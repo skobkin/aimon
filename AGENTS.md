@@ -21,8 +21,17 @@ Read these before implementation:
 4. `docs/UI_UX.md`
 5. `docs/INTEGRATIONS.md`
 6. `docs/tasks/S1-agent-task.md`
+7. `docs/DECISION_LOG.md`
 
-When documents overlap, the order above is the precedence order. Do not redesign the product or UI while implementing it.
+When documents overlap, the order above is the precedence order. `docs/DECISION_LOG.md` is different in kind: it records dated implementation-time decisions, and an entry there supersedes the affected document from its date onward. Do not redesign the product or UI while implementing it.
+
+## Decision log
+
+Implementation-time changes that deviate from or extend the authoritative
+documents — user-directed or forced by real-world behavior — must be
+recorded with a dated entry in `docs/DECISION_LOG.md` in the same commit
+(or ask the user whether to log it). Never let the code and the documents
+diverge silently.
 
 ## Non-negotiable constraints
 
