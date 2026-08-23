@@ -246,7 +246,7 @@ func cardBody(c ui.CardVM, _ config.Config) fyne.CanvasObject {
 		}
 		objs := make([]fyne.CanvasObject, 0, len(rows))
 		for _, r := range rows {
-			objs = append(objs, components.NewMetricRow(r.Label, r.Value))
+			objs = append(objs, components.NewMetricRow(r))
 		}
 		if len(objs) == 0 {
 			return noDataYet()

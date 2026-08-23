@@ -25,10 +25,25 @@ const (
 	KindQuota CardKind = "quota"
 )
 
+// MetricLevel classifies a metric value by load for coloring. The zero
+// value is MetricNeutral: no coloring (unleveled rows and placeholders).
+// The names pair with the threshold color constants.
+type MetricLevel int
+
+// Metric load levels; Neutral means "render like plain text".
+const (
+	MetricNeutral MetricLevel = iota
+	MetricGood
+	MetricWarning
+	MetricLow
+	MetricCritical
+)
+
 // MetricRowVM is one label/value line in a card body.
 type MetricRowVM struct {
 	Label string
 	Value string
+	Level MetricLevel
 }
 
 // GPUVM carries the metric rows for one GPU snapshot. Overview holds the
@@ -193,34 +208,86 @@ func userMessage(err error) string {
 
 // BuildGPUVM derives the GPU metric rows. Overview shows util, VRAM and
 // temperature, omitting missing sensors; Detail shows every contracted
-// row with "—" for missing sensors.
+// row with "—" for missing sensors. Util, VRAM and temperature values
+// carry a load level for coloring in both variants.
 func BuildGPUVM(snap domain.GPUSnapshot, detail bool) GPUVM {
 	vm := GPUVM{}
 
 	if detail {
 		rows := []MetricRowVM{
-			{"GPU util", dashWhenNil(snap.GPUUtilizationPct, FormatPct)},
-			{"VRAM", dashIfEmpty(formatBytePair(snap.VRAMUsedBytes, snap.VRAMTotalBytes))},
-			{"GTT", dashIfEmpty(formatBytePair(snap.GTTUsedBytes, snap.GTTTotalBytes))},
-			{"Temp", dashWhenNil(snap.TemperatureC, FormatTemp)},
-			{"Power", dashWhenNil(snap.PowerWatts, FormatWatts)},
-			{"SCLK", dashWhenNil(snap.SCLKMHz, FormatMHz)},
-			{"MCLK", dashWhenNil(snap.MCLKMHz, FormatMHz)},
+			{Label: "GPU util", Value: dashWhenNil(snap.GPUUtilizationPct, FormatPct), Level: metricLevel(snap.GPUUtilizationPct, utilLevel)},
+			{Label: "VRAM", Value: dashIfEmpty(formatBytePair(snap.VRAMUsedBytes, snap.VRAMTotalBytes)), Level: bytePairLevel(snap.VRAMUsedBytes, snap.VRAMTotalBytes)},
+			{Label: "GTT", Value: dashIfEmpty(formatBytePair(snap.GTTUsedBytes, snap.GTTTotalBytes))},
+			{Label: "Temp", Value: dashWhenNil(snap.TemperatureC, FormatTemp), Level: metricLevel(snap.TemperatureC, tempLevel)},
+			{Label: "Power", Value: dashWhenNil(snap.PowerWatts, FormatWatts)},
+			{Label: "SCLK", Value: dashWhenNil(snap.SCLKMHz, FormatMHz)},
+			{Label: "MCLK", Value: dashWhenNil(snap.MCLKMHz, FormatMHz)},
 		}
 		vm.Detail = rows
 		return vm
 	}
 
 	if snap.GPUUtilizationPct != nil {
-		vm.Overview = append(vm.Overview, MetricRowVM{"GPU util", FormatPct(snap.GPUUtilizationPct)})
+		vm.Overview = append(vm.Overview, MetricRowVM{Label: "GPU util", Value: FormatPct(snap.GPUUtilizationPct), Level: utilLevel(*snap.GPUUtilizationPct)})
 	}
 	if s := formatBytePair(snap.VRAMUsedBytes, snap.VRAMTotalBytes); s != "" {
-		vm.Overview = append(vm.Overview, MetricRowVM{"VRAM", s})
+		vm.Overview = append(vm.Overview, MetricRowVM{Label: "VRAM", Value: s, Level: bytePairLevel(snap.VRAMUsedBytes, snap.VRAMTotalBytes)})
 	}
 	if snap.TemperatureC != nil {
-		vm.Overview = append(vm.Overview, MetricRowVM{"Temp", FormatTemp(snap.TemperatureC)})
+		vm.Overview = append(vm.Overview, MetricRowVM{Label: "Temp", Value: FormatTemp(snap.TemperatureC), Level: tempLevel(*snap.TemperatureC)})
 	}
 	return vm
+}
+
+// loadLevel classifies a load fraction (0–1) with the quota-bar
+// thresholds mirrored onto usage: >0.90 critical, >0.80 low, >0.50
+// warning, else good.
+func loadLevel(frac float64) MetricLevel {
+	switch {
+	case frac > 0.90:
+		return MetricCritical
+	case frac > 0.80:
+		return MetricLow
+	case frac > 0.50:
+		return MetricWarning
+	default:
+		return MetricGood
+	}
+}
+
+// utilLevel classifies a GPU utilization percentage.
+func utilLevel(pct float64) MetricLevel { return loadLevel(pct / 100) }
+
+// tempLevel classifies a temperature: ≥80 °C critical, ≥70 low, ≥60
+// warning, else good.
+func tempLevel(c float64) MetricLevel {
+	switch {
+	case c >= 80:
+		return MetricCritical
+	case c >= 70:
+		return MetricLow
+	case c >= 60:
+		return MetricWarning
+	default:
+		return MetricGood
+	}
+}
+
+// metricLevel levels a sensor value when present, neutral when absent.
+func metricLevel(v *float64, level func(float64) MetricLevel) MetricLevel {
+	if v == nil {
+		return MetricNeutral
+	}
+	return level(*v)
+}
+
+// bytePairLevel classifies the used fraction of a byte pair; neutral
+// when either side is missing or the total is zero.
+func bytePairLevel(used, total *uint64) MetricLevel {
+	if used == nil || total == nil || *total == 0 {
+		return MetricNeutral
+	}
+	return loadLevel(float64(*used) / float64(*total))
 }
 
 // BuildSwapVM derives the running-model lines.

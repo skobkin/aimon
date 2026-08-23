@@ -64,7 +64,7 @@ Treat `docs/UI_UX.md` as a UI contract, not inspiration.
 - Do not introduce circular gauges.
 - Do not introduce charts.
 - Do not use color as the only status signal; always pair status color with text/iconography.
-- High GPU utilization is not an error and must not be colored as a warning merely because it is high.
+- High GPU utilization is not an error and must not be colored as a warning merely because it is high. (User-directed exception, 2026-08-23: GPU utilization, VRAM and temperature values are colored by load with agreed thresholds — recorded in `docs/DECISION_LOG.md`.)
 - Keep equivalent metrics visually consistent across providers.
 - Do not invent source data. If an upstream API does not expose a value reliably, omit it or show `Unavailable` according to the UI spec.
 

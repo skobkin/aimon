@@ -163,9 +163,9 @@ func TestBuildGPUVMOverviewOmitsMissing(t *testing.T) {
 		t.Fatalf("overview rows = %d, want 3", len(vm.Overview))
 	}
 	want := []MetricRowVM{
-		{"GPU util", "74%"},
-		{"VRAM", "13.8 / 16.0 GiB"},
-		{"Temp", "63 °C"},
+		{Label: "GPU util", Value: "74%", Level: MetricWarning},
+		{Label: "VRAM", Value: "13.8 / 16.0 GiB", Level: MetricLow},
+		{Label: "Temp", Value: "63 °C", Level: MetricWarning},
 	}
 	for i, w := range want {
 		if vm.Overview[i] != w {
@@ -204,12 +204,58 @@ func TestBuildGPUVMDetailShowsEveryRowWithDash(t *testing.T) {
 		}
 	}
 
-	// A null sensor becomes an em dash, never a fake zero.
+	// A null sensor becomes an em dash, never a fake zero, and carries
+	// no load level.
 	empty := domain.GPUSnapshot{}
 	vm = BuildGPUVM(empty, true)
 	for _, r := range vm.Detail {
 		if r.Value != "—" {
 			t.Errorf("null sensor %s = %q, want em dash", r.Label, r.Value)
+		}
+		if r.Level != MetricNeutral {
+			t.Errorf("null sensor %s level = %v, want neutral", r.Label, r.Level)
+		}
+	}
+}
+
+// Load-level boundaries mirror the quota-bar thresholds onto usage;
+// temperature uses absolute °C bands (user-agreed 2026-08-23).
+func TestBuildGPUVMMetricLevels(t *testing.T) {
+	cases := []struct {
+		name string
+		snap domain.GPUSnapshot
+		want MetricLevel
+	}{
+		{"util 50", domain.GPUSnapshot{GPUUtilizationPct: f(50)}, MetricGood},
+		{"util 51", domain.GPUSnapshot{GPUUtilizationPct: f(51)}, MetricWarning},
+		{"util 80", domain.GPUSnapshot{GPUUtilizationPct: f(80)}, MetricWarning},
+		{"util 81", domain.GPUSnapshot{GPUUtilizationPct: f(81)}, MetricLow},
+		{"util 90", domain.GPUSnapshot{GPUUtilizationPct: f(90)}, MetricLow},
+		{"util 91", domain.GPUSnapshot{GPUUtilizationPct: f(91)}, MetricCritical},
+		{"vram half", domain.GPUSnapshot{VRAMUsedBytes: u(8), VRAMTotalBytes: u(16)}, MetricGood},
+		{"vram 81%", domain.GPUSnapshot{VRAMUsedBytes: u(81), VRAMTotalBytes: u(100)}, MetricLow},
+		{"vram 91%", domain.GPUSnapshot{VRAMUsedBytes: u(91), VRAMTotalBytes: u(100)}, MetricCritical},
+		{"vram no total", domain.GPUSnapshot{VRAMUsedBytes: u(91)}, MetricNeutral},
+		{"temp 59", domain.GPUSnapshot{TemperatureC: f(59)}, MetricGood},
+		{"temp 60", domain.GPUSnapshot{TemperatureC: f(60)}, MetricWarning},
+		{"temp 70", domain.GPUSnapshot{TemperatureC: f(70)}, MetricLow},
+		{"temp 80", domain.GPUSnapshot{TemperatureC: f(80)}, MetricCritical},
+	}
+	for _, c := range cases {
+		vm := BuildGPUVM(c.snap, true)
+		var got MetricLevel
+		var found bool
+		for _, r := range vm.Detail {
+			if r.Level != MetricNeutral {
+				got, found = r.Level, true
+			}
+		}
+		if !found && c.want != MetricNeutral {
+			t.Errorf("%s: no leveled row in %+v", c.name, vm.Detail)
+			continue
+		}
+		if found && got != c.want {
+			t.Errorf("%s level = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

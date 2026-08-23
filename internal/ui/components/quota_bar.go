@@ -46,6 +46,33 @@ func ThresholdColor(remaining float64) color.Color {
 	}
 }
 
+// LevelColor maps a metric level onto its display color. Neutral uses
+// the theme foreground so unleveled rows render like plain text.
+func LevelColor(level ui.MetricLevel) color.Color {
+	switch level {
+	case ui.MetricGood:
+		return colorHealthy
+	case ui.MetricWarning:
+		return colorWarning
+	case ui.MetricLow:
+		return colorLow
+	case ui.MetricCritical:
+		return colorCritical
+	default:
+		return foregroundColor()
+	}
+}
+
+// foregroundColor picks the theme's foreground color. Outside a running
+// app (headless tests) the theme lookup panics, so a fixed near-black
+// stands in.
+func foregroundColor() color.Color {
+	if fyne.CurrentApp() == nil {
+		return color.RGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xFF}
+	}
+	return theme.Color(theme.ColorNameForeground)
+}
+
 // QuotaBar is a thin horizontal progress bar showing used quota: the fill
 // is the used fraction, the color still reflects how much quota is left
 // (ThresholdColor of the remaining fraction). The numeric label always

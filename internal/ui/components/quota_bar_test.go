@@ -3,6 +3,8 @@ package components
 import (
 	"image/color"
 	"testing"
+
+	"github.com/skobkin/llm-monitor/internal/ui"
 )
 
 func TestThresholdColorBoundaries(t *testing.T) {
@@ -39,6 +41,28 @@ func TestThresholdColorExactValues(t *testing.T) {
 	}
 	if got := ThresholdColor(0.80); got != (color.RGBA{R: 0x4C, G: 0xAF, B: 0x50, A: 0xFF}) {
 		t.Errorf("healthy color = %v", got)
+	}
+}
+
+func TestLevelColor(t *testing.T) {
+	cases := []struct {
+		level ui.MetricLevel
+		want  color.Color
+	}{
+		{ui.MetricGood, colorHealthy},
+		{ui.MetricWarning, colorWarning},
+		{ui.MetricLow, colorLow},
+		{ui.MetricCritical, colorCritical},
+	}
+	for _, c := range cases {
+		if got := LevelColor(c.level); got != c.want {
+			t.Errorf("LevelColor(%v) = %v, want %v", c.level, got, c.want)
+		}
+	}
+	// Neutral falls back to the theme foreground; headless (no app) it
+	// is the fixed near-black stand-in.
+	if got := LevelColor(ui.MetricNeutral); got == nil {
+		t.Error("LevelColor(neutral) = nil")
 	}
 }
 

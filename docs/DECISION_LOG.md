@@ -9,7 +9,27 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
-## 2026-08-23 — Compact quota row: percent on the name line
+## 2026-08-23 — Local metric values colored by load
+
+GPU utilization, VRAM and temperature values are colored green → amber →
+orange → red by load, in both the Overview and Local tabs. Thresholds
+(user-agreed):
+
+- utilization and VRAM, as a fraction of capacity: green ≤50%, amber
+  50–80%, orange 80–90%, red >90% — the quota-bar scheme mirrored onto
+  usage;
+- temperature: green <60 °C, amber 60–70, orange 70–80, red ≥80.
+
+Other rows (GTT, power, clocks) and "—" placeholders stay uncolored. The
+value text itself always remains, so color is never the only signal.
+
+Why: user request after first real-world use. This is a recorded
+exception to the AGENTS.md rule that high GPU utilization must not be
+colored as a warning merely because it is high; the rule's intent
+(no false "error" styling) is kept by using informational load bands
+rather than error semantics.
+
+Updates: the AGENTS.md "UI implementation rules" bullet noted above.
 
 One quota window renders as a single header line — bold window name on
 the left, "NN% used" right-aligned — with the bar directly beneath and
