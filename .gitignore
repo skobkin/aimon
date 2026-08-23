@@ -1,0 +1,29 @@
+# Build output
+/bin/
+/dist/
+/build/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Local runtime/config artifacts
+.env
+.env.*
+*.key
+*.pem
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# IDE/editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS noise
+.DS_Store
+Thumbs.db
