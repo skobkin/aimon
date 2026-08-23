@@ -34,6 +34,19 @@ import (
 // (preferences path, tray, packaging all key off it).
 const appID = "com.skobkin.llm-monitor"
 
+// appMetadata mirrors FyneApp.toml for runs without packaged metadata
+// (see New). Keep the values in sync with the toml; a test guards the
+// duplication.
+func appMetadata() fyne.AppMetadata {
+	return fyne.AppMetadata{
+		ID:         appID,
+		Name:       "LLM Monitor",
+		Version:    "0.1.0",
+		Build:      1,
+		Migrations: map[string]bool{"fyneDo": true},
+	}
+}
+
 // App is the running application.
 type App struct {
 	fyneApp  fyne.App
@@ -65,6 +78,11 @@ func New() (*App, error) {
 	}))
 
 	fa := fyneapp.NewWithID(appID)
+	// Packaged builds get their metadata injected by the fyne tool; every
+	// other run (go run, an installed binary) finds no FyneApp.toml next
+	// to the executable, so the fyne.Do migration flag and the version
+	// would be missing and every start would log the not-migrated warning.
+	fyneapp.SetMetadata(appMetadata())
 	fa.SetIcon(resources.Icon())
 
 	repo := config.NewRepository(fa.Preferences())

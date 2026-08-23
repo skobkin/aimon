@@ -2,11 +2,50 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/skobkin/llm-monitor/internal/credentials"
 )
+
+// TestMetadataMirrorsFyneAppToml guards the duplication between
+// FyneApp.toml (packaged apps) and appMetadata (every other run): the
+// values must stay identical or the fyne.Do migration flag and version
+// drift between build modes.
+func TestMetadataMirrorsFyneAppToml(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "FyneApp.toml"))
+	if err != nil {
+		t.Fatalf("read FyneApp.toml: %v", err)
+	}
+	toml := string(raw)
+	m := appMetadata()
+
+	for _, field := range []struct{ key, value string }{
+		{"ID", m.ID},
+		{"Name", m.Name},
+		{"Version", m.Version},
+	} {
+		if !strings.Contains(toml, fmt.Sprintf("%s = %q", field.key, field.value)) {
+			t.Errorf("FyneApp.toml does not set %s = %q", field.key, field.value)
+		}
+	}
+	if !strings.Contains(toml, fmt.Sprintf("Build = %d", m.Build)) {
+		t.Errorf("FyneApp.toml does not set Build = %d", m.Build)
+	}
+	if !m.Migrations["fyneDo"] {
+		t.Error("appMetadata must opt into the fyne.Do threading model")
+	}
+	if !strings.Contains(toml, "fyneDo = true") {
+		t.Error("FyneApp.toml does not opt into the fyne.Do threading model")
+	}
+	if m.ID != appID {
+		t.Errorf("metadata ID = %q, want the app ID %q", m.ID, appID)
+	}
+}
 
 // memStore is a fake credential store; it never touches a keychain.
 type memStore struct {
