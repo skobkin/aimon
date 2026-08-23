@@ -1,11 +1,15 @@
 // Package zai adapts the Z.AI / GLM Coding Plan usage-quota endpoint onto
 // the domain quota snapshot.
 //
-// The endpoint reports usage-oriented percentages whose scale is
-// undocumented (0–100 or 0–1). Wherever an entry also carries numeric
-// currentValue/usage, the scale is resolved per entry by cross-check;
-// only ambiguous entries fall back to the per-value rule. Reset times are
-// not exposed by the endpoint and stay nil (S1 omission).
+// Verified against real payloads (same endpoint the working statusline
+// integrations read): entries carry numeric counts where usage is the
+// LIMIT and remaining is what is left, plus an absolute epoch-ms
+// nextResetTime. Counts have known semantics, so they are preferred; the
+// usage-oriented percentage (whose scale is undocumented, 0–100 or 0–1)
+// is only a fallback and is scale-resolved per entry by cross-check
+// against currentValue/usage. Newer plans report two CREDIT_LIMIT entries
+// — one per window — distinguishable only by reset time: the one resetting
+// sooner is the 5-hour window, the later one the weekly window.
 package zai
 
 import (
@@ -14,6 +18,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -36,17 +41,31 @@ const (
 	fractionTolerance = 0.02
 )
 
-// limitEntry is one entry of limits[]. CurrentValue and Usage are decoded
-// loosely: the upstream types them any and the cross-check only needs
-// numbers when they are numbers.
+// countTolerance is the allowed disagreement between the fraction implied
+// by the counts and the one implied by the percentage before the counts
+// win and a warning is logged.
+const countTolerance = 0.05
+
+// Limit entry types observed on the endpoint.
+const (
+	typeTokens = "TOKENS_LIMIT"
+	typeTime   = "TIME_LIMIT"
+	typeCredit = "CREDIT_LIMIT"
+)
+
+// limitEntry is one entry of limits[]. The count and time fields are
+// decoded loosely: upstream types them any and real payloads have been
+// seen with numbers where a string was expected (unit) and vice versa.
 type limitEntry struct {
 	Type         string   `json:"type"`
 	Percentage   *float64 `json:"percentage"`
+	Remaining    any      `json:"remaining"`
 	CurrentValue any      `json:"currentValue"`
 	Usage        any      `json:"usage"`
 	UsageDetails any      `json:"usageDetails"`
-	Unit         string   `json:"unit"`
+	Unit         any      `json:"unit"`
 	Number       any      `json:"number"`
+	NextResetMs  any      `json:"nextResetTime"`
 }
 
 // quotaData is the wrapped shape: {"data":{"limits":[…]}}.
@@ -60,19 +79,24 @@ type envelope struct {
 	Limits []limitEntry `json:"limits"`
 }
 
-// windowSpec maps a limit entry type onto its stable window identity.
+// windowSpec maps a limit entry onto its stable window identity.
 type windowSpec struct {
 	ID   string
 	Name string
 }
 
-// windowSpecs are the entry types with verified display semantics. The
-// credit entry rides the same endpoint on newer international plans.
-var windowSpecs = map[string]windowSpec{
-	"TOKENS_LIMIT": {ID: "tokens-5h", Name: "Token usage · 5 hour"},
-	"TIME_LIMIT":   {ID: "mcp-monthly", Name: "MCP usage · 1 month"},
-	"CREDIT_LIMIT": {ID: "credits-5h", Name: "Credit usage · 5 hour"},
+// fixedSpecs are the entry types with a single, statically known window.
+var fixedSpecs = map[string]windowSpec{
+	typeTokens: {ID: "tokens-5h", Name: "Token usage · 5 hour"},
+	typeTime:   {ID: "mcp-monthly", Name: "MCP usage · 1 month"},
 }
+
+// The two credit windows of newer Coding Plans: one CREDIT_LIMIT entry
+// per window, told apart by reset time.
+var (
+	credit5hSpec     = windowSpec{ID: "credits-5h", Name: "Credit usage · 5 hour"}
+	creditWeeklySpec = windowSpec{ID: "credits-weekly", Name: "Credit usage · Weekly"}
+)
 
 // Adapter polls the Z.AI usage-quota endpoint. Pointer type: the manager
 // detects configuration changes by pointer identity.
@@ -119,13 +143,24 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 
 	windows := make([]domain.QuotaWindow, 0, len(limits))
+	var credits []limitEntry
 	for _, e := range limits {
-		w, ok := a.entryWindow(e)
-		if !ok {
+		if e.Type == typeCredit {
+			// Credit entries are window-assigned only after all of
+			// them are known (their order is reset-time dependent).
+			credits = append(credits, e)
 			continue
 		}
-		windows = append(windows, w)
+		spec, known := fixedSpecs[e.Type]
+		if !known {
+			a.log.Debug("zai: skipping unknown limit type", "type", e.Type)
+			continue
+		}
+		if w, ok := a.limitWindow(e, spec); ok {
+			windows = append(windows, w)
+		}
 	}
+	windows = append(windows, a.creditWindows(credits)...)
 
 	if len(windows) == 0 {
 		return nil, &source.Error{
@@ -169,37 +204,125 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 	}
 }
 
-// entryWindow normalizes one limits[] entry. Unknown types are skipped
-// (forward-compatible); unusable percentages are dropped with a warning.
-func (a *Adapter) entryWindow(e limitEntry) (domain.QuotaWindow, bool) {
-	spec, known := windowSpecs[e.Type]
-	if !known {
-		a.log.Debug("zai: skipping unknown limit type", "type", e.Type)
+// creditWindows maps the CREDIT_LIMIT entries onto the 5-hour and weekly
+// windows. The entries carry no window name; the one resetting sooner is
+// the 5-hour window, the one resetting later the weekly one. A lone entry
+// can only be the 5-hour window; beyond two, the extremes by reset time
+// win and the middle ones are skipped.
+func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	sorted := append([]limitEntry(nil), entries...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return resetKey(sorted[i]) < resetKey(sorted[j])
+	})
+	for _, e := range sorted {
+		if resetKey(e) == math.MaxInt64 {
+			a.log.Warn("zai: credit limit entry without nextResetTime; window ordering may be wrong")
+			break
+		}
+	}
+
+	if len(sorted) == 1 {
+		a.log.Debug("zai: single credit limit entry; treating it as the 5-hour window")
+		if w, ok := a.limitWindow(sorted[0], credit5hSpec); ok {
+			return []domain.QuotaWindow{w}
+		}
+		return nil
+	}
+	if extra := len(sorted) - 2; extra > 0 {
+		a.log.Warn("zai: more than two credit limit entries; keeping the first and last by reset time", "extra", extra)
+	}
+
+	var out []domain.QuotaWindow
+	if w, ok := a.limitWindow(sorted[0], credit5hSpec); ok {
+		out = append(out, w)
+	}
+	if w, ok := a.limitWindow(sorted[len(sorted)-1], creditWeeklySpec); ok {
+		out = append(out, w)
+	}
+	return out
+}
+
+// resetKey is the entry's reset time as a sortable integer; entries
+// without a usable one sort last.
+func resetKey(e limitEntry) int64 {
+	if ms, ok := toFloat(e.NextResetMs); ok && ms > 0 {
+		return int64(ms)
+	}
+	return math.MaxInt64
+}
+
+// limitWindow normalizes one limits[] entry under its window spec. The
+// counts are preferred (verified semantics: usage is the limit, remaining
+// what is left); the scale-ambiguous percentage is the fallback. Entries
+// with neither are dropped with a warning.
+func (a *Adapter) limitWindow(e limitEntry, spec windowSpec) (domain.QuotaWindow, bool) {
+	w := domain.QuotaWindow{ID: spec.ID, Name: spec.Name}
+
+	rem, haveRem := toFloat(e.Remaining)
+	lim, haveLim := toFloat(e.Usage)
+	if haveRem && haveLim && (lim <= 0 || rem < 0 || rem > lim) {
+		a.log.Warn("zai: nonsensical counts ignored", "type", e.Type, "remaining", rem, "usage", lim)
+		haveRem, haveLim = false, false
+	}
+
+	switch {
+	case haveRem && haveLim:
+		frac, err := domain.Fraction(rem / lim)
+		if err != nil {
+			a.log.Warn("zai: count fraction out of range; entry dropped", "type", e.Type)
+			return domain.QuotaWindow{}, false
+		}
+		w.RemainingFraction = frac
+		r, l := rem, lim
+		w.Remaining, w.Limit = &r, &l
+		// A string unit names the counts; numeric unit codes carry no
+		// verified display meaning and are ignored.
+		if s, ok := e.Unit.(string); ok {
+			w.Unit = s
+		}
+		if used := a.usedFractionFromPercentage(e); used != nil &&
+			math.Abs(*used-(1-frac)) > countTolerance {
+			a.log.Warn("zai: percentage and counts disagree; trusting counts", "type", e.Type)
+		}
+	case e.Percentage != nil:
+		used := a.usedFractionFromPercentage(e)
+		if used == nil {
+			return domain.QuotaWindow{}, false
+		}
+		w.RemainingFraction = 1 - *used
+	default:
+		a.log.Warn("zai: limit entry without usable counts or percentage dropped", "type", e.Type)
 		return domain.QuotaWindow{}, false
 	}
+
+	w.UsedFraction = 1 - w.RemainingFraction
+
+	if t, ok := epochMilli(e.NextResetMs); ok {
+		w.ResetAt = &t
+	}
+	return w, true
+}
+
+// usedFractionFromPercentage returns the used fraction implied by the
+// entry's usage-oriented percentage, resolving its scale; nil when the
+// percentage is absent or unusable.
+func (a *Adapter) usedFractionFromPercentage(e limitEntry) *float64 {
 	if e.Percentage == nil {
-		a.log.Warn("zai: limit entry without percentage dropped", "type", e.Type)
-		return domain.QuotaWindow{}, false
+		return nil
 	}
 	pct := *e.Percentage
 	// The value must be valid under SOME scale: 0–1 (fraction) or 0–100
 	// (percent). Anything else is garbage, not a rounding edge.
 	if math.IsNaN(pct) || pct < 0 || pct > 100 {
-		a.log.Warn("zai: out-of-range percentage dropped", "type", e.Type, "percentage", pct)
-		return domain.QuotaWindow{}, false
+		a.log.Warn("zai: out-of-range percentage ignored", "type", e.Type, "percentage", pct)
+		return nil
 	}
-
 	used := domain.Clamp01(a.resolveUsedFraction(e, pct))
-
-	w := domain.QuotaWindow{
-		ID:                spec.ID,
-		Name:              spec.Name,
-		UsedFraction:      used,
-		RemainingFraction: 1 - used,
-		// Raw counts and units are unverified semantics: not attached.
-		// The endpoint exposes no reset time: ResetAt stays nil.
-	}
-	return w, true
+	return &used
 }
 
 // resolveUsedFraction converts a usage-oriented percentage to a used
@@ -240,4 +363,14 @@ func toFloat(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// epochMilli converts an absolute epoch-milliseconds value (loosely
+// decoded) to a time.
+func epochMilli(v any) (time.Time, bool) {
+	ms, ok := toFloat(v)
+	if !ok || ms <= 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(int64(ms)), true
 }

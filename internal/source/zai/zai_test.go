@@ -3,12 +3,14 @@ package zai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/skobkin/llm-monitor/internal/credentials"
 	"github.com/skobkin/llm-monitor/internal/domain"
@@ -157,7 +159,7 @@ func TestDataWrappedPercentScale(t *testing.T) {
 			t.Errorf("tokens name = %q", w.Name)
 		}
 		if w.ResetAt != nil || w.Remaining != nil || w.Limit != nil {
-			t.Errorf("unverified fields must stay nil: %+v", w)
+			t.Errorf("fields absent from this payload must stay nil: %+v", w)
 		}
 	}
 	if w := windowByID(q, "mcp-monthly"); w == nil {
@@ -381,4 +383,94 @@ func TestStringCountsFeedScaleResolution(t *testing.T) {
 		t.Fatal("tokens-5h window missing")
 	}
 	assertFraction(t, "tokens remaining", w.RemainingFraction, 0.99)
+}
+
+// Real-plan shape: two CREDIT_LIMIT entries (numeric unit codes, absolute
+// epoch-ms reset times) with the weekly one first in the payload. They
+// must be told apart by reset time — sooner resets = 5-hour, later =
+// weekly — and carry the verified counts (usage is the limit) and reset
+// times. The numeric unit must decode without failing the refresh.
+func TestDualCreditWindowsByResetTime(t *testing.T) {
+	const soonResetMs = int64(1740000000000)
+	const laterResetMs = int64(1750000000000)
+	body := fmt.Sprintf(`{"data":{"limits":[
+		{"type":"CREDIT_LIMIT","remaining":30,"usage":300,"currentValue":270,"unit":1,"nextResetTime":%d},
+		{"type":"CREDIT_LIMIT","remaining":120,"usage":200,"currentValue":80,"unit":1,"nextResetTime":%d}
+	]}}`, laterResetMs, soonResetMs)
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+
+	fiveHour := windowByID(q, "credits-5h")
+	if fiveHour == nil {
+		t.Fatal("credits-5h window missing")
+	}
+	if fiveHour.Name != "Credit usage · 5 hour" {
+		t.Errorf("5h name = %q", fiveHour.Name)
+	}
+	assertFraction(t, "5h remaining", fiveHour.RemainingFraction, 0.6)
+	if fiveHour.Remaining == nil || *fiveHour.Remaining != 120 ||
+		fiveHour.Limit == nil || *fiveHour.Limit != 200 {
+		t.Errorf("5h counts = %v/%v, want 120/200", fiveHour.Remaining, fiveHour.Limit)
+	}
+	if fiveHour.Unit != "" {
+		t.Errorf("numeric unit code must not become the window unit, got %q", fiveHour.Unit)
+	}
+	if fiveHour.ResetAt == nil || !fiveHour.ResetAt.Equal(time.UnixMilli(soonResetMs)) {
+		t.Errorf("5h ResetAt = %v, want %v", fiveHour.ResetAt, time.UnixMilli(soonResetMs))
+	}
+
+	weekly := windowByID(q, "credits-weekly")
+	if weekly == nil {
+		t.Fatal("credits-weekly window missing")
+	}
+	if weekly.Name != "Credit usage · Weekly" {
+		t.Errorf("weekly name = %q", weekly.Name)
+	}
+	assertFraction(t, "weekly remaining", weekly.RemainingFraction, 0.1)
+	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(time.UnixMilli(laterResetMs)) {
+		t.Errorf("weekly ResetAt = %v, want %v", weekly.ResetAt, time.UnixMilli(laterResetMs))
+	}
+}
+
+// Counts have verified semantics and win over a disagreeing percentage:
+// counts say 90% remaining while the usage-oriented percentage claims 90%
+// used.
+func TestCountsPreferredOverPercentage(t *testing.T) {
+	body := `{"limits":[
+		{"type":"CREDIT_LIMIT","remaining":90,"usage":100,"currentValue":10,"percentage":90,"nextResetTime":1000}
+	]}`
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+	w := windowByID(q, "credits-5h")
+	if w == nil {
+		t.Fatal("credits-5h window missing")
+	}
+	assertFraction(t, "credits remaining", w.RemainingFraction, 0.90)
+	if w.Remaining == nil || *w.Remaining != 90 || w.Limit == nil || *w.Limit != 100 {
+		t.Errorf("counts = %v/%v, want 90/100", w.Remaining, w.Limit)
+	}
+}
+
+// A string unit names the counts and is attached; string-typed counts
+// must work like numeric ones.
+func TestStringUnitAndStringCounts(t *testing.T) {
+	body := `{"limits":[
+		{"type":"TOKENS_LIMIT","remaining":"45000","usage":"50000","unit":"token"}
+	]}`
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+	w := windowByID(q, "tokens-5h")
+	if w == nil {
+		t.Fatal("tokens-5h window missing")
+	}
+	assertFraction(t, "tokens remaining", w.RemainingFraction, 0.9)
+	if w.Unit != "token" {
+		t.Errorf("unit = %q, want token", w.Unit)
+	}
 }
