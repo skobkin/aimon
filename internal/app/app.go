@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/systray"
 
 	"github.com/skobkin/llm-monitor/internal/config"
 	"github.com/skobkin/llm-monitor/internal/credentials"
@@ -181,6 +182,9 @@ func (a *App) setupTray() {
 		a.monitor.Show()
 		return
 	}
+	// Set before the tray registers: the StatusNotifierItem ToolTip
+	// property is read at registration (later calls update it live).
+	systray.SetTooltip("LLM Monitor")
 	desk.SetSystemTrayWindow(a.monitor.Window())
 	desk.SetSystemTrayMenu(fyne.NewMenu("LLM Monitor",
 		fyne.NewMenuItem("Show Monitor", a.monitor.Show),
