@@ -1,0 +1,86 @@
+// Package credentials stores source credentials in the system keychain
+// via github.com/zalando/go-keyring. There is no plaintext fallback in S1
+// (DECISIONS D12): when the keychain is unavailable, credential features
+// degrade, they do not bypass.
+package credentials
+
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
+// State describes the usability of the keychain backend.
+type State string
+
+// Keychain backend states.
+const (
+	// StateAvailable: reads and writes are expected to work.
+	StateAvailable State = "available"
+	// StateLocked: the keychain exists but requires an unlock/prompts.
+	StateLocked State = "locked"
+	// StateUnavailable: the backend cannot be reached right now.
+	StateUnavailable State = "unavailable"
+	// StateUnsupported: the platform has no keychain implementation.
+	StateUnsupported State = "unsupported"
+)
+
+// Status is a point-in-time report about the keychain backend, surfaced in
+// Settings so users can see why credential rows are disabled.
+type Status struct {
+	Backend string
+	State   State
+	Message string
+}
+
+// AccountID names one stored credential. Stable identifiers; changing one
+// orphans the stored secret.
+type AccountID string
+
+// Credential accounts, one per source that authenticates.
+const (
+	// AccountLlamaSwap holds the llama-swap API key, used only when the
+	// local instance requires one.
+	AccountLlamaSwap AccountID = "source/llama-swap"
+	// AccountMiniMax holds the MiniMax subscription key.
+	AccountMiniMax AccountID = "source/minimax"
+	// AccountZAI holds the Z.AI / GLM coding plan token.
+	AccountZAI AccountID = "source/zai"
+)
+
+// ErrNotFound reports that no credential is stored for an account. It is
+// distinct from a broken keychain: callers treat it as "not configured".
+var ErrNotFound = errors.New("credential not found")
+
+// Store reads and writes credentials. Implementations must be safe for
+// concurrent use. Contexts are accepted for interface stability; the
+// keychain calls themselves are synchronous.
+type Store interface {
+	// Status probes the backend without touching any real account.
+	Status(ctx context.Context) Status
+	// Get returns the stored secret, or ("", ErrNotFound) when unset.
+	// A backend problem is reported as *StateError.
+	Get(ctx context.Context, id AccountID) (string, error)
+	// Set stores (overwrites) the secret for an account.
+	Set(ctx context.Context, id AccountID, secret string) error
+	// Delete removes the credential; deleting an unset account succeeds.
+	Delete(ctx context.Context, id AccountID) error
+}
+
+// StateError reports that the keychain backend itself is in a state that
+// prevented the operation. State says which one; Message is safe for UI
+// display; Err is the underlying cause (may be nil).
+type StateError struct {
+	State   State
+	Message string
+	Err     error
+}
+
+func (e *StateError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("keychain %s: %s: %v", e.State, e.Message, e.Err)
+	}
+	return fmt.Sprintf("keychain %s: %s", e.State, e.Message)
+}
+
+func (e *StateError) Unwrap() error { return e.Err }
