@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
@@ -145,6 +147,18 @@ func New() (*App, error) {
 // source goroutines after the loop returns.
 func (a *App) Run() {
 	a.log.Info("starting", "app", appID, "version", a.fyneApp.Metadata().Version)
+
+	// Fyne's own SIGINT/SIGTERM handling quits only the event loop; with
+	// no window ever focused it also skips unregistering the tray icon,
+	// and Run would then block forever in Wait with the pollers still
+	// running — an invisible process holding a dead tray entry. Route
+	// termination signals through the same graceful path as tray Quit.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		a.quit()
+	}()
 
 	// Keychain state changes are Info-worthy (they gate credential
 	// features); the probe never touches a real account.
