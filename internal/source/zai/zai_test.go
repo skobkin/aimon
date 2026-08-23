@@ -155,7 +155,7 @@ func TestDataWrappedPercentScale(t *testing.T) {
 		t.Fatal("tokens-5h window missing")
 	} else {
 		assertFraction(t, "tokens remaining", w.RemainingFraction, 0.58)
-		if w.Name != "Token usage · 5 hour" {
+		if w.Name != "5-hour" {
 			t.Errorf("tokens name = %q", w.Name)
 		}
 		if w.ResetAt != nil || w.Remaining != nil || w.Limit != nil {
@@ -166,7 +166,7 @@ func TestDataWrappedPercentScale(t *testing.T) {
 		t.Fatal("mcp-monthly window missing")
 	} else {
 		assertFraction(t, "mcp remaining", w.RemainingFraction, 0.12)
-		if w.Name != "MCP usage · 1 month" {
+		if w.Name != "Monthly" {
 			t.Errorf("mcp name = %q", w.Name)
 		}
 	}
@@ -205,7 +205,7 @@ func TestScaleResolvedByCrossCheck(t *testing.T) {
 		t.Fatal("credits-5h window missing")
 	}
 	assertFraction(t, "credits remaining", w.RemainingFraction, 0.99)
-	if w.Name != "Credit usage · 5 hour" {
+	if w.Name != "5-hour" {
 		t.Errorf("credits name = %q", w.Name)
 	}
 }
@@ -406,7 +406,7 @@ func TestDualCreditWindowsByResetTime(t *testing.T) {
 	if fiveHour == nil {
 		t.Fatal("credits-5h window missing")
 	}
-	if fiveHour.Name != "Credit usage · 5 hour" {
+	if fiveHour.Name != "5-hour" {
 		t.Errorf("5h name = %q", fiveHour.Name)
 	}
 	assertFraction(t, "5h remaining", fiveHour.RemainingFraction, 0.6)
@@ -414,8 +414,8 @@ func TestDualCreditWindowsByResetTime(t *testing.T) {
 		fiveHour.Limit == nil || *fiveHour.Limit != 200 {
 		t.Errorf("5h counts = %v/%v, want 120/200", fiveHour.Remaining, fiveHour.Limit)
 	}
-	if fiveHour.Unit != "" {
-		t.Errorf("numeric unit code must not become the window unit, got %q", fiveHour.Unit)
+	if fiveHour.Unit != "credits" {
+		t.Errorf("credit window unit = %q, want credits (numeric payload code replaced)", fiveHour.Unit)
 	}
 	if fiveHour.ResetAt == nil || !fiveHour.ResetAt.Equal(time.UnixMilli(soonResetMs)) {
 		t.Errorf("5h ResetAt = %v, want %v", fiveHour.ResetAt, time.UnixMilli(soonResetMs))
@@ -425,12 +425,15 @@ func TestDualCreditWindowsByResetTime(t *testing.T) {
 	if weekly == nil {
 		t.Fatal("credits-weekly window missing")
 	}
-	if weekly.Name != "Credit usage · Weekly" {
+	if weekly.Name != "Weekly" {
 		t.Errorf("weekly name = %q", weekly.Name)
 	}
 	assertFraction(t, "weekly remaining", weekly.RemainingFraction, 0.1)
 	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(time.UnixMilli(laterResetMs)) {
 		t.Errorf("weekly ResetAt = %v, want %v", weekly.ResetAt, time.UnixMilli(laterResetMs))
+	}
+	if weekly.Unit != "credits" {
+		t.Errorf("weekly unit = %q, want credits", weekly.Unit)
 	}
 }
 

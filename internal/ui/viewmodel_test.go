@@ -370,7 +370,7 @@ func TestBuildOverviewNothingEnabled(t *testing.T) {
 func TestBuildLocalAndRemoteTabs(t *testing.T) {
 	states := map[domain.SourceID]domain.Runtime{
 		domain.SourceLlamaSwap: {Enabled: true, LastSuccessAt: now, Snapshot: domain.LlamaSwapSnapshot{RunningModels: []domain.RunningModel{{ID: "m1"}}}},
-		domain.SourceZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "Token usage · 5 hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
+		domain.SourceZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "5-hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
 	}
 
 	local := BuildLocalTab(states, now)

@@ -9,6 +9,21 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-23 — Plain quota window names, matching MiniMax
+
+Z.AI window names drop the quota-kind prefixes ("Token usage · 5 hour" →
+"5-hour", "MCP usage · 1 month" → "Monthly", "Credit usage · Weekly" →
+"Weekly"): every card is per-source, so the kind added no information
+and made rows harder to read. The kind is not lost — credit windows
+label their counts line "xx / yy credits" under the bar (the payload's
+numeric unit code carries no display meaning).
+
+Why: user request after first real-world use — label consistency
+between the MiniMax and Z.AI cards.
+
+Updates: the Z.AI window naming in `docs/INTEGRATIONS.md` §5 and the
+quota-row wireframes in `docs/UI_UX.md`.
+
 ## 2026-08-23 — Local metric values colored by load
 
 GPU utilization, VRAM and temperature values are colored green → amber →

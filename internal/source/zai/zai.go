@@ -86,16 +86,19 @@ type windowSpec struct {
 }
 
 // fixedSpecs are the entry types with a single, statically known window.
+// Window names match the MiniMax naming ("5-hour"/"Weekly"): the kind of
+// quota carries no extra information in a per-source card and only made
+// the rows harder to read.
 var fixedSpecs = map[string]windowSpec{
-	typeTokens: {ID: "tokens-5h", Name: "Token usage · 5 hour"},
-	typeTime:   {ID: "mcp-monthly", Name: "MCP usage · 1 month"},
+	typeTokens: {ID: "tokens-5h", Name: "5-hour"},
+	typeTime:   {ID: "mcp-monthly", Name: "Monthly"},
 }
 
 // The two credit windows of newer Coding Plans: one CREDIT_LIMIT entry
 // per window, told apart by reset time.
 var (
-	credit5hSpec     = windowSpec{ID: "credits-5h", Name: "Credit usage · 5 hour"}
-	creditWeeklySpec = windowSpec{ID: "credits-weekly", Name: "Credit usage · Weekly"}
+	credit5hSpec     = windowSpec{ID: "credits-5h", Name: "5-hour"}
+	creditWeeklySpec = windowSpec{ID: "credits-weekly", Name: "Weekly"}
 )
 
 // Adapter polls the Z.AI usage-quota endpoint. Pointer type: the manager
@@ -228,6 +231,7 @@ func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
 	if len(sorted) == 1 {
 		a.log.Debug("zai: single credit limit entry; treating it as the 5-hour window")
 		if w, ok := a.limitWindow(sorted[0], credit5hSpec); ok {
+			creditUnit(&w)
 			return []domain.QuotaWindow{w}
 		}
 		return nil
@@ -238,12 +242,22 @@ func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
 
 	var out []domain.QuotaWindow
 	if w, ok := a.limitWindow(sorted[0], credit5hSpec); ok {
+		creditUnit(&w)
 		out = append(out, w)
 	}
 	if w, ok := a.limitWindow(sorted[len(sorted)-1], creditWeeklySpec); ok {
+		creditUnit(&w)
 		out = append(out, w)
 	}
 	return out
+}
+
+// creditUnit names the credit windows' counts when the payload did not:
+// the counts line then reads "12.4k / 40.0k credits".
+func creditUnit(w *domain.QuotaWindow) {
+	if w.Unit == "" {
+		w.Unit = "credits"
+	}
 }
 
 // resetKey is the entry's reset time as a sortable integer; entries
