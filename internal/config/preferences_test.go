@@ -91,6 +91,7 @@ func TestStableKeyList(t *testing.T) {
 	// compatibility decision; changing or removing one silently discards
 	// user settings.
 	want := []string{
+		"app.configured",
 		"source.amdgputop-web.enabled",
 		"source.amdgputop-web.gpu",
 		"source.amdgputop-web.interval",
@@ -130,5 +131,20 @@ func TestStableKeyList(t *testing.T) {
 				t.Errorf("preference key %q looks credential-related", k)
 			}
 		}
+	}
+}
+
+// The first-run marker: absent until the first Save, set forever after
+// (Settings opens at startup while it is absent).
+func TestConfiguredMarker(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	if repo.Configured() {
+		t.Error("fresh preferences must read as not configured")
+	}
+	repo.Save(Default())
+	if !repo.Configured() {
+		t.Error("Save must set the configured marker")
 	}
 }

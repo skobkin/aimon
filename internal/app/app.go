@@ -172,6 +172,11 @@ func (a *App) Run() {
 
 	// Apply before the event loop exists: no contention with the UI.
 	a.applyConfig(a.Config())
+	// First run (nothing ever saved): open Settings once the loop is up,
+	// so the app is not just a tray icon with nothing configured.
+	if !a.repo.Configured() {
+		a.fyneApp.Lifecycle().SetOnStarted(a.settings.Show)
+	}
 	a.fyneApp.Run()
 	a.mgr.Wait()
 	a.log.Info("stopped")

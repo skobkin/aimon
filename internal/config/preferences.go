@@ -33,6 +33,10 @@ const (
 	keyZAIEnabled = "source.zai.enabled"
 	keyZAIURL     = "source.zai.url"
 	keyZAIEvery   = "source.zai.interval"
+
+	// keyConfigured marks that the user has saved settings at least
+	// once; until then the app treats every launch as a first run.
+	keyConfigured = "app.configured"
 )
 
 // Repository loads and saves the non-secret configuration through the
@@ -94,6 +98,14 @@ func (r *Repository) Save(cfg Config) {
 	r.prefs.SetBool(keyZAIEnabled, cfg.ZAI.Enabled)
 	r.prefs.SetString(keyZAIURL, cfg.ZAI.BaseURL)
 	r.prefs.SetString(keyZAIEvery, cfg.ZAI.PollInterval.String())
+
+	r.prefs.SetBool(keyConfigured, true)
+}
+
+// Configured reports whether the user has ever saved settings. Until the
+// first Save every launch is a first run (Settings opens at startup).
+func (r *Repository) Configured() bool {
+	return r.prefs.Bool(keyConfigured)
 }
 
 func loadInterval(prefs Preferences, key string, def time.Duration) time.Duration {
