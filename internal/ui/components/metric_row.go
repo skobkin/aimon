@@ -8,7 +8,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/skobkin/llm-monitor/internal/ui"
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
 // NewMetricRow builds one "Label ……… Value" line from standard objects:

@@ -21,23 +21,23 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/systray"
 
-	"github.com/skobkin/llm-monitor/internal/config"
-	"github.com/skobkin/llm-monitor/internal/credentials"
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/resources"
-	"github.com/skobkin/llm-monitor/internal/source"
-	"github.com/skobkin/llm-monitor/internal/source/amdgpuweb"
-	"github.com/skobkin/llm-monitor/internal/source/llamaswap"
-	"github.com/skobkin/llm-monitor/internal/source/minimax"
-	"github.com/skobkin/llm-monitor/internal/source/zai"
-	"github.com/skobkin/llm-monitor/internal/ui"
-	"github.com/skobkin/llm-monitor/internal/ui/monitor"
-	"github.com/skobkin/llm-monitor/internal/ui/settings"
+	"git.skobk.in/skobkin/aimonitor/internal/config"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/resources"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
+	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
+	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
+	"git.skobk.in/skobkin/aimonitor/internal/source/zai"
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
+	"git.skobk.in/skobkin/aimonitor/internal/ui/monitor"
+	"git.skobk.in/skobkin/aimonitor/internal/ui/settings"
 )
 
 // appID is the single application identity, identical to FyneApp.toml
 // (preferences path, tray, packaging all key off it).
-const appID = "com.skobkin.llm-monitor"
+const appID = "com.skobkin.aimonitor"
 
 // appMetadata mirrors FyneApp.toml for runs without packaged metadata
 // (see New). Keep the values in sync with the toml; a test guards the
@@ -45,7 +45,7 @@ const appID = "com.skobkin.llm-monitor"
 func appMetadata() fyne.AppMetadata {
 	return fyne.AppMetadata{
 		ID:         appID,
-		Name:       "LLM Monitor",
+		Name:       "AI Monitor",
 		Version:    "0.1.0",
 		Build:      1,
 		Migrations: map[string]bool{"fyneDo": true},
@@ -188,7 +188,7 @@ func (a *App) setupTray() {
 	a.deskApp = desk
 	// Set before the tray registers: the StatusNotifierItem ToolTip
 	// property is read at registration (later calls update it live).
-	systray.SetTooltip("LLM Monitor")
+	systray.SetTooltip("AI Monitor")
 	desk.SetSystemTrayWindow(a.monitor.Window())
 	desk.SetSystemTrayMenu(a.trayMenu())
 }
@@ -216,7 +216,7 @@ func (a *App) trayMenu() *fyne.Menu {
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", a.quit),
 	)
-	return fyne.NewMenu("LLM Monitor", items...)
+	return fyne.NewMenu("AI Monitor", items...)
 }
 
 // openLink opens a source's web UI in the system browser (navigation

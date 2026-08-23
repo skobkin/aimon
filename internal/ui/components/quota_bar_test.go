@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/skobkin/llm-monitor/internal/ui"
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
 func TestThresholdColorBoundaries(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/skobkin/llm-monitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 )
 
 // TestMetadataMirrorsFyneAppToml guards the duplication between

@@ -10,8 +10,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // CardKind discriminates which body a card renders.

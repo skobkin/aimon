@@ -169,7 +169,7 @@ func TestSetUsesServiceAndAccount(t *testing.T) {
 	if len(fake.stored) != 1 {
 		t.Fatalf("expected exactly one stored entry, got %d", len(fake.stored))
 	}
-	if _, ok := fake.stored["llm-monitor/source/llama-swap"]; !ok {
+	if _, ok := fake.stored["aimonitor/source/llama-swap"]; !ok {
 		t.Errorf("entry must be stored under service/account, have %v", fake.stored)
 	}
 }

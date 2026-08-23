@@ -9,6 +9,28 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-23 — Rebrand: LLM Monitor → AI Monitor (`aimon`)
+
+The product is renamed AI Monitor. The binary is `aimon` (`cmd/aimon`),
+the Go module is `git.skobk.in/skobkin/aimonitor` (self-hosted Forgejo at
+`https://git.skobk.in`, not GitHub), the Fyne app ID is
+`com.skobkin.aimonitor`, the keychain service is `aimonitor`, and the
+in-window "LLM Monitor" chrome label is removed (the window title and
+the tray tooltip already name the app).
+
+Consequences of the full rename (user-approved): API keys stored under
+the old keychain service (`llm-monitor`) are not migrated and must be
+re-entered once in Settings, and the new app ID starts from fresh Fyne
+preferences (enabled flags and intervals reset to defaults).
+
+Why: user decision after first real-world use — the tool monitors more
+than LLM quotas (local GPU and runtime telemetry).
+
+Updates: the product naming across `AGENTS.md` and `docs/` ("LLM
+Monitor", `cmd/llm-monitor`, module `github.com/skobkin/llm-monitor`) is
+superseded from this date; those documents are historical and are not
+rewritten.
+
 ## 2026-08-23 — Plain quota window names, matching MiniMax
 
 Z.AI window names drop the quota-kind prefixes ("Token usage · 5 hour" →

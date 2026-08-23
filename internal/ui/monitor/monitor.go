@@ -12,11 +12,11 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/skobkin/llm-monitor/internal/config"
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/resources"
-	"github.com/skobkin/llm-monitor/internal/ui"
-	"github.com/skobkin/llm-monitor/internal/ui/components"
+	"git.skobk.in/skobkin/aimonitor/internal/config"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/resources"
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
+	"git.skobk.in/skobkin/aimonitor/internal/ui/components"
 )
 
 // MonitorController is everything the monitor window needs from the app.
@@ -73,8 +73,9 @@ func NewMonitor(a fyne.App, ctrl MonitorController) *Monitor {
 	m.refreshBtn = widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), m.onRefresh)
 	settingsBtn := widget.NewButtonWithIcon("", theme.SettingsIcon(), ctrl.OpenSettings)
 
+	// Chrome keeps only the actions; the window title (and the tray
+	// tooltip) already name the app, so a label would repeat it.
 	chrome := container.NewHBox(
-		widget.NewLabelWithStyle("LLM Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		layout.NewSpacer(),
 		m.refreshBtn,
 		settingsBtn,

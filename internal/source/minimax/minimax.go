@@ -29,9 +29,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/credentials"
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // Endpoint is the official, fixed Token Plan usage URL.

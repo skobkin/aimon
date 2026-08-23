@@ -1,4 +1,4 @@
-# LLM Monitor
+# AI Monitor
 
 Work in progress.
 

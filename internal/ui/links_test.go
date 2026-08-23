@@ -3,8 +3,8 @@ package ui
 import (
 	"testing"
 
-	"github.com/skobkin/llm-monitor/internal/config"
-	"github.com/skobkin/llm-monitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/config"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
 func TestSourceWebLinkPerSource(t *testing.T) {

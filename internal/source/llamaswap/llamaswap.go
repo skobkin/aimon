@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/credentials"
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // requestTimeout bounds each HTTP call (local daemon).

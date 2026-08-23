@@ -1,7 +1,7 @@
 [Details]
   Icon = "internal/resources/icon.svg"
-  Name = "LLM Monitor"
-  ID = "com.skobkin.llm-monitor"
+  Name = "AI Monitor"
+  ID = "com.skobkin.aimonitor"
   Version = "0.1.0"
   Build = 1
 

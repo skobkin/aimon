@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
 // fakeSource is a scriptable Source for manager tests.

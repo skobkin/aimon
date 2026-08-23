@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
 // Source is one pollable data source adapter. Implementations MUST be

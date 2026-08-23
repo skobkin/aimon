@@ -13,7 +13,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/skobkin/llm-monitor/internal/ui"
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
 // quotaBarHeight is the rendered bar height in theme-independent pixels.

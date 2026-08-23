@@ -9,8 +9,8 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-// ServiceName namespaces all llm-monitor entries inside the keychain.
-const ServiceName = "llm-monitor"
+// ServiceName namespaces all aimonitor entries inside the keychain.
+const ServiceName = "aimonitor"
 
 // statusProbeAccount is a reserved account name used only to probe the
 // backend; no real credential is ever stored under it.

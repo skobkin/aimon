@@ -17,10 +17,10 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/skobkin/llm-monitor/internal/config"
-	"github.com/skobkin/llm-monitor/internal/credentials"
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/resources"
+	"git.skobk.in/skobkin/aimonitor/internal/config"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/resources"
 )
 
 // testTimeout bounds one Settings connection test.
@@ -211,7 +211,7 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		bottom,
 	))
 
-	win := a.NewWindow("Settings — LLM Monitor")
+	win := a.NewWindow("Settings — AI Monitor")
 	win.SetIcon(resources.Icon())
 	win.SetContent(content)
 	win.Resize(fyne.NewSize(560, 680))

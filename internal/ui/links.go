@@ -1,8 +1,8 @@
 package ui
 
 import (
-	"github.com/skobkin/llm-monitor/internal/config"
-	"github.com/skobkin/llm-monitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/config"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
 // Console pages of the remote providers (their own usage dashboards, not

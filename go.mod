@@ -1,4 +1,4 @@
-module github.com/skobkin/llm-monitor
+module git.skobk.in/skobkin/aimonitor
 
 go 1.26.2
 

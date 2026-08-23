@@ -22,9 +22,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/credentials"
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // quotaPath is the usage-quota endpoint under the configured base URL.

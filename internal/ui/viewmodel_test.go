@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/skobkin/llm-monitor/internal/domain"
-	"github.com/skobkin/llm-monitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 func f(v float64) *float64         { return &v }
