@@ -82,9 +82,14 @@ func NewMonitor(a fyne.App, ctrl MonitorController) *Monitor {
 
 	// No chrome row: the actions float over the tab content, top-right
 	// (the tab strip only reaches mid-width, so they sit in its empty
-	// right end). Empty overlay space is not interactive, so the tabs
-	// underneath still take the clicks.
-	actions := container.NewHBox(layout.NewSpacer(), m.refreshBtn, settingsBtn)
+	// right end). The row must sit in a VBox: a Stack stretches its
+	// children to the full size and an HBox then grows its children to
+	// the row height, so a bare row stretched the buttons window-tall.
+	// Empty overlay space is not interactive, so the tabs underneath
+	// still take the clicks.
+	actions := container.NewVBox(
+		container.NewHBox(layout.NewSpacer(), m.refreshBtn, settingsBtn),
+	)
 	win.SetContent(container.NewStack(tabs, actions))
 	win.Resize(monitorSize)
 
