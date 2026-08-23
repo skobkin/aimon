@@ -46,12 +46,15 @@ type SwapVM struct {
 	MoreCount  int
 }
 
-// QuotaWindowVM is one quota window row.
+// QuotaWindowVM is one quota window row. The display is used-oriented:
+// Used drives the bar fill and the "NN% used" label, while Remaining
+// still drives the threshold color (how much quota is left).
 type QuotaWindowVM struct {
-	Name          string
-	RemainingText string
-	Secondary     string
-	Remaining     float64
+	Name      string
+	UsedText  string
+	Secondary string
+	Used      float64
+	Remaining float64
 }
 
 // QuotaVM carries the window rows of one quota snapshot.
@@ -240,14 +243,15 @@ func BuildSwapVM(snap domain.LlamaSwapSnapshot, detail bool) SwapVM {
 }
 
 // BuildQuotaVM derives the quota window rows. Secondary (raw counts) is a
-// detail-tab extra; the overview shows the remaining lines only.
+// detail-tab extra; the overview shows the used lines only.
 func BuildQuotaVM(snap domain.QuotaSnapshot, detail bool) QuotaVM {
 	vm := QuotaVM{Windows: make([]QuotaWindowVM, 0, len(snap.Windows))}
 	for _, w := range snap.Windows {
 		row := QuotaWindowVM{
-			Name:          w.Name,
-			RemainingText: FormatRemaining(w.RemainingFraction),
-			Remaining:     w.RemainingFraction,
+			Name:      w.Name,
+			UsedText:  FormatUsed(w.UsedFraction),
+			Used:      w.UsedFraction,
+			Remaining: w.RemainingFraction,
 		}
 		if detail {
 			row.Secondary = formatCounts(w)
@@ -257,12 +261,17 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, detail bool) QuotaVM {
 	return vm
 }
 
-// formatCounts renders the raw provider counts when both ends are known.
+// formatCounts renders the raw provider counts when both ends are known,
+// used-oriented to match the bar: "used / limit [unit]".
 func formatCounts(w domain.QuotaWindow) string {
 	if w.Remaining == nil || w.Limit == nil {
 		return ""
 	}
-	s := fmt.Sprintf("%s / %s", FormatCount(*w.Remaining), FormatCount(*w.Limit))
+	used := *w.Limit - *w.Remaining
+	if used < 0 {
+		used = 0
+	}
+	s := fmt.Sprintf("%s / %s", FormatCount(used), FormatCount(*w.Limit))
 	if w.Unit != "" {
 		s += " " + w.Unit
 	}
@@ -312,9 +321,9 @@ func FormatAge(t, now time.Time) string {
 	}
 }
 
-// FormatRemaining renders the NN% remaining label (UI_UX §"NN% remaining").
-func FormatRemaining(fraction float64) string {
-	return fmt.Sprintf("%d%% remaining", int(math.Round(domain.Clamp01(fraction)*100)))
+// FormatUsed renders the NN% used label (used-oriented quota display).
+func FormatUsed(fraction float64) string {
+	return fmt.Sprintf("%d%% used", int(math.Round(domain.Clamp01(fraction)*100)))
 }
 
 // FormatBytesGiB renders a byte count in GiB with one decimal.

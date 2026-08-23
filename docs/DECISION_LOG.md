@@ -9,6 +9,22 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-23 — Quota display is used-oriented
+
+Quota progress bars fill with the **used** fraction and the label reads
+"NN% used" (was: fill = remaining, "NN% remaining"). The threshold color
+is unchanged and still reflects how much quota is left (red = almost
+exhausted, now a nearly full bar). The raw-counts line under the bar (now
+that real payloads provide counts) is used-oriented too: "used / limit
+[unit]".
+
+Why: user request after first real-world use — usage progress reads more
+naturally than remaining progress.
+
+Updates: `docs/INTEGRATIONS.md` §5 — "The UI must still say `NN%
+remaining`, just like MiniMax" is superseded for both providers; the
+`docs/UI_UX.md` "NN% remaining" wording likewise.
+
 ## 2026-08-23 — Open-web-UI buttons on every source card
 
 Every source card carries an "open the provider's own UI" navigation

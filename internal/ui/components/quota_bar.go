@@ -45,30 +45,39 @@ func ThresholdColor(remaining float64) color.Color {
 	}
 }
 
-// QuotaBar is a thin horizontal progress bar showing remaining quota. The
-// numeric label always lives outside the bar (a separate label), so the
-// bar itself never renders text. This is the only custom widget in S1.
+// QuotaBar is a thin horizontal progress bar showing used quota: the fill
+// is the used fraction, the color still reflects how much quota is left
+// (ThresholdColor of the remaining fraction). The numeric label always
+// lives outside the bar (a separate label), so the bar itself never
+// renders text. This is the only custom widget in S1.
 type QuotaBar struct {
 	widget.BaseWidget
 
+	used      float64
 	remaining float64
 }
 
-// NewQuotaBar creates a bar showing the given remaining fraction.
-func NewQuotaBar(remaining float64) *QuotaBar {
+// NewQuotaBar creates a bar filled to the used fraction and colored by
+// the remaining fraction.
+func NewQuotaBar(used, remaining float64) *QuotaBar {
 	b := &QuotaBar{}
 	b.ExtendBaseWidget(b)
+	b.used = clamp01(used)
 	b.remaining = clamp01(remaining)
 	return b
 }
 
-// SetRemaining updates the fraction shown, clamped to [0, 1].
-func (b *QuotaBar) SetRemaining(f float64) {
-	b.remaining = clamp01(f)
+// SetFractions updates the fractions shown, clamped to [0, 1].
+func (b *QuotaBar) SetFractions(used, remaining float64) {
+	b.used = clamp01(used)
+	b.remaining = clamp01(remaining)
 	b.Refresh()
 }
 
-// Remaining reports the currently shown fraction.
+// Used reports the currently shown used fraction.
+func (b *QuotaBar) Used() float64 { return b.used }
+
+// Remaining reports the currently shown remaining fraction.
 func (b *QuotaBar) Remaining() float64 { return b.remaining }
 
 // CreateRenderer implements fyne.Widget.
@@ -114,14 +123,14 @@ func (r *quotaBarRenderer) MinSize() fyne.Size {
 	return fyne.NewSize(quotaBarMinWidth, quotaBarHeight)
 }
 
-// Layout sizes the track to the full area and the fill to the remaining
+// Layout sizes the track to the full area and the fill to the used
 // fraction, both quotaBarHeight tall and vertically centered.
 func (r *quotaBarRenderer) Layout(size fyne.Size) {
 	y := (size.Height - quotaBarHeight) / 2
 	r.track.Move(fyne.NewPos(0, y))
 	r.track.Resize(fyne.NewSize(size.Width, quotaBarHeight))
 	r.fill.Move(fyne.NewPos(0, y))
-	r.fill.Resize(fyne.NewSize(size.Width*float32(r.bar.remaining), quotaBarHeight))
+	r.fill.Resize(fyne.NewSize(size.Width*float32(r.bar.used), quotaBarHeight))
 }
 
 func (r *quotaBarRenderer) Refresh() {
@@ -133,13 +142,13 @@ func (r *quotaBarRenderer) Refresh() {
 }
 
 // NewQuotaRow builds one quota window block: bold window name, the
-// "NN% remaining" label, the QuotaBar, and the optional raw-count
-// secondary line. The numeric label stays outside the bar.
+// "NN% used" label, the QuotaBar, and the optional raw-count secondary
+// line. The numeric label stays outside the bar.
 func NewQuotaRow(vm ui.QuotaWindowVM) fyne.CanvasObject {
 	row := container.NewVBox(
 		widget.NewLabelWithStyle(vm.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel(vm.RemainingText),
-		NewQuotaBar(vm.Remaining),
+		widget.NewLabel(vm.UsedText),
+		NewQuotaBar(vm.Used, vm.Remaining),
 	)
 	if vm.Secondary != "" {
 		row.Add(widget.NewLabel(vm.Secondary))

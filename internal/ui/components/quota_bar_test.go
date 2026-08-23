@@ -43,25 +43,32 @@ func TestThresholdColorExactValues(t *testing.T) {
 }
 
 func TestNewQuotaBarClamps(t *testing.T) {
-	if got := NewQuotaBar(1.5).Remaining(); got != 1 {
-		t.Errorf("over range = %v, want 1", got)
+	b := NewQuotaBar(1.5, -3)
+	if got := b.Used(); got != 1 {
+		t.Errorf("used over range = %v, want 1", got)
 	}
-	if got := NewQuotaBar(-3).Remaining(); got != 0 {
-		t.Errorf("under range = %v, want 0", got)
+	if got := b.Remaining(); got != 0 {
+		t.Errorf("remaining under range = %v, want 0", got)
 	}
-	if got := NewQuotaBar(0.42).Remaining(); got != 0.42 {
-		t.Errorf("in range = %v, want 0.42", got)
+	if got := NewQuotaBar(0.42, 0.58).Used(); got != 0.42 {
+		t.Errorf("used in range = %v, want 0.42", got)
 	}
 }
 
-func TestSetRemainingClamps(t *testing.T) {
-	b := NewQuotaBar(0.5)
-	b.SetRemaining(2)
-	if got := b.Remaining(); got != 1 {
-		t.Errorf("set over = %v, want 1", got)
+func TestSetFractionsClamps(t *testing.T) {
+	b := NewQuotaBar(0.5, 0.5)
+	b.SetFractions(2, 2)
+	if got := b.Used(); got != 1 {
+		t.Errorf("set used over = %v, want 1", got)
 	}
-	b.SetRemaining(-1)
+	if got := b.Remaining(); got != 1 {
+		t.Errorf("set remaining over = %v, want 1", got)
+	}
+	b.SetFractions(-1, -1)
+	if got := b.Used(); got != 0 {
+		t.Errorf("set used under = %v, want 0", got)
+	}
 	if got := b.Remaining(); got != 0 {
-		t.Errorf("set under = %v, want 0", got)
+		t.Errorf("set remaining under = %v, want 0", got)
 	}
 }

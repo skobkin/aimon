@@ -54,21 +54,21 @@ func TestFormatAgeBoundaries(t *testing.T) {
 	}
 }
 
-func TestFormatRemainingRounding(t *testing.T) {
+func TestFormatUsedRounding(t *testing.T) {
 	cases := []struct {
 		frac float64
 		want string
 	}{
-		{0.28, "28% remaining"},
-		{0.586, "59% remaining"}, // rounds to nearest
-		{0.0, "0% remaining"},
-		{1.0, "100% remaining"},
-		{-0.5, "0% remaining"}, // clamped
-		{1.5, "100% remaining"},
+		{0.28, "28% used"},
+		{0.586, "59% used"}, // rounds to nearest
+		{0.0, "0% used"},
+		{1.0, "100% used"},
+		{-0.5, "0% used"}, // clamped
+		{1.5, "100% used"},
 	}
 	for _, c := range cases {
-		if got := FormatRemaining(c.frac); got != c.want {
-			t.Errorf("FormatRemaining(%v) = %q, want %q", c.frac, got, c.want)
+		if got := FormatUsed(c.frac); got != c.want {
+			t.Errorf("FormatUsed(%v) = %q, want %q", c.frac, got, c.want)
 		}
 	}
 }
@@ -247,8 +247,8 @@ func TestBuildQuotaVM(t *testing.T) {
 	snap := domain.QuotaSnapshot{
 		Source: domain.SourceMiniMax,
 		Windows: []domain.QuotaWindow{
-			{ID: "interval", Name: "5-hour", RemainingFraction: 0.69, Remaining: &rem, Limit: &lim, Unit: "requests"},
-			{ID: "weekly", Name: "Weekly", RemainingFraction: 0.87},
+			{ID: "interval", Name: "5-hour", RemainingFraction: 0.69, UsedFraction: 0.31, Remaining: &rem, Limit: &lim, Unit: "requests"},
+			{ID: "weekly", Name: "Weekly", RemainingFraction: 0.87, UsedFraction: 0.13},
 		},
 	}
 
@@ -261,14 +261,18 @@ func TestBuildQuotaVM(t *testing.T) {
 	}
 
 	detail := BuildQuotaVM(snap, true)
-	if detail.Windows[0].Secondary != "690 / 1000 requests" {
+	if detail.Windows[0].Secondary != "310 / 1000 requests" {
 		t.Errorf("secondary = %q", detail.Windows[0].Secondary)
 	}
 	if detail.Windows[1].Secondary != "" {
 		t.Errorf("percent-only window secondary = %q, want empty", detail.Windows[1].Secondary)
 	}
-	if detail.Windows[0].RemainingText != "69% remaining" {
-		t.Errorf("remaining text = %q", detail.Windows[0].RemainingText)
+	if detail.Windows[0].UsedText != "31% used" {
+		t.Errorf("used text = %q", detail.Windows[0].UsedText)
+	}
+	if detail.Windows[0].Used != 0.31 || detail.Windows[0].Remaining != 0.69 {
+		t.Errorf("fractions = used %v remaining %v, want 0.31/0.69",
+			detail.Windows[0].Used, detail.Windows[0].Remaining)
 	}
 }
 
@@ -320,7 +324,7 @@ func TestBuildOverviewNothingEnabled(t *testing.T) {
 func TestBuildLocalAndRemoteTabs(t *testing.T) {
 	states := map[domain.SourceID]domain.Runtime{
 		domain.SourceLlamaSwap: {Enabled: true, LastSuccessAt: now, Snapshot: domain.LlamaSwapSnapshot{RunningModels: []domain.RunningModel{{ID: "m1"}}}},
-		domain.SourceZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "Token usage · 5 hour", RemainingFraction: 0.58}}}},
+		domain.SourceZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "Token usage · 5 hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
 	}
 
 	local := BuildLocalTab(states, now)
@@ -331,8 +335,8 @@ func TestBuildLocalAndRemoteTabs(t *testing.T) {
 	if len(remote) != 1 || remote[0].Kind != KindQuota {
 		t.Fatalf("remote tab = %+v", remote)
 	}
-	if w := remote[0].Quota.Windows[0]; w.RemainingText != "58% remaining" {
-		t.Errorf("remaining = %q", w.RemainingText)
+	if w := remote[0].Quota.Windows[0]; w.UsedText != "42% used" {
+		t.Errorf("used = %q", w.UsedText)
 	}
 
 	if got := BuildLocalTab(map[domain.SourceID]domain.Runtime{}, now); len(got) != 0 {
