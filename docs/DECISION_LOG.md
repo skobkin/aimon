@@ -9,6 +9,19 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-23 — Compact quota row: percent on the name line
+
+One quota window renders as a single header line — bold window name on
+the left, "NN% used" right-aligned — with the bar directly beneath and
+the optional raw-counts line after it. The name/percent/bar stack of
+three lines is gone. The layout is shared by every tab (Overview and
+Remote render quota rows through the same component).
+
+Why: user request after first real-world use — one line less per window
+makes the overview noticeably more compact and readable.
+
+Updates: the quota-row wireframe in `docs/UI_UX.md`.
+
 ## 2026-08-23 — Quota display is used-oriented
 
 Quota progress bars fill with the **used** fraction and the label reads

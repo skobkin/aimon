@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -141,13 +142,17 @@ func (r *quotaBarRenderer) Refresh() {
 	canvas.Refresh(r.bar)
 }
 
-// NewQuotaRow builds one quota window block: bold window name, the
-// "NN% used" label, the QuotaBar, and the optional raw-count secondary
-// line. The numeric label stays outside the bar.
+// NewQuotaRow builds one compact quota window block: the window name and
+// the "NN% used" label share the first line, the QuotaBar sits directly
+// beneath, and the optional raw-count secondary line follows. The numeric
+// label stays outside the bar.
 func NewQuotaRow(vm ui.QuotaWindowVM) fyne.CanvasObject {
 	row := container.NewVBox(
-		widget.NewLabelWithStyle(vm.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel(vm.UsedText),
+		container.NewHBox(
+			widget.NewLabelWithStyle(vm.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			layout.NewSpacer(),
+			widget.NewLabel(vm.UsedText),
+		),
 		NewQuotaBar(vm.Used, vm.Remaining),
 	)
 	if vm.Secondary != "" {
