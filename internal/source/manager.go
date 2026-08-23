@@ -95,11 +95,14 @@ func (m *Manager) Apply(regs map[domain.SourceID]Registration) {
 		l, running := m.loops[id]
 		switch {
 		case !running && reg.Enabled:
+			m.log.Info("source enabled", "source", string(id), "interval", reg.Interval.String())
 			m.startLoopLocked(id, reg)
 		case running && !reg.Enabled:
+			m.log.Info("source disabled", "source", string(id))
 			stopped = append(stopped, m.detachLoopLocked(id))
 			m.disableRuntimeLocked(id)
 		case running && reg.Enabled && (l.source != reg.Source || l.interval != reg.Interval):
+			m.log.Info("source reconfigured", "source", string(id), "interval", reg.Interval.String())
 			stopped = append(stopped, m.detachLoopLocked(id))
 			m.startLoopLocked(id, reg)
 		}
@@ -285,9 +288,15 @@ func (m *Manager) refreshOnce(l *loop) {
 		rt.LastError = err
 		m.log.Warn("refresh failed", "source", string(l.id), "error", err)
 	} else {
+		recovered := rt.LastError != nil
 		rt.LastError = nil
 		rt.LastSuccessAt = now
 		rt.Snapshot = snap
+		if recovered {
+			m.log.Info("source recovered", "source", string(l.id))
+		} else {
+			m.log.Debug("refresh ok", "source", string(l.id))
+		}
 	}
 	m.mu.Unlock()
 	m.notify(l.id)

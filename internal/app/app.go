@@ -126,10 +126,19 @@ func New() (*App, error) {
 // Run starts the configured sources and the event loop, then joins the
 // source goroutines after the loop returns.
 func (a *App) Run() {
+	a.log.Info("starting", "app", appID, "version", a.fyneApp.Metadata().Version)
+
+	// Keychain state changes are Info-worthy (they gate credential
+	// features); the probe never touches a real account.
+	if st := a.creds.Status(context.Background()); st.State != credentials.StateAvailable {
+		a.log.Warn("keychain not available", "state", string(st.State), "backend", st.Backend, "message", st.Message)
+	}
+
 	// Apply before the event loop exists: no contention with the UI.
 	a.applyConfig(a.Config())
 	a.fyneApp.Run()
 	a.mgr.Wait()
+	a.log.Info("stopped")
 }
 
 // setupTray installs the tray icon and menu. Without a desktop driver
@@ -217,6 +226,7 @@ func (a *App) quit() {
 	if !a.running.CompareAndSwap(true, false) {
 		return
 	}
+	a.log.Info("quitting")
 	a.unsub()
 	close(a.done)
 	a.mgr.Cancel()
