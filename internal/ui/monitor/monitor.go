@@ -73,14 +73,6 @@ func NewMonitor(a fyne.App, ctrl MonitorController) *Monitor {
 	m.refreshBtn = widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), m.onRefresh)
 	settingsBtn := widget.NewButtonWithIcon("", theme.SettingsIcon(), ctrl.OpenSettings)
 
-	// Chrome keeps only the actions; the window title (and the tray
-	// tooltip) already name the app, so a label would repeat it.
-	chrome := container.NewHBox(
-		layout.NewSpacer(),
-		m.refreshBtn,
-		settingsBtn,
-	)
-
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Overview", container.NewVScroll(m.overviewBox)),
 		container.NewTabItem("Local", container.NewVScroll(m.localBox)),
@@ -88,7 +80,12 @@ func NewMonitor(a fyne.App, ctrl MonitorController) *Monitor {
 	)
 	tabs.SelectIndex(0)
 
-	win.SetContent(container.NewBorder(chrome, nil, nil, nil, tabs))
+	// No chrome row: the actions float over the tab content, top-right
+	// (the tab strip only reaches mid-width, so they sit in its empty
+	// right end). Empty overlay space is not interactive, so the tabs
+	// underneath still take the clicks.
+	actions := container.NewHBox(layout.NewSpacer(), m.refreshBtn, settingsBtn)
+	win.SetContent(container.NewStack(tabs, actions))
 	win.Resize(monitorSize)
 
 	// Closing hides to tray; the app keeps running.
