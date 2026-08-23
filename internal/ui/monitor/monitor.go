@@ -199,13 +199,23 @@ func (m *Monitor) localTabObjects(cards []ui.CardVM, cfg config.Config) []fyne.C
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
 		body := cardBody(c, cfg)
-		if c.Kind == ui.KindSwap {
-			body = withSwapUILink(body, cfg)
+		switch c.Kind {
+		case ui.KindSwap:
+			body = withWebUILink(body, "Open llama-swap UI", cfg.LlamaSwap.BaseURL+"/ui")
+		case ui.KindGPU:
+			body = withWebUILink(body, "Open AMDGPUTOP web UI", cfg.AMDGPUWeb.BaseURL)
 		}
 		objs = append(objs, components.NewSourceCard(c, body))
 	}
 	return objs
 }
+
+// Console pages of the remote providers (their own usage dashboards, not
+// the API endpoints the adapters poll).
+const (
+	minimaxConsoleURL = "https://platform.minimax.io/console/usage"
+	zaiUsageURL       = "https://z.ai/manage-apikey/coding-plan/personal/usage"
+)
 
 func (m *Monitor) remoteTabObjects(cards []ui.CardVM) []fyne.CanvasObject {
 	if len(cards) == 0 {
@@ -213,7 +223,14 @@ func (m *Monitor) remoteTabObjects(cards []ui.CardVM) []fyne.CanvasObject {
 	}
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
-		objs = append(objs, components.NewSourceCard(c, cardBody(c, config.Config{})))
+		body := cardBody(c, config.Config{})
+		switch c.ID {
+		case domain.SourceMiniMax:
+			body = withWebUILink(body, "Open MiniMax usage", minimaxConsoleURL)
+		case domain.SourceZAI:
+			body = withWebUILink(body, "Open Z.ai usage", zaiUsageURL)
+		}
+		objs = append(objs, components.NewSourceCard(c, body))
 	}
 	return objs
 }
@@ -263,11 +280,10 @@ func cardBody(c ui.CardVM, _ config.Config) fyne.CanvasObject {
 	}
 }
 
-// withSwapUILink appends the "Open llama-swap UI" navigation button to the
-// local-tab swap card (navigation only — S1 never calls control APIs).
-func withSwapUILink(body fyne.CanvasObject, cfg config.Config) fyne.CanvasObject {
-	target := cfg.LlamaSwap.BaseURL + "/ui"
-	btn := widget.NewButtonWithIcon("Open llama-swap UI", theme.LoginIcon(), func() {
+// withWebUILink appends a navigation button to a card body (navigation
+// only — S1 never calls control APIs).
+func withWebUILink(body fyne.CanvasObject, label, target string) fyne.CanvasObject {
+	btn := widget.NewButtonWithIcon(label, theme.LoginIcon(), func() {
 		if u, err := url.Parse(target); err == nil && u.Scheme != "" {
 			fyne.CurrentApp().OpenURL(u)
 		}
