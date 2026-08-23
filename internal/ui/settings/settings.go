@@ -20,6 +20,7 @@ import (
 	"github.com/skobkin/llm-monitor/internal/config"
 	"github.com/skobkin/llm-monitor/internal/credentials"
 	"github.com/skobkin/llm-monitor/internal/domain"
+	"github.com/skobkin/llm-monitor/internal/resources"
 )
 
 // testTimeout bounds one Settings connection test.
@@ -211,6 +212,7 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 	))
 
 	win := a.NewWindow("Settings — LLM Monitor")
+	win.SetIcon(resources.Icon())
 	win.SetContent(content)
 	win.Resize(fyne.NewSize(560, 680))
 	// Closing hides; unsaved edits are discarded and will be reset on

@@ -14,6 +14,7 @@ import (
 
 	"github.com/skobkin/llm-monitor/internal/config"
 	"github.com/skobkin/llm-monitor/internal/domain"
+	"github.com/skobkin/llm-monitor/internal/resources"
 	"github.com/skobkin/llm-monitor/internal/ui"
 	"github.com/skobkin/llm-monitor/internal/ui/components"
 )
@@ -57,8 +58,12 @@ func NewMonitor(a fyne.App, ctrl MonitorController) *Monitor {
 		win = d.CreateSplashWindow()
 	} else {
 		// No desktop driver (off-desktop run): a plain window still works.
-		win = a.NewWindow("LLM Monitor")
+		win = a.NewWindow("AI Monitor")
 	}
+	// Splash windows are created with an empty title (Fyne would show
+	// "Fyne Application"); give the window its name and icon explicitly.
+	win.SetTitle("AI Monitor")
+	win.SetIcon(resources.Icon())
 	m.win = win
 
 	m.overviewBox = container.NewVBox()
