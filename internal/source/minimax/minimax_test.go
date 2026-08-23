@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -362,6 +363,72 @@ func TestCase5CodingEntrySelectedByName(t *testing.T) {
 	}
 }
 
+// Real payloads expose the text/chat plan as the literal "general" bucket
+// alongside unrelated lanes; it must be selected by name even when the
+// entry names carry no coding/text hint (the failure this guards against
+// read "cannot identify plan entry among 2 models").
+func TestGeneralBucketSelectedByName(t *testing.T) {
+	body := `{
+		"base_resp": {"status_code": 0},
+		"model_remains": [
+			{
+				"model_name": "MiniMax-M2.5",
+				"current_interval_remaining_percent": 10,
+				"current_weekly_remaining_percent": 20
+			},
+			{
+				"model_name": "general",
+				"current_interval_remaining_percent": 42,
+				"current_weekly_remaining_percent": 87
+			}
+		]
+	}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+
+	interval := windowByID(q, "interval")
+	if interval == nil || interval.RemainingFraction != 0.42 {
+		t.Errorf("interval = %+v, want the general entry's 42%%", interval)
+	}
+	if weekly := windowByID(q, "weekly"); weekly == nil || weekly.RemainingFraction != 0.87 {
+		t.Errorf("weekly = %+v, want the general entry's 87%%", weekly)
+	}
+}
+
+// The general bucket is the verified plan lane; it outranks the coding
+// name heuristic when a payload offers both.
+func TestGeneralBucketWinsOverCodingEntry(t *testing.T) {
+	body := `{
+		"base_resp": {"status_code": 0},
+		"model_remains": [
+			{
+				"model_name": "MiniMax-M2.7-coding",
+				"current_interval_remaining_percent": 10,
+				"current_weekly_remaining_percent": 20
+			},
+			{
+				"model_name": "general",
+				"current_interval_remaining_percent": 55,
+				"current_weekly_remaining_percent": 66
+			}
+		]
+	}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+
+	interval := windowByID(q, "interval")
+	if interval == nil || interval.RemainingFraction != 0.55 {
+		t.Errorf("interval = %+v, want the general entry's 55%%", interval)
+	}
+	if weekly := windowByID(q, "weekly"); weekly == nil || weekly.RemainingFraction != 0.66 {
+		t.Errorf("weekly = %+v, want the general entry's 66%%", weekly)
+	}
+}
+
 func TestBearerTokenSent(t *testing.T) {
 	fixture := newPlanServer(`{"base_resp":{"status_code":0},"model_remains":[{"model_name":"MiniMax-M2.7-coding","current_interval_remaining_percent":50}]}`)
 	srv := httptest.NewServer(fixture.handler())
@@ -462,6 +529,13 @@ func TestNoMatchingEntryAmongMany(t *testing.T) {
 	serr := asSourceError(t, err)
 	if serr.Category != source.CatInvalidResponse {
 		t.Errorf("no coding/text entry category = %s, want invalid-response", serr.Category)
+	}
+	// The detail must name the entries so an unmatched real payload is
+	// diagnosable from the error alone.
+	for _, want := range []string{"MiniMax-abab6.5s-chat", "MiniMax-abab5.5"} {
+		if !strings.Contains(serr.Detail, want) {
+			t.Errorf("detail %q does not list entry %q", serr.Detail, want)
+		}
 	}
 }
 

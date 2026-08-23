@@ -219,9 +219,12 @@ func (a *Adapter) checkProviderError(resp tokenPlanResp) *source.Error {
 }
 
 // selectEntry picks the plan entry to report. Selection is by name
-// semantics (coding/text lanes), never by array position; a single entry
-// is used directly; ambiguity without a match is an error. A nil entry
-// with non-nil agg means the legacy aggregate-only shape.
+// semantics, never by array position: the literal "general" bucket first
+// (the text/chat plan lane real payloads expose — the same bucket the
+// known-good statusline integrations read), then the coding and text name
+// lanes for other plan shapes, then a lone entry. Ambiguity without a
+// match is an error naming the entries seen. A nil entry with non-nil agg
+// means the legacy aggregate-only shape.
 func selectEntry(resp tokenPlanResp) (entry *modelRemainEntry, agg *tokenPlanData, err *source.Error) {
 	entries := resp.ModelRemains
 	agg = resp.Data
@@ -239,8 +242,11 @@ func selectEntry(resp tokenPlanResp) (entry *modelRemainEntry, agg *tokenPlanDat
 		}
 	}
 
-	// Coding is the stronger signal for this monitor: match it first,
-	// then the general text lane, then fall back to a lone entry.
+	for i := range entries {
+		if entries[i].name() == "general" {
+			return &entries[i], agg, nil
+		}
+	}
 	for i := range entries {
 		if strings.Contains(strings.ToLower(entries[i].name()), "cod") {
 			return &entries[i], agg, nil
@@ -254,9 +260,15 @@ func selectEntry(resp tokenPlanResp) (entry *modelRemainEntry, agg *tokenPlanDat
 	if len(entries) == 1 {
 		return &entries[0], agg, nil
 	}
+
+	names := make([]string, len(entries))
+	for i := range entries {
+		names[i] = entries[i].name()
+	}
 	return nil, nil, &source.Error{
 		Category: source.CatInvalidResponse,
-		Detail:   fmt.Sprintf("cannot identify plan entry among %d models", len(entries)),
+		Detail: fmt.Sprintf("cannot identify plan entry among %d models: %s",
+			len(entries), strings.Join(names, ", ")),
 	}
 }
 
