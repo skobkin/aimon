@@ -166,7 +166,7 @@ func (m *Monitor) rebuild() {
 
 	m.rebuildOverview(ui.BuildOverview(states, now), cfg)
 	replaceObjects(m.localBox, m.localTabObjects(ui.BuildLocalTab(states, now), cfg)...)
-	replaceObjects(m.remoteBox, m.remoteTabObjects(ui.BuildRemoteTab(states, now))...)
+	replaceObjects(m.remoteBox, m.remoteTabObjects(ui.BuildRemoteTab(states, now), cfg)...)
 }
 
 func (m *Monitor) rebuildOverview(vm ui.OverviewVM, cfg config.Config) {
@@ -199,36 +199,23 @@ func (m *Monitor) localTabObjects(cards []ui.CardVM, cfg config.Config) []fyne.C
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
 		body := cardBody(c, cfg)
-		switch c.Kind {
-		case ui.KindSwap:
-			body = withWebUILink(body, "Open llama-swap UI", cfg.LlamaSwap.BaseURL+"/ui")
-		case ui.KindGPU:
-			body = withWebUILink(body, "Open AMDGPUTOP web UI", cfg.AMDGPUWeb.BaseURL)
+		if link, ok := ui.SourceWebLink(c.ID, cfg); ok {
+			body = withWebUILink(body, "Open "+link.Label, link.URL)
 		}
 		objs = append(objs, components.NewSourceCard(c, body))
 	}
 	return objs
 }
 
-// Console pages of the remote providers (their own usage dashboards, not
-// the API endpoints the adapters poll).
-const (
-	minimaxConsoleURL = "https://platform.minimax.io/console/usage"
-	zaiUsageURL       = "https://z.ai/manage-apikey/coding-plan/personal/usage"
-)
-
-func (m *Monitor) remoteTabObjects(cards []ui.CardVM) []fyne.CanvasObject {
+func (m *Monitor) remoteTabObjects(cards []ui.CardVM, cfg config.Config) []fyne.CanvasObject {
 	if len(cards) == 0 {
 		return []fyne.CanvasObject{components.NewEmptyState("No remote sources enabled.", m.ctrl.OpenSettings)}
 	}
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
-		body := cardBody(c, config.Config{})
-		switch c.ID {
-		case domain.SourceMiniMax:
-			body = withWebUILink(body, "Open MiniMax usage", minimaxConsoleURL)
-		case domain.SourceZAI:
-			body = withWebUILink(body, "Open Z.ai usage", zaiUsageURL)
+		body := cardBody(c, cfg)
+		if link, ok := ui.SourceWebLink(c.ID, cfg); ok {
+			body = withWebUILink(body, "Open "+link.Label, link.URL)
 		}
 		objs = append(objs, components.NewSourceCard(c, body))
 	}

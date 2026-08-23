@@ -9,6 +9,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/skobkin/llm-monitor/internal/source/llamaswap"
 	"github.com/skobkin/llm-monitor/internal/source/minimax"
 	"github.com/skobkin/llm-monitor/internal/source/zai"
+	"github.com/skobkin/llm-monitor/internal/ui"
 	"github.com/skobkin/llm-monitor/internal/ui/monitor"
 	"github.com/skobkin/llm-monitor/internal/ui/settings"
 )
@@ -53,6 +55,7 @@ func appMetadata() fyne.AppMetadata {
 // App is the running application.
 type App struct {
 	fyneApp  fyne.App
+	deskApp  desktop.App
 	log      *slog.Logger
 	client   *http.Client
 	creds    credentials.Store
@@ -182,17 +185,48 @@ func (a *App) setupTray() {
 		a.monitor.Show()
 		return
 	}
+	a.deskApp = desk
 	// Set before the tray registers: the StatusNotifierItem ToolTip
 	// property is read at registration (later calls update it live).
 	systray.SetTooltip("LLM Monitor")
 	desk.SetSystemTrayWindow(a.monitor.Window())
-	desk.SetSystemTrayMenu(fyne.NewMenu("LLM Monitor",
+	desk.SetSystemTrayMenu(a.trayMenu())
+}
+
+// trayMenu builds the tray menu. The Open submenu lists the configured
+// sources' web UIs (the same destinations as the cards' buttons) and is
+// omitted entirely when no source is enabled.
+func (a *App) trayMenu() *fyne.Menu {
+	items := []*fyne.MenuItem{
 		fyne.NewMenuItem("Show Monitor", a.monitor.Show),
 		fyne.NewMenuItem("Refresh", a.mgr.RefreshAll),
+	}
+	if links := ui.SourceLinks(a.Config()); len(links) > 0 {
+		open := fyne.NewMenuItem("Open", nil)
+		open.ChildMenu = fyne.NewMenu("")
+		for _, l := range links {
+			link := l
+			open.ChildMenu.Items = append(open.ChildMenu.Items,
+				fyne.NewMenuItem(link.Label, a.openLink(link.URL)))
+		}
+		items = append(items, open)
+	}
+	items = append(items,
 		fyne.NewMenuItem("Settings", a.settings.Show),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Quit", a.quit),
-	))
+	)
+	return fyne.NewMenu("LLM Monitor", items...)
+}
+
+// openLink opens a source's web UI in the system browser (navigation
+// only). Malformed targets are ignored, like the card buttons.
+func (a *App) openLink(target string) func() {
+	return func() {
+		if u, err := url.Parse(target); err == nil && u.Scheme != "" {
+			a.fyneApp.OpenURL(u)
+		}
+	}
 }
 
 // Config implements monitor.MonitorController.
@@ -217,6 +251,11 @@ func (a *App) OpenSettings() { a.settings.Show() }
 func (a *App) onSaveConfig(cfg config.Config) error {
 	a.repo.Save(cfg)
 	a.applyConfig(cfg)
+	// The tray's Open submenu follows the enabled-source set.
+	if a.deskApp != nil {
+		menu := a.trayMenu()
+		fyne.Do(func() { a.deskApp.SetSystemTrayMenu(menu) })
+	}
 	return nil
 }
 
