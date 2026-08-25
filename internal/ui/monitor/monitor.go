@@ -209,17 +209,31 @@ func (m *Monitor) rebuildOverview(vm ui.OverviewVM, cfg config.Config) {
 
 	if len(vm.LocalCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Local"))
-		for _, c := range vm.LocalCards {
-			objs = append(objs, overviewSourceCard(c, overviewCardBody(c)))
-		}
+		objs = append(objs, overviewRow(vm.LocalCards)...)
 	}
 	if len(vm.RemoteCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Remote"))
-		for _, c := range vm.RemoteCards {
-			objs = append(objs, overviewSourceCard(c, overviewCardBody(c)))
-		}
+		objs = append(objs, overviewRow(vm.RemoteCards)...)
 	}
 	replaceObjects(m.overviewBox, objs...)
+}
+
+// overviewRow lays out overview cards: two cards side-by-side in equal
+// columns (GridWithColumns), one card at full width, or nothing.
+func overviewRow(cards []ui.OverviewCardVM) []fyne.CanvasObject {
+	if len(cards) == 2 {
+		return []fyne.CanvasObject{
+			container.NewGridWithColumns(2,
+				overviewSourceCard(cards[0], overviewCardBody(cards[0])),
+				overviewSourceCard(cards[1], overviewCardBody(cards[1])),
+			),
+		}
+	}
+	objs := make([]fyne.CanvasObject, 0, len(cards))
+	for _, c := range cards {
+		objs = append(objs, overviewSourceCard(c, overviewCardBody(c)))
+	}
+	return objs
 }
 
 // overviewSourceCard wraps an overview card body in a title/status header.
