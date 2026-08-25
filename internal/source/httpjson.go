@@ -30,6 +30,7 @@ func GetJSON(ctx context.Context, client *http.Client, url string, header http.H
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		drainBody(resp.Body)
 		return statusError(resp.StatusCode)
 	}
 
@@ -38,6 +39,9 @@ func GetJSON(ctx context.Context, client *http.Client, url string, header http.H
 		return &Error{Category: CatConnection, Detail: "reading response body", Err: err}
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
+		// A truncated (oversized) body leaves the connection unread;
+		// drain what is left before the deferred close.
+		drainBody(resp.Body)
 		return &Error{Category: CatInvalidResponse, Detail: "malformed JSON", Err: err}
 	}
 	return nil
@@ -61,6 +65,7 @@ func GetText(ctx context.Context, client *http.Client, url string, header http.H
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		drainBody(resp.Body)
 		return "", statusError(resp.StatusCode)
 	}
 
@@ -69,4 +74,14 @@ func GetText(ctx context.Context, client *http.Client, url string, header http.H
 		return "", &Error{Category: CatConnection, Detail: "reading response body", Err: err}
 	}
 	return string(body), nil
+}
+
+// drainBody discards what remains of a body that will not be consumed, so
+// the Transport can return the connection to the keep-alive pool instead
+// of closing it — without a drain, every non-2xx poll (404 retries, 429s,
+// auth failures) forces a fresh dial. The bound stops a pathological
+// multi-gigabyte response from being downloaded in full; past it the
+// connection is dropped, which is the status quo anyway.
+func drainBody(body io.Reader) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxBodyBytes))
 }
