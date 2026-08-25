@@ -2,8 +2,8 @@
   Icon = "internal/resources/icon.svg"
   Name = "AI Monitor"
   ID = "com.skobkin.aimonitor"
-  Version = "0.1.0"
-  Build = 1
+  Version = "0.2.0"
+  Build = 2
 
 [Migrations]
   fyneDo = true

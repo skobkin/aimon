@@ -46,8 +46,8 @@ func appMetadata() fyne.AppMetadata {
 	return fyne.AppMetadata{
 		ID:         appID,
 		Name:       "AI Monitor",
-		Version:    "0.1.0",
-		Build:      1,
+		Version:    "0.2.0",
+		Build:      2,
 		Migrations: map[string]bool{"fyneDo": true},
 	}
 }
@@ -240,7 +240,7 @@ func (a *App) rebuildTrayMenu() {
 	// Open submenu lists the configured sources' web UIs.
 	var mOpen *systray.MenuItem
 	if links := ui.SourceLinks(a.Config()); len(links) > 0 {
-		mOpen = systray.AddMenuItem("Open", "")
+		mOpen = systray.AddMenuItem("Web UIs", "")
 		for _, l := range links {
 			link := l
 			sub := mOpen.AddSubMenuItem(link.Label, "")
