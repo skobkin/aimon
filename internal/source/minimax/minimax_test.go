@@ -185,7 +185,8 @@ func TestCase1LegacyCountsAreRemaining(t *testing.T) {
 
 // Case 2: current top-level shape, time-based plan with 0/0 counts.
 // Windows come from the remaining percents; raw counts stay nil;
-// end_time (epoch ms) is the interval reset; weekly reset unknown.
+// remains_time (9 000 000 ms = 2.5 h) overrides end_time for interval;
+// weekly_remains_time (403 200 000 ms ≈ 4.67 d) provides the weekly reset.
 func TestCase2TimeBasedPlanUsesPercents(t *testing.T) {
 	body := `{
 		"base_resp": {"status_code": 0, "status_msg": "success"},
@@ -214,9 +215,10 @@ func TestCase2TimeBasedPlanUsesPercents(t *testing.T) {
 	if interval.Remaining != nil || interval.Limit != nil {
 		t.Errorf("time-based plan must not carry raw counts: %v/%v", interval.Remaining, interval.Limit)
 	}
-	wantReset := time.UnixMilli(1770018000000)
-	if interval.ResetAt == nil || !interval.ResetAt.Equal(wantReset) {
-		t.Errorf("interval reset = %v, want %v", interval.ResetAt, wantReset)
+	// remains_time (9 000 000 ms) takes precedence over end_time.
+	wantInterval := q.CollectedAt.Add(9000 * time.Second)
+	if interval.ResetAt == nil || !interval.ResetAt.Equal(wantInterval) {
+		t.Errorf("interval reset = %v, want %v (CollectedAt + remains_time)", interval.ResetAt, wantInterval)
 	}
 
 	weekly := windowByID(q, "weekly")
@@ -226,8 +228,10 @@ func TestCase2TimeBasedPlanUsesPercents(t *testing.T) {
 	if weekly.RemainingFraction != 0.87 {
 		t.Errorf("weekly fraction = %v, want 0.87", weekly.RemainingFraction)
 	}
-	if weekly.ResetAt != nil {
-		t.Errorf("weekly reset must be nil (no verified field), got %v", weekly.ResetAt)
+	// weekly_remains_time (403 200 000 ms ≈ 4.67 d) provides weekly reset.
+	wantWeekly := q.CollectedAt.Add(403200 * time.Second)
+	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(wantWeekly) {
+		t.Errorf("weekly reset = %v, want %v (CollectedAt + weekly_remains_time)", weekly.ResetAt, wantWeekly)
 	}
 }
 
@@ -286,10 +290,12 @@ func TestCase3PercentWinsOverDisagreeingCounts(t *testing.T) {
 	}
 }
 
-// Case 4: reset/countdown fields. start/end epoch ms parse; the
-// passively-draining remains_time countdowns influence nothing.
-func TestCase4CountdownFieldsIgnored(t *testing.T) {
-	withCountdowns := `{
+// Case 4: duration fields provide ResetAt and override end_time.
+// remains_time (3 600 000 ms = 1 h) wins over end_time for interval;
+// weekly_remains_time (7 200 000 ms = 2 h) provides the weekly reset.
+// Fractions and counts are unaffected by reset fields.
+func TestCase4DurationFieldsBecomeResetAt(t *testing.T) {
+	withDurations := `{
 		"base_resp": {"status_code": 0},
 		"model_remains": [{
 			"model_name": "MiniMax-M2.7-coding",
@@ -301,33 +307,123 @@ func TestCase4CountdownFieldsIgnored(t *testing.T) {
 			"end_time": 1770018000000
 		}]
 	}`
-	srv := httptest.NewServer(newPlanServer(withCountdowns).handler())
+	srv := httptest.NewServer(newPlanServer(withDurations).handler())
 	defer srv.Close()
 
 	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
 
-	for _, id := range []string{"interval", "weekly"} {
-		w := windowByID(q, id)
-		if w == nil {
-			t.Fatalf("%s window missing", id)
-		}
-		// remains_time (1h) and weekly_remains_time (2h) must not leak
-		// into fractions (0.6/0.3-ish), resets, or counts.
-		badCounts := w.Remaining != nil || w.Limit != nil
-		badWeeklyReset := id == "weekly" && w.ResetAt != nil
-		if badCounts || badWeeklyReset {
-			t.Errorf("%s window unexpectedly populated: %+v", id, w)
-		}
-	}
-	interval := windowByID(q, "interval")
-	if interval.RemainingFraction != 0.55 {
-		t.Errorf("interval fraction = %v, want 0.55 (unaffected by remains_time)", interval.RemainingFraction)
-	}
-	if interval.ResetAt == nil || !interval.ResetAt.Equal(time.UnixMilli(1770018000000)) {
-		t.Errorf("interval reset = %v, want end_time", interval.ResetAt)
+	// Fractions come from percents, unchanged by reset fields.
+	if interval := windowByID(q, "interval"); interval.RemainingFraction != 0.55 {
+		t.Errorf("interval fraction = %v, want 0.55", interval.RemainingFraction)
 	}
 	if weekly := windowByID(q, "weekly"); weekly.RemainingFraction != 0.66 {
-		t.Errorf("weekly fraction = %v, want 0.66 (unaffected by weekly_remains_time)", weekly.RemainingFraction)
+		t.Errorf("weekly fraction = %v, want 0.66", weekly.RemainingFraction)
+	}
+
+	// remains_time (1 h) overrides end_time.
+	interval := windowByID(q, "interval")
+	wantInterval := q.CollectedAt.Add(3600 * time.Second)
+	if interval.ResetAt == nil || !interval.ResetAt.Equal(wantInterval) {
+		t.Errorf("interval reset = %v, want %v (CollectedAt + 1 h)", interval.ResetAt, wantInterval)
+	}
+
+	// weekly_remains_time (2 h) provides weekly reset.
+	weekly := windowByID(q, "weekly")
+	wantWeekly := q.CollectedAt.Add(7200 * time.Second)
+	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(wantWeekly) {
+		t.Errorf("weekly reset = %v, want %v (CollectedAt + 2 h)", weekly.ResetAt, wantWeekly)
+	}
+}
+
+// Case 4b: malformed/negative/overflow duration fields are ignored;
+// the verified end_time fallback is used instead.
+func TestCase4bMalformedDurationFallsBack(t *testing.T) {
+	body := `{
+		"base_resp": {"status_code": 0},
+		"model_remains": [{
+			"model_name": "MiniMax-M2.7-coding",
+			"current_interval_remaining_percent": 50,
+			"remains_time": -1,
+			"weekly_remains_time": 0,
+			"end_time": 1770018000000
+		}]
+	}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+
+	// Quota usage is unaffected by bad reset data.
+	interval := windowByID(q, "interval")
+	if interval == nil || interval.RemainingFraction != 0.50 {
+		t.Errorf("interval fraction = %v, want 0.50", interval)
+	}
+
+	// Negative/zero durations rejected; end_time fallback used.
+	wantReset := time.UnixMilli(1770018000000)
+	if interval.ResetAt == nil || !interval.ResetAt.Equal(wantReset) {
+		t.Errorf("interval reset = %v, want end_time fallback %v", interval.ResetAt, wantReset)
+	}
+}
+
+// Case 4c: overflow duration (larger than time.Duration can represent)
+// is rejected; quota usage remains valid.
+func TestCase4cOverflowDurationRejected(t *testing.T) {
+	body := `{
+		"base_resp": {"status_code": 0},
+		"model_remains": [{
+			"model_name": "MiniMax-M2.7-coding",
+			"current_interval_remaining_percent": 80,
+			"remains_time": 99999999999999
+		}]
+	}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+
+	interval := windowByID(q, "interval")
+	if interval == nil {
+		t.Fatal("interval window missing")
+	}
+	// Quota usage is valid despite overflow.
+	if interval.RemainingFraction != 0.80 {
+		t.Errorf("interval fraction = %v, want 0.80", interval)
+	}
+	// Overflow duration rejected; no reset time set.
+	if interval.ResetAt != nil {
+		t.Errorf("interval reset should be nil for overflow duration, got %v", interval.ResetAt)
+	}
+}
+
+// Case 4d: both windows use the same captured observation time.
+func TestCase4dBothWindowsUseSameObservedAt(t *testing.T) {
+	body := `{
+		"base_resp": {"status_code": 0},
+		"model_remains": [{
+			"model_name": "MiniMax-M2.7-coding",
+			"current_interval_remaining_percent": 50,
+			"current_weekly_remaining_percent": 60,
+			"remains_time": 3600000,
+			"weekly_remains_time": 7200000
+		}]
+	}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+
+	observed := q.CollectedAt
+	interval := windowByID(q, "interval")
+	weekly := windowByID(q, "weekly")
+
+	wantInterval := observed.Add(3600 * time.Second)
+	if interval.ResetAt == nil || !interval.ResetAt.Equal(wantInterval) {
+		t.Errorf("interval reset = %v, want %v", interval.ResetAt, wantInterval)
+	}
+	wantWeekly := observed.Add(7200 * time.Second)
+	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(wantWeekly) {
+		t.Errorf("weekly reset = %v, want %v", weekly.ResetAt, wantWeekly)
 	}
 }
 

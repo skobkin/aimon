@@ -14,9 +14,10 @@
 //   - *_usage_count fields are mislabeled: they report REMAINING quota,
 //     not consumed usage (MiniMax-M2 issue #99). Nothing here ever
 //     computes total−usage.
-//   - remains_time / weekly_remains_time are real-time countdowns of a
-//     time budget that drains even with zero API calls (MiniMax-M2.7
-//     issue #47). They are neither quota nor reset times and are ignored.
+//   - remains_time is the remaining milliseconds until the 5-hour
+//     quota window resets; weekly_remains_time is the same for the weekly
+//     window. Both are converted to absolute ResetAt using the observation
+//     time (MiniMax-M2.7 issue #47 semantics reinterpreted for S2).
 package minimax
 
 import (
@@ -65,7 +66,8 @@ type modelRemainEntry struct {
 	CurIntervalRemainingPercent *float64 `json:"current_interval_remaining_percent"`
 	CurWeeklyRemainingPercent   *float64 `json:"current_weekly_remaining_percent"`
 
-	// Time-budget countdowns; ignored on purpose (see package comment).
+	// Milliseconds until the 5-hour / weekly quota window resets.
+	// Converted to absolute ResetAt using the observation time (S2).
 	RemainsTime       *int64 `json:"remains_time"`
 	WeeklyRemainsTime *int64 `json:"weekly_remains_time"`
 
@@ -153,7 +155,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 
 	now := time.Now()
-	windows, werr := buildWindows(entry, agg, a.log)
+	windows, werr := buildWindows(entry, agg, now, a.log)
 	if werr != nil {
 		return nil, werr
 	}
@@ -275,7 +277,7 @@ func selectEntry(resp tokenPlanResp) (entry *modelRemainEntry, agg *tokenPlanDat
 // buildWindows derives the 5-hour and weekly windows in strict preference
 // order: remaining-percent first (covers time-based plans with 0/0
 // counts), then count fields with issue-#99 semantics.
-func buildWindows(entry *modelRemainEntry, agg *tokenPlanData, log *slog.Logger) ([]domain.QuotaWindow, *source.Error) {
+func buildWindows(entry *modelRemainEntry, agg *tokenPlanData, observedAt time.Time, log *slog.Logger) ([]domain.QuotaWindow, *source.Error) {
 	var intervalPct, weeklyPct *float64
 	var intervalCounts, weeklyCounts countPair
 
@@ -322,24 +324,62 @@ func buildWindows(entry *modelRemainEntry, agg *tokenPlanData, log *slog.Logger)
 		}
 	}
 
-	// Reset times: current shape carries epoch-ms window bounds on the
-	// entry; the legacy shape carries RFC3339 strings on the aggregate.
-	// Attach by window ID — a dropped window shifts indices.
-	if entry != nil && entry.EndTime != nil && *entry.EndTime > 0 {
-		reset := time.UnixMilli(*entry.EndTime)
-		setResetAt(windows, "interval", &reset)
-	} else if agg != nil && agg.CurIntervalReset != "" {
-		if reset, perr := time.Parse(time.RFC3339, agg.CurIntervalReset); perr == nil {
-			setResetAt(windows, "interval", &reset)
+	// Reset times: duration fields from the entry take precedence.
+	// Legacy epoch-ms window bounds and RFC3339 strings are defensive
+	// fallbacks when the duration fields are absent or invalid.
+	if entry != nil && entry.RemainsTime != nil {
+		if t, ok := resetAtFromMilliseconds(observedAt, *entry.RemainsTime); ok {
+			setResetAt(windows, "interval", t)
 		}
 	}
-	if agg != nil && agg.CurWeeklyReset != "" {
-		if reset, perr := time.Parse(time.RFC3339, agg.CurWeeklyReset); perr == nil {
-			setResetAt(windows, "weekly", &reset)
+	if !hasReset(windows, "interval") {
+		if entry != nil && entry.EndTime != nil && *entry.EndTime > 0 {
+			reset := time.UnixMilli(*entry.EndTime)
+			setResetAt(windows, "interval", &reset)
+		} else if agg != nil && agg.CurIntervalReset != "" {
+			if reset, perr := time.Parse(time.RFC3339, agg.CurIntervalReset); perr == nil {
+				setResetAt(windows, "interval", &reset)
+			}
+		}
+	}
+	if entry != nil && entry.WeeklyRemainsTime != nil {
+		if t, ok := resetAtFromMilliseconds(observedAt, *entry.WeeklyRemainsTime); ok {
+			setResetAt(windows, "weekly", t)
+		}
+	}
+	if !hasReset(windows, "weekly") {
+		if agg != nil && agg.CurWeeklyReset != "" {
+			if reset, perr := time.Parse(time.RFC3339, agg.CurWeeklyReset); perr == nil {
+				setResetAt(windows, "weekly", &reset)
+			}
 		}
 	}
 
 	return windows, nil
+}
+
+// maxDurationMilliseconds is the largest millisecond value that can be
+// safely converted to time.Duration without overflowing int64 nanoseconds.
+const maxDurationMilliseconds = int64(math.MaxInt64) / int64(time.Millisecond)
+
+// resetAtFromMilliseconds converts a millisecond duration to an absolute
+// ResetAt using the observation time. Returns false for durations <= 0 or
+// values that would overflow time.Duration.
+func resetAtFromMilliseconds(observedAt time.Time, ms int64) (*time.Time, bool) {
+	if ms <= 0 || ms > maxDurationMilliseconds {
+		return nil, false
+	}
+	t := observedAt.Add(time.Duration(ms) * time.Millisecond)
+	return &t, true
+}
+
+func hasReset(windows []domain.QuotaWindow, id string) bool {
+	for i := range windows {
+		if windows[i].ID == id && windows[i].ResetAt != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func setResetAt(windows []domain.QuotaWindow, id string, reset *time.Time) {
