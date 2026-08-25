@@ -298,7 +298,7 @@ func TestBuildQuotaVM(t *testing.T) {
 		},
 	}
 
-	over := BuildQuotaVM(snap, false)
+	over := BuildQuotaVM(snap, now, false)
 	if len(over.Windows) != 2 {
 		t.Fatalf("windows = %d", len(over.Windows))
 	}
@@ -306,7 +306,7 @@ func TestBuildQuotaVM(t *testing.T) {
 		t.Error("overview must not show raw counts")
 	}
 
-	detail := BuildQuotaVM(snap, true)
+	detail := BuildQuotaVM(snap, now, true)
 	if detail.Windows[0].Secondary != "310 / 1000 requests" {
 		t.Errorf("secondary = %q", detail.Windows[0].Secondary)
 	}
@@ -390,5 +390,53 @@ func TestBuildLocalAndRemoteTabs(t *testing.T) {
 	}
 	if got := BuildRemoteTab(map[domain.SourceID]domain.Runtime{}, now); len(got) != 0 {
 		t.Errorf("empty remote tab = %+v", got)
+	}
+}
+
+func TestFormatResetCountdownBoundaries(t *testing.T) {
+	cases := []struct {
+		name  string
+		delta time.Duration
+		want  string
+	}{
+		{"42s", 42 * time.Second, "42s"},
+		{"59m", 59 * time.Minute, "59m"},
+		{"2h14m", 2*time.Hour + 14*time.Minute, "2h14m"},
+		{"4d7h", 4*24*time.Hour + 7*time.Hour, "4d7h"},
+		{"zero", 0, "now"},
+		{"past", -1 * time.Minute, "now"},
+	}
+	for _, c := range cases {
+		resetAt := now.Add(c.delta)
+		if got := FormatResetCountdown(&resetAt, now); got != c.want {
+			t.Errorf("FormatResetCountdown(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// nil ResetAt → empty.
+	if got := FormatResetCountdown(nil, now); got != "" {
+		t.Errorf("nil reset = %q, want empty", got)
+	}
+}
+
+func TestBuildQuotaVMResetText(t *testing.T) {
+	reset := now.Add(2*time.Hour + 14*time.Minute)
+	snap := domain.QuotaSnapshot{
+		Source: domain.SourceMiniMax,
+		Windows: []domain.QuotaWindow{
+			{ID: "interval", Name: "5-hour", RemainingFraction: 0.83, UsedFraction: 0.17, ResetAt: &reset},
+			{ID: "weekly", Name: "Weekly", RemainingFraction: 0.50, UsedFraction: 0.50},
+		},
+	}
+
+	vm := BuildQuotaVM(snap, now, true)
+	if vm.Windows[0].ResetText != "2h14m" {
+		t.Errorf("interval reset text = %q, want \"2h14m\"", vm.Windows[0].ResetText)
+	}
+	if vm.Windows[1].ResetText != "" {
+		t.Errorf("weekly reset text = %q, want empty", vm.Windows[1].ResetText)
+	}
+	// UsedText unchanged.
+	if vm.Windows[0].UsedText != "17% used" {
+		t.Errorf("used text = %q", vm.Windows[0].UsedText)
 	}
 }

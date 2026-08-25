@@ -174,9 +174,13 @@ func (r *quotaBarRenderer) Refresh() {
 // beneath, and the optional raw-count secondary line follows. The numeric
 // label stays outside the bar.
 func NewQuotaRow(vm ui.QuotaWindowVM) fyne.CanvasObject {
+	nameText := vm.Name
+	if vm.ResetText != "" {
+		nameText += " · " + vm.ResetText
+	}
 	row := container.NewVBox(
 		container.NewHBox(
-			widget.NewLabelWithStyle(vm.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewLabelWithStyle(nameText, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			layout.NewSpacer(),
 			widget.NewLabel(vm.UsedText),
 		),

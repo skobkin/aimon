@@ -67,6 +67,7 @@ type SwapVM struct {
 type QuotaWindowVM struct {
 	Name      string
 	UsedText  string
+	ResetText string // compact countdown, e.g. "2h14m"; empty when unknown
 	Secondary string
 	Used      float64
 	Remaining float64
@@ -161,7 +162,7 @@ func BuildCard(id domain.SourceID, rt domain.Runtime, now time.Time, detail bool
 		card.Swap = BuildSwapVM(snap, detail)
 	case domain.QuotaSnapshot:
 		card.Kind = KindQuota
-		card.Quota = BuildQuotaVM(snap, detail)
+		card.Quota = BuildQuotaVM(snap, now, detail)
 	}
 	return card
 }
@@ -311,12 +312,13 @@ func BuildSwapVM(snap domain.LlamaSwapSnapshot, detail bool) SwapVM {
 
 // BuildQuotaVM derives the quota window rows. Secondary (raw counts) is a
 // detail-tab extra; the overview shows the used lines only.
-func BuildQuotaVM(snap domain.QuotaSnapshot, detail bool) QuotaVM {
+func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM {
 	vm := QuotaVM{Windows: make([]QuotaWindowVM, 0, len(snap.Windows))}
 	for _, w := range snap.Windows {
 		row := QuotaWindowVM{
 			Name:      w.Name,
 			UsedText:  FormatUsed(w.UsedFraction),
+			ResetText: FormatResetCountdown(w.ResetAt, now),
 			Used:      w.UsedFraction,
 			Remaining: w.RemainingFraction,
 		}
@@ -419,5 +421,38 @@ func FormatCount(v float64) string {
 		return fmt.Sprintf("%.1fk", v/1_000)
 	default:
 		return fmt.Sprintf("%.0f", v)
+	}
+}
+
+// FormatResetCountdown renders a compact relative countdown from an
+// absolute ResetAt. Pure function — takes an explicit now.
+//
+//	nil ResetAt  → empty string
+//	past/now     → "now"
+//	< 1 min     → "NNs"
+//	< 1 hour    → "NNm"
+//	< 24 hours  → "NhNNm" (no space)
+//	≥ 24 hours  → "NNdNNh"
+func FormatResetCountdown(resetAt *time.Time, now time.Time) string {
+	if resetAt == nil {
+		return ""
+	}
+	d := resetAt.Sub(now)
+	if d <= 0 {
+		return "now"
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		m := int(d.Minutes()) % 60
+		return fmt.Sprintf("%dh%dm", h, m)
+	default:
+		days := int(d.Hours() / 24)
+		h := int(d.Hours()) % 24
+		return fmt.Sprintf("%dd%dh", days, h)
 	}
 }

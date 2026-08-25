@@ -64,10 +64,10 @@ type App struct {
 	monitor  *monitor.Monitor
 	settings *settings.Settings
 
-	done     chan struct{}
-	running  atomic.Bool
-	unsub    func()
-	trayEnd  func()
+	done    chan struct{}
+	running atomic.Bool
+	unsub   func()
+	trayEnd func()
 
 	mu  sync.RWMutex // guards cfg and the adapters
 	cfg config.Config
