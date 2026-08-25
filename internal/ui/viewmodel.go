@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
@@ -78,6 +79,68 @@ type QuotaVM struct {
 	Windows []QuotaWindowVM
 }
 
+// OverviewKind discriminates Overview card presentation.
+type OverviewKind string
+
+// Overview card kinds; zero value means no data yet.
+const (
+	OverviewMetrics OverviewKind = "metrics"
+	OverviewRuntime OverviewKind = "runtime"
+	OverviewQuota   OverviewKind = "quota"
+)
+
+// MetricBarVM is the pure data for one labeled usage bar.
+// Presence is determined by Text being non-empty. Fraction 0 is a valid
+// zero-usage metric and renders as an empty track with its text.
+type MetricBarVM struct {
+	Text     string
+	Fraction float64 // clamped [0,1]; 0 = empty track (valid)
+	Level    MetricLevel
+}
+
+// MetricsOverviewVM carries compact metric bar data for amdgputop-web.
+type MetricsOverviewVM struct {
+	GPU     MetricBarVM // zero Text = omitted
+	VRAM    MetricBarVM // zero Text = omitted
+	Temp    MetricRowVM // zero Value = omitted
+	HasData bool
+}
+
+// RuntimeOverviewVM carries compact running-model summary for llama-swap.
+type RuntimeOverviewVM struct {
+	Summary   string   // "2 models running", "No models running"
+	Names     []string // first two model names
+	MoreCount int      // 0 or N
+	HasData   bool
+}
+
+// OverviewDonutVM is the pure data for one quota donut gauge.
+type OverviewDonutVM struct {
+	Label     string  // short label: "5h", "week", "month"
+	PctText   string  // "14%"
+	Used      float64 // arc fraction
+	Remaining float64 // drives threshold color
+	ResetText string  // countdown below donut
+}
+
+// QuotaOverviewVM carries up to two headline quota donuts.
+type QuotaOverviewVM struct {
+	Windows []OverviewDonutVM // 0, 1, or 2
+	HasData bool
+}
+
+// OverviewCardVM is one card in the Overview tab.
+type OverviewCardVM struct {
+	ID     domain.SourceID
+	Kind   OverviewKind
+	Title  string
+	Status string
+
+	Metrics MetricsOverviewVM
+	Runtime RuntimeOverviewVM
+	Quota   QuotaOverviewVM
+}
+
 // CardVM is one source card. Status is the per-source freshness label
 // ("5s ago", "1m ago · stale", "Unavailable", "Loading…"); Footer carries
 // the last refresh failure for Stale/Unavailable cards.
@@ -95,8 +158,8 @@ type CardVM struct {
 
 // OverviewVM is the full overview tab state.
 type OverviewVM struct {
-	LocalCards     []CardVM
-	RemoteCards    []CardVM
+	LocalCards     []OverviewCardVM
+	RemoteCards    []OverviewCardVM
 	NothingEnabled bool
 }
 
@@ -114,11 +177,23 @@ const overviewSwapLines = 3
 // their first snapshot lands.
 func BuildOverview(states map[domain.SourceID]domain.Runtime, now time.Time) OverviewVM {
 	vm := OverviewVM{
-		LocalCards:  buildCards(localOrder, states, now, false),
-		RemoteCards: buildCards(remoteOrder, states, now, false),
+		LocalCards:  buildOverviewCards(localOrder, states, now),
+		RemoteCards: buildOverviewCards(remoteOrder, states, now),
 	}
 	vm.NothingEnabled = len(vm.LocalCards) == 0 && len(vm.RemoteCards) == 0
 	return vm
+}
+
+func buildOverviewCards(order []domain.SourceID, states map[domain.SourceID]domain.Runtime, now time.Time) []OverviewCardVM {
+	cards := make([]OverviewCardVM, 0, len(order))
+	for _, id := range order {
+		rt, ok := states[id]
+		if !ok || !rt.Enabled {
+			continue
+		}
+		cards = append(cards, BuildOverviewCard(id, rt, now))
+	}
+	return cards
 }
 
 // BuildLocalTab derives the local tab cards (full detail bodies).
@@ -165,6 +240,145 @@ func BuildCard(id domain.SourceID, rt domain.Runtime, now time.Time, detail bool
 		card.Quota = BuildQuotaVM(snap, now, detail)
 	}
 	return card
+}
+
+// BuildOverviewCard derives one overview card from a runtime.
+func BuildOverviewCard(id domain.SourceID, rt domain.Runtime, now time.Time) OverviewCardVM {
+	card := OverviewCardVM{
+		ID:     id,
+		Title:  id.DisplayName(),
+		Status: FreshnessText(rt, now),
+	}
+
+	switch snap := rt.Snapshot.(type) {
+	case domain.GPUSnapshot:
+		card.Kind = OverviewMetrics
+		card.Metrics = BuildMetricsOverview(snap)
+	case domain.LlamaSwapSnapshot:
+		card.Kind = OverviewRuntime
+		card.Runtime = BuildRuntimeOverview(snap)
+	case domain.QuotaSnapshot:
+		card.Kind = OverviewQuota
+		card.Quota = BuildQuotaOverview(snap, now)
+	}
+	return card
+}
+
+// BuildMetricsOverview derives compact metric bar data from a GPU snapshot.
+func BuildMetricsOverview(snap domain.GPUSnapshot) MetricsOverviewVM {
+	vm := MetricsOverviewVM{}
+
+	if snap.GPUUtilizationPct != nil {
+		pct := *snap.GPUUtilizationPct
+		vm.GPU = MetricBarVM{
+			Text:     "GPU " + FormatPct(snap.GPUUtilizationPct),
+			Fraction: domain.Clamp01(pct / 100),
+			Level:    utilLevel(pct),
+		}
+	}
+	if s := formatBytePair(snap.VRAMUsedBytes, snap.VRAMTotalBytes); s != "" {
+		frac := domain.Clamp01(float64(*snap.VRAMUsedBytes) / float64(*snap.VRAMTotalBytes))
+		vm.VRAM = MetricBarVM{
+			Text:     "VRAM " + s,
+			Fraction: frac,
+			Level:    bytePairLevel(snap.VRAMUsedBytes, snap.VRAMTotalBytes),
+		}
+	}
+	if snap.TemperatureC != nil {
+		vm.Temp = MetricRowVM{Label: "Temp", Value: FormatTemp(snap.TemperatureC), Level: tempLevel(*snap.TemperatureC)}
+	}
+
+	vm.HasData = vm.GPU.Text != "" || vm.VRAM.Text != "" || vm.Temp.Value != ""
+	return vm
+}
+
+// BuildRuntimeOverview derives a compact running-model summary.
+func BuildRuntimeOverview(snap domain.LlamaSwapSnapshot) RuntimeOverviewVM {
+	n := len(snap.RunningModels)
+	vm := RuntimeOverviewVM{HasData: true}
+
+	switch {
+	case n == 0:
+		vm.Summary = "No models running"
+	case n == 1:
+		vm.Summary = "1 model running"
+	default:
+		vm.Summary = fmt.Sprintf("%d models running", n)
+	}
+
+	for _, m := range snap.RunningModels {
+		name := m.Name
+		if name == "" {
+			name = m.ID
+		}
+		vm.Names = append(vm.Names, name)
+		if len(vm.Names) == 2 {
+			break
+		}
+	}
+	vm.MoreCount = max(0, n-2)
+	return vm
+}
+
+// BuildQuotaOverview derives up to two headline quota donuts.
+func BuildQuotaOverview(snap domain.QuotaSnapshot, now time.Time) QuotaOverviewVM {
+	vm := QuotaOverviewVM{}
+	headlines := selectHeadlineWindows(snap.Windows)
+	for _, w := range headlines {
+		vm.Windows = append(vm.Windows, OverviewDonutVM{
+			Label:     shortLabel(w),
+			PctText:   formatPctOnly(w.UsedFraction),
+			Used:      w.UsedFraction,
+			Remaining: w.RemainingFraction,
+			ResetText: FormatResetCountdown(w.ResetAt, now),
+		})
+	}
+	vm.HasData = len(vm.Windows) > 0
+	return vm
+}
+
+// shortLabel maps a quota window ID to a compact label for the donut.
+func shortLabel(w domain.QuotaWindow) string {
+	switch w.ID {
+	case "interval", "tokens-5h", "credits-5h":
+		return "5h"
+	case "weekly", "credits-weekly":
+		return "week"
+	case "mcp-monthly":
+		return "month"
+	default:
+		return w.Name
+	}
+}
+
+// selectHeadlineWindows picks at most 2 windows, preferring the 5-hour
+// and weekly windows when both exist.
+func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
+	priority := func(id string) int {
+		switch id {
+		case "interval", "tokens-5h", "credits-5h":
+			return 0
+		case "weekly", "credits-weekly":
+			return 1
+		default:
+			return 2
+		}
+	}
+	sorted := make([]domain.QuotaWindow, len(windows))
+	copy(sorted, windows)
+	sort.Slice(sorted, func(i, j int) bool {
+		return priority(sorted[i].ID) < priority(sorted[j].ID)
+	})
+
+	if len(sorted) > 2 {
+		sorted = sorted[:2]
+	}
+	return sorted
+}
+
+// formatPctOnly renders a percentage without the "used" suffix.
+func formatPctOnly(fraction float64) string {
+	return fmt.Sprintf("%d%%", int(math.Round(domain.Clamp01(fraction)*100)))
 }
 
 // FreshnessText renders the per-source freshness label (DECISIONS D7).

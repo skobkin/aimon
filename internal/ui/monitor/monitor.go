@@ -210,16 +210,41 @@ func (m *Monitor) rebuildOverview(vm ui.OverviewVM, cfg config.Config) {
 	if len(vm.LocalCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Local"))
 		for _, c := range vm.LocalCards {
-			objs = append(objs, components.NewSourceCard(c, cardBody(c, cfg)))
+			objs = append(objs, overviewSourceCard(c, overviewCardBody(c)))
 		}
 	}
 	if len(vm.RemoteCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Remote"))
 		for _, c := range vm.RemoteCards {
-			objs = append(objs, components.NewSourceCard(c, cardBody(c, cfg)))
+			objs = append(objs, overviewSourceCard(c, overviewCardBody(c)))
 		}
 	}
 	replaceObjects(m.overviewBox, objs...)
+}
+
+// overviewSourceCard wraps an overview card body in a title/status header.
+// No footer: Overview omits failure detail per S2_UI_UX.
+func overviewSourceCard(vm ui.OverviewCardVM, body fyne.CanvasObject) fyne.CanvasObject {
+	header := container.NewHBox(
+		widget.NewLabelWithStyle(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		layout.NewSpacer(),
+		widget.NewLabel(vm.Status),
+	)
+	return widget.NewCard("", "", container.NewVBox(header, body))
+}
+
+// overviewCardBody dispatches to the compact overview body builder.
+func overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
+	switch c.Kind {
+	case ui.OverviewMetrics:
+		return components.NewMetricsOverviewBody(c.Metrics)
+	case ui.OverviewRuntime:
+		return components.NewRuntimeOverviewBody(c.Runtime)
+	case ui.OverviewQuota:
+		return components.NewQuotaOverviewBody(c.Quota)
+	default:
+		return noDataYet()
+	}
 }
 
 func (m *Monitor) localTabObjects(cards []ui.CardVM, cfg config.Config) []fyne.CanvasObject {

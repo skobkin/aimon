@@ -341,15 +341,16 @@ func TestBuildOverviewOmitsDisabled(t *testing.T) {
 	}
 
 	gpu := vm.LocalCards[0]
-	if gpu.Kind != KindGPU || gpu.Title != "amdgputop-web" || gpu.Status != "5s ago" {
+	if gpu.Kind != OverviewMetrics || gpu.Title != "amdgputop-web" || gpu.Status != "5s ago" {
 		t.Errorf("gpu card = %+v", gpu)
 	}
-	mm := vm.RemoteCards[0]
-	if mm.Kind != KindNone || mm.Status != "Unavailable" {
-		t.Errorf("minimax card = %+v", mm)
+	if !gpu.Metrics.HasData {
+		t.Error("gpu metrics should have data")
 	}
-	if mm.Footer != "Last refresh failed: Connection failed" {
-		t.Errorf("minimax footer = %q", mm.Footer)
+
+	mm := vm.RemoteCards[0]
+	if mm.Kind != OverviewKind("") || mm.Status != "Unavailable" {
+		t.Errorf("minimax card = %+v", mm)
 	}
 }
 
@@ -438,5 +439,186 @@ func TestBuildQuotaVMResetText(t *testing.T) {
 	// UsedText unchanged.
 	if vm.Windows[0].UsedText != "17% used" {
 		t.Errorf("used text = %q", vm.Windows[0].UsedText)
+	}
+}
+
+func TestBuildMetricsOverview(t *testing.T) {
+	snap := gpuSnap()
+	vm := BuildMetricsOverview(snap)
+	if !vm.HasData {
+		t.Error("should have data")
+	}
+	if vm.GPU.Text != "GPU 74%" {
+		t.Errorf("GPU text = %q", vm.GPU.Text)
+	}
+	if vm.GPU.Fraction != 0.745 {
+		t.Errorf("GPU fraction = %v", vm.GPU.Fraction)
+	}
+	if vm.GPU.Level != MetricWarning {
+		t.Errorf("GPU level = %v", vm.GPU.Level)
+	}
+	if vm.VRAM.Text != "VRAM 13.8 / 16.0 GiB" {
+		t.Errorf("VRAM text = %q", vm.VRAM.Text)
+	}
+	if vm.Temp.Value != "63 °C" {
+		t.Errorf("Temp value = %q", vm.Temp.Value)
+	}
+
+	// Sparse: only GPU util.
+	sparse := domain.GPUSnapshot{GPUUtilizationPct: f(12)}
+	vm = BuildMetricsOverview(sparse)
+	if vm.GPU.Text == "" {
+		t.Error("GPU text should be set")
+	}
+	if vm.VRAM.Text != "" {
+		t.Error("VRAM text should be empty")
+	}
+	if vm.Temp.Value != "" {
+		t.Error("Temp value should be empty")
+	}
+
+	// Empty: no data.
+	vm = BuildMetricsOverview(domain.GPUSnapshot{})
+	if vm.HasData {
+		t.Error("empty snap should not have data")
+	}
+}
+
+func TestBuildRuntimeOverview(t *testing.T) {
+	// 0 models.
+	vm := BuildRuntimeOverview(domain.LlamaSwapSnapshot{})
+	if vm.Summary != "No models running" {
+		t.Errorf("summary = %q", vm.Summary)
+	}
+	if !vm.HasData {
+		t.Error("should have data even with 0 models")
+	}
+
+	// 1 model.
+	vm = BuildRuntimeOverview(domain.LlamaSwapSnapshot{
+		RunningModels: []domain.RunningModel{{ID: "m1", Name: "Qwen 3 14B"}},
+	})
+	if vm.Summary != "1 model running" {
+		t.Errorf("summary = %q", vm.Summary)
+	}
+	if len(vm.Names) != 1 || vm.Names[0] != "Qwen 3 14B" {
+		t.Errorf("names = %+v", vm.Names)
+	}
+	if vm.MoreCount != 0 {
+		t.Errorf("more = %d", vm.MoreCount)
+	}
+
+	// 3 models: show 2 names, +1 more.
+	vm = BuildRuntimeOverview(domain.LlamaSwapSnapshot{
+		RunningModels: []domain.RunningModel{
+			{ID: "m1", Name: "Qwen 3 14B"},
+			{ID: "m2", Name: "Gemma 3 4B"},
+			{ID: "m3"}, // no Name, falls back to ID
+		},
+	})
+	if vm.Summary != "3 models running" {
+		t.Errorf("summary = %q", vm.Summary)
+	}
+	if len(vm.Names) != 2 || vm.Names[1] != "Gemma 3 4B" {
+		t.Errorf("names = %+v", vm.Names)
+	}
+	if vm.MoreCount != 1 {
+		t.Errorf("more = %d", vm.MoreCount)
+	}
+}
+
+func TestBuildQuotaOverview(t *testing.T) {
+	reset := now.Add(2 * time.Hour)
+	snap := domain.QuotaSnapshot{
+		Windows: []domain.QuotaWindow{
+			{ID: "interval", Name: "5-hour", UsedFraction: 0.42, RemainingFraction: 0.58, ResetAt: &reset},
+			{ID: "weekly", Name: "Weekly", UsedFraction: 0.14, RemainingFraction: 0.86},
+		},
+	}
+
+	vm := BuildQuotaOverview(snap, now)
+	if !vm.HasData {
+		t.Error("should have data")
+	}
+	if len(vm.Windows) != 2 {
+		t.Fatalf("windows = %d, want 2", len(vm.Windows))
+	}
+	// 5h should be first (priority 0).
+	if vm.Windows[0].Label != "5h" {
+		t.Errorf("label[0] = %q", vm.Windows[0].Label)
+	}
+	if vm.Windows[0].PctText != "42%" {
+		t.Errorf("pct[0] = %q", vm.Windows[0].PctText)
+	}
+	if vm.Windows[0].ResetText != "2h0m" {
+		t.Errorf("reset[0] = %q", vm.Windows[0].ResetText)
+	}
+	if vm.Windows[1].Label != "week" {
+		t.Errorf("label[1] = %q", vm.Windows[1].Label)
+	}
+
+	// No windows.
+	vm = BuildQuotaOverview(domain.QuotaSnapshot{}, now)
+	if vm.HasData {
+		t.Error("no windows should not have data")
+	}
+}
+
+func TestShortLabelMapping(t *testing.T) {
+	cases := []struct {
+		id, name, want string
+	}{
+		{"interval", "5-hour", "5h"},
+		{"tokens-5h", "5-hour", "5h"},
+		{"credits-5h", "5-hour", "5h"},
+		{"weekly", "Weekly", "week"},
+		{"credits-weekly", "Weekly", "week"},
+		{"mcp-monthly", "Monthly", "month"},
+		{"unknown-id", "Custom Plan", "Custom Plan"},
+	}
+	for _, c := range cases {
+		w := domain.QuotaWindow{ID: c.id, Name: c.name}
+		if got := shortLabel(w); got != c.want {
+			t.Errorf("shortLabel(%s) = %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
+func TestSelectHeadlineWindows(t *testing.T) {
+	windows := []domain.QuotaWindow{
+		{ID: "mcp-monthly", Name: "Monthly"},
+		{ID: "weekly", Name: "Weekly"},
+		{ID: "interval", Name: "5-hour"},
+	}
+
+	sel := selectHeadlineWindows(windows)
+	if len(sel) != 2 {
+		t.Fatalf("selected = %d, want 2", len(sel))
+	}
+	if sel[0].ID != "interval" {
+		t.Errorf("first = %q, want interval", sel[0].ID)
+	}
+	if sel[1].ID != "weekly" {
+		t.Errorf("second = %q, want weekly", sel[1].ID)
+	}
+
+	// Only one window.
+	sel = selectHeadlineWindows([]domain.QuotaWindow{
+		{ID: "mcp-monthly", Name: "Monthly"},
+	})
+	if len(sel) != 1 || sel[0].ID != "mcp-monthly" {
+		t.Errorf("single = %+v", sel)
+	}
+}
+
+func TestOverviewPctTextNoUsed(t *testing.T) {
+	if got := formatPctOnly(0.14); got != "14%" {
+		t.Errorf("formatPctOnly(0.14) = %q, want \"14%%\"", got)
+	}
+	if got := formatPctOnly(0.0); got != "0%" {
+		t.Errorf("formatPctOnly(0) = %q, want \"0%%\"", got)
+	}
+	if got := formatPctOnly(1.0); got != "100%" {
+		t.Errorf("formatPctOnly(1) = %q, want \"100%%\"", got)
 	}
 }
