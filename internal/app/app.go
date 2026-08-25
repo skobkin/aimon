@@ -114,7 +114,7 @@ func New() (*App, error) {
 	// at refresh time): built once, never rebuilt.
 	a.mmAdapter = minimax.New(creds, client, logger)
 
-	a.monitor = monitor.NewMonitor(fa, a)
+	a.monitor = monitor.NewMonitor(fa, a, a.done)
 	a.settings = settings.NewSettings(fa, settings.Deps{
 		LoadConfig: a.Config,
 		OnSave:     a.onSaveConfig,
@@ -143,7 +143,7 @@ func New() (*App, error) {
 		}
 		fyne.Do(a.monitor.OnStatesChanged)
 	})
-	a.monitor.StartTicker(a.done)
+	a.monitor.StartTicker()
 	return a, nil
 }
 

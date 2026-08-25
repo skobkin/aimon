@@ -38,6 +38,10 @@ type Monitor struct {
 	ctrl MonitorController
 	win  fyne.Window
 
+	// done closes when the app begins quitting; background work scheduled
+	// by the monitor bails out instead of touching the dying UI.
+	done <-chan struct{}
+
 	overviewBox *fyne.Container
 	localBox    *fyne.Container
 	remoteBox   *fyne.Container
@@ -49,9 +53,9 @@ type Monitor struct {
 }
 
 // NewMonitor builds the monitor window (hidden; tray-first startup shows
-// it on demand).
-func NewMonitor(a fyne.App, ctrl MonitorController) *Monitor {
-	m := &Monitor{ctrl: ctrl}
+// it on demand). done closes when the app begins quitting.
+func NewMonitor(a fyne.App, ctrl MonitorController, done <-chan struct{}) *Monitor {
+	m := &Monitor{ctrl: ctrl, done: done}
 
 	var win fyne.Window
 	if d, ok := a.Driver().(desktop.Driver); ok {
@@ -136,14 +140,14 @@ func (m *Monitor) isVisible() bool {
 func (m *Monitor) OnStatesChanged() { m.rebuild() }
 
 // StartTicker re-renders relative ages ("5s ago") once a second while the
-// window is visible. It exits when done closes.
-func (m *Monitor) StartTicker(done <-chan struct{}) {
+// window is visible. It exits when the app begins quitting.
+func (m *Monitor) StartTicker() {
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-done:
+			case <-m.done:
 				return
 			case <-ticker.C:
 				if !m.isVisible() {
@@ -162,6 +166,14 @@ func (m *Monitor) onRefresh() {
 	m.ctrl.RefreshAll()
 	m.refreshBtn.Disable()
 	time.AfterFunc(time.Second, func() {
+		// Once the app is quitting the event loop is gone: fyne.Do would
+		// either run the callback inline on this timer goroutine or race
+		// the loop's queue teardown. Leave the dead UI alone.
+		select {
+		case <-m.done:
+			return
+		default:
+		}
 		fyne.Do(m.refreshBtn.Enable)
 	})
 }

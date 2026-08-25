@@ -24,7 +24,9 @@ func (stubCtrl) OpenSettings()                              {}
 // guards that structure against regression.
 func TestActionsOverlayKeepsButtonHeight(t *testing.T) {
 	app := test.NewApp()
-	m := NewMonitor(app, stubCtrl{})
+	done := make(chan struct{})
+	defer close(done)
+	m := NewMonitor(app, stubCtrl{}, done)
 	m.Window().Resize(monitorSize)
 
 	got := m.refreshBtn.Size().Height
