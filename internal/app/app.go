@@ -64,9 +64,10 @@ type App struct {
 	monitor  *monitor.Monitor
 	settings *settings.Settings
 
-	done    chan struct{}
-	running atomic.Bool
-	unsub   func()
+	done     chan struct{}
+	running  atomic.Bool
+	unsub    func()
+	trayEnd  func()
 
 	mu  sync.RWMutex // guards cfg and the adapters
 	cfg config.Config
@@ -184,6 +185,15 @@ func (a *App) Run() {
 
 // setupTray installs the tray icon and menu. Without a desktop driver
 // (off-desktop run) the monitor window shows at startup instead.
+//
+// The native systray is managed directly via the systray package rather
+// than through Fyne's SetSystemTrayMenu / SetSystemTrayWindow.  Fyne's
+// internal runSystray creates a real "SystrayMonitor" GLFW window (used
+// as a quit-detection sentinel); on Wayland the window is created with
+// default visibility and Plasma adds it to the taskbar as a spurious
+// empty entry.  Building the menu ourselves avoids that window entirely
+// while keeping the same behaviour (left-click toggles the monitor,
+// right-click shows the context menu).
 func (a *App) setupTray() {
 	desk, ok := a.fyneApp.(desktop.App)
 	if !ok {
@@ -191,47 +201,83 @@ func (a *App) setupTray() {
 		return
 	}
 	a.deskApp = desk
-	// Set before the tray registers: the StatusNotifierItem ToolTip
-	// property is read at registration (later calls update it live).
-	systray.SetTooltip("AI Monitor")
-	desk.SetSystemTrayWindow(a.monitor.Window())
-	desk.SetSystemTrayMenu(a.trayMenu())
+
+	start, end := systray.RunWithExternalLoop(func() {
+		// SetSystemTrayIcon handles SVG→PNG conversion and calls
+		// systray.SetIcon internally.
+		desk.SetSystemTrayIcon(resources.Icon())
+		systray.SetTooltip("AI Monitor")
+
+		// Some XDG systray implementations crash without a title.
+		title := a.fyneApp.Metadata().Name
+		if title == "" {
+			title = a.fyneApp.UniqueID()
+		}
+		systray.SetTitle(title)
+
+		// Left-click on the tray icon toggles the splash monitor window
+		// (show if hidden, hide if shown).
+		systray.SetOnTapped(func() {
+			fyne.Do(a.monitor.ToggleVisible)
+		})
+
+		a.rebuildTrayMenu()
+	}, func() {
+		// tear-down is handled by the end function (nativeEnd + Quit).
+	})
+	start()
+	a.trayEnd = end
 }
 
-// trayMenu builds the tray menu. The Open submenu lists the configured
-// sources' web UIs (the same destinations as the cards' buttons) and is
-// omitted entirely when no source is enabled.
-func (a *App) trayMenu() *fyne.Menu {
-	items := []*fyne.MenuItem{
-		fyne.NewMenuItem("Show Monitor", a.monitor.Show),
-		fyne.NewMenuItem("Refresh", a.mgr.RefreshAll),
-	}
+// rebuildTrayMenu tears down and rebuilds the systray context menu.
+// Safe to call from any goroutine (systray is internally synchronized).
+func (a *App) rebuildTrayMenu() {
+	systray.ResetMenu()
+
+	mShow := systray.AddMenuItem("Show Monitor", "")
+	mRefresh := systray.AddMenuItem("Refresh", "")
+
+	// Open submenu lists the configured sources' web UIs.
+	var mOpen *systray.MenuItem
 	if links := ui.SourceLinks(a.Config()); len(links) > 0 {
-		open := fyne.NewMenuItem("Open", nil)
-		open.ChildMenu = fyne.NewMenu("")
+		mOpen = systray.AddMenuItem("Open", "")
 		for _, l := range links {
 			link := l
-			open.ChildMenu.Items = append(open.ChildMenu.Items,
-				fyne.NewMenuItem(link.Label, a.openLink(link.URL)))
+			sub := mOpen.AddSubMenuItem(link.Label, "")
+			go func() {
+				for range sub.ClickedCh {
+					if u, err := url.Parse(link.URL); err == nil && u.Scheme != "" {
+						a.fyneApp.OpenURL(u)
+					}
+				}
+			}()
 		}
-		items = append(items, open)
 	}
-	items = append(items,
-		fyne.NewMenuItem("Settings", a.settings.Show),
-		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Quit", a.quit),
-	)
-	return fyne.NewMenu("AI Monitor", items...)
-}
 
-// openLink opens a source's web UI in the system browser (navigation
-// only). Malformed targets are ignored, like the card buttons.
-func (a *App) openLink(target string) func() {
-	return func() {
-		if u, err := url.Parse(target); err == nil && u.Scheme != "" {
-			a.fyneApp.OpenURL(u)
+	mSettings := systray.AddMenuItem("Settings", "")
+	systray.AddSeparator()
+	mQuit := systray.AddMenuItem("Quit", "")
+
+	go func() {
+		for range mShow.ClickedCh {
+			fyne.Do(a.monitor.Show)
 		}
-	}
+	}()
+	go func() {
+		for range mRefresh.ClickedCh {
+			a.mgr.RefreshAll()
+		}
+	}()
+	go func() {
+		for range mSettings.ClickedCh {
+			fyne.Do(a.settings.Show)
+		}
+	}()
+	go func() {
+		for range mQuit.ClickedCh {
+			a.quit()
+		}
+	}()
 }
 
 // Config implements monitor.MonitorController.
@@ -263,8 +309,7 @@ func (a *App) onSaveConfig(cfg config.Config) error {
 	a.applyConfig(cfg)
 	// The tray's Open submenu follows the enabled-source set.
 	if a.deskApp != nil {
-		menu := a.trayMenu()
-		fyne.Do(func() { a.deskApp.SetSystemTrayMenu(menu) })
+		a.rebuildTrayMenu()
 	}
 	return nil
 }
@@ -315,6 +360,9 @@ func (a *App) quit() {
 	a.unsub()
 	close(a.done)
 	a.mgr.Cancel()
+	if a.trayEnd != nil {
+		a.trayEnd()
+	}
 	a.fyneApp.Quit()
 }
 

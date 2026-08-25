@@ -123,6 +123,16 @@ func (m *Monitor) hide() {
 	m.win.Hide()
 }
 
+// ToggleVisible shows the window if hidden, or hides it if shown.
+// This is the standard left-click behaviour for a tray-controlled splash window.
+func (m *Monitor) ToggleVisible() {
+	if m.isVisible() {
+		m.hide()
+	} else {
+		m.Show()
+	}
+}
+
 func (m *Monitor) setVisible(v bool) {
 	m.mu.Lock()
 	m.visible = v
