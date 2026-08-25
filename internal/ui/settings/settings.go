@@ -54,6 +54,14 @@ type Settings struct {
 	deps Deps
 	win  fyne.Window
 
+	// ctx parents every background probe, test and credential removal;
+	// it is cancelled when the app begins quitting (deps.Done) so
+	// in-flight work aborts instead of running out its timeout against a
+	// dying app. Saves deliberately do not derive from it: a save the
+	// user requested must persist even when it races Quit.
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// amdgputop-web
 	amdEnabled   *widget.Check
 	amdURL       *widget.Entry
@@ -111,7 +119,16 @@ func newCredRow(account credentials.AccountID) credRow {
 
 // NewSettings builds the window (hidden until Show).
 func NewSettings(a fyne.App, deps Deps) *Settings {
-	s := &Settings{deps: deps}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Settings{deps: deps, ctx: ctx, cancel: cancel}
+	// Cancel the root as soon as the app begins quitting.
+	go func() {
+		select {
+		case <-deps.Done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
 	s.amdEnabled = widget.NewCheck("Enabled", nil)
 	s.amdURL = widget.NewEntry()
@@ -276,7 +293,7 @@ func (s *Settings) reset() {
 func (s *Settings) probeKeychain() {
 	s.keychainLabel.SetText("Checking keychain…")
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		ctx, cancel := context.WithTimeout(s.ctx, testTimeout)
 		defer cancel()
 
 		status := s.deps.Creds.Status(ctx)
@@ -337,7 +354,7 @@ func (s *Settings) wireRemove(row credRow) {
 	row.remove.OnTapped = func() {
 		row.remove.Disable()
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			ctx, cancel := context.WithTimeout(s.ctx, testTimeout)
 			defer cancel()
 			err := s.deps.Creds.Delete(ctx, row.account)
 			if s.closing() {
@@ -438,7 +455,7 @@ func (s *Settings) testAMDGPU() {
 	s.amdTestLabel.SetText("Testing…")
 	base := s.amdURL.Text
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		ctx, cancel := context.WithTimeout(s.ctx, testTimeout)
 		defer cancel()
 		gpus, err := s.deps.TestAMDGPU(ctx, base)
 		if s.closing() {
@@ -478,7 +495,7 @@ func (s *Settings) testZAI() {
 func (s *Settings) runTest(label *widget.Label, test func(ctx context.Context) error) {
 	label.SetText("Testing…")
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		ctx, cancel := context.WithTimeout(s.ctx, testTimeout)
 		defer cancel()
 		err := test(ctx)
 		if s.closing() {
