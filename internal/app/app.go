@@ -252,9 +252,14 @@ func (a *App) OpenSettings() { a.settings.Show() }
 
 // onSaveConfig persists the config and reconfigures the manager. It runs
 // on the Settings save goroutine, never on the UI thread (Apply may wait
-// out a request timeout).
+// out a request timeout). A save racing Quit still persists, but skips
+// reconfiguring an already-cancelled manager and poking the tray through
+// a dying event loop.
 func (a *App) onSaveConfig(cfg config.Config) error {
 	a.repo.Save(cfg)
+	if !a.running.Load() {
+		return nil
+	}
 	a.applyConfig(cfg)
 	// The tray's Open submenu follows the enabled-source set.
 	if a.deskApp != nil {
