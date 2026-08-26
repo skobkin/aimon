@@ -141,7 +141,6 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 
 	e.saveBtn = widget.NewButtonWithIcon("Save", theme.ConfirmIcon(), e.onSave)
 	e.cancelBtn = widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), func() { e.close() })
-	bottom := container.NewHBox(e.cancelBtn, e.saveBtn)
 
 	title := "Add source"
 	if !isNew {
@@ -150,7 +149,10 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	e.dlg = dialog.NewCustomWithoutButtons(title, container.NewVBox(
 		form,
 		widget.NewSeparator(),
-		container.NewHBox(container.NewHScroll(bottom)),
+		// A grid row stretches the two buttons across the full content
+		// width. An HBox shrinks them to their minimum, and an HScroll
+		// wrapper collapses the whole row to the scrollbar strip.
+		container.NewGridWithColumns(2, e.cancelBtn, e.saveBtn),
 	), s.win)
 	e.dlg.Show()
 	s.probeEditorKeychain(e)
