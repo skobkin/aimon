@@ -24,10 +24,14 @@ const (
 	metricBarPillPadX = 6
 	// metricBarPillPadY is the vertical padding inside the pill.
 	metricBarPillPadY = 2
+	// metricBarPillInset is the minimum gap kept between the pill and the
+	// bar's top and bottom when the padded text would otherwise touch them.
+	metricBarPillInset = 1
 )
 
-// pillBg is a semi-transparent dark background for the label pill.
-var pillBg = color.RGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x99}
+// pillBg is a semi-transparent neutral background for the label pill,
+// translucent enough to read as a tint over both the fill and the track.
+var pillBg = color.RGBA{R: 0x00, G: 0x00, B: 0x00, A: 0x66}
 
 // pillText is white text inside the pill.
 var pillText = color.RGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
@@ -102,36 +106,46 @@ func (r *metricBarRenderer) MinSize() fyne.Size {
 }
 
 func (r *metricBarRenderer) Layout(size fyne.Size) {
-	// Track fills the full bar area.
+	// Track and fill cover the complete bar bounds.
 	r.track.Move(fyne.NewPos(0, 0))
-	r.track.Resize(fyne.NewSize(size.Width, metricBarHeight))
+	r.track.Resize(size)
 
-	// Fill covers the used fraction.
 	fillW := size.Width * float32(r.bar.fraction)
 	r.fill.Move(fyne.NewPos(0, 0))
-	r.fill.Resize(fyne.NewSize(fillW, metricBarHeight))
+	r.fill.Resize(fyne.NewSize(fillW, size.Height))
 
-	// Pill: measure text, add padding, center in bar.
+	// Pill and text share one centered geometry.
 	r.pillLabel.Text = r.bar.text
 	textSize := r.pillLabel.MinSize()
-	pillW := textSize.Width + 2*float32(metricBarPillPadX)
-	pillH := textSize.Height + 2*float32(metricBarPillPadY)
+	pillPos, pillSize, textPos := pillGeometry(size, textSize)
+	r.pillBg.Move(pillPos)
+	r.pillBg.Resize(pillSize)
+	r.pillLabel.Move(textPos)
+	r.pillLabel.Resize(textSize)
+}
 
-	// Cap pill to bar width.
-	if pillW > size.Width {
-		pillW = size.Width
+// pillGeometry centers the label pill and its text inside the complete bar
+// bounds. The pill keeps at least metricBarPillInset to the bar's top and
+// bottom even when the padded text would touch the edges, and its width is
+// capped at the bar width; the text stays centered in the bar regardless, so
+// a clamped pill may sit slightly inside its text.
+func pillGeometry(bar, text fyne.Size) (pillPos fyne.Position, pillSize fyne.Size, textPos fyne.Position) {
+	pillW := text.Width + 2*float32(metricBarPillPadX)
+	if pillW > bar.Width {
+		pillW = bar.Width
+	}
+	pillH := text.Height + 2*float32(metricBarPillPadY)
+	if maxH := bar.Height - 2*float32(metricBarPillInset); pillH > maxH {
+		pillH = maxH
+	}
+	if pillH < 0 {
+		pillH = 0
 	}
 
-	pillX := (size.Width - pillW) / 2
-	pillY := (metricBarHeight - pillH) / 2
-	r.pillBg.Move(fyne.NewPos(pillX, pillY))
-	r.pillBg.Resize(fyne.NewSize(pillW, pillH))
-
-	// Text centered inside the pill.
-	textX := pillX + (pillW-textSize.Width)/2
-	textY := pillY + (pillH-textSize.Height)/2
-	r.pillLabel.Move(fyne.NewPos(textX, textY))
-	r.pillLabel.Resize(textSize)
+	pillPos = fyne.NewPos((bar.Width-pillW)/2, (bar.Height-pillH)/2)
+	pillSize = fyne.NewSize(pillW, pillH)
+	textPos = fyne.NewPos((bar.Width-text.Width)/2, (bar.Height-text.Height)/2)
+	return pillPos, pillSize, textPos
 }
 
 func (r *metricBarRenderer) Refresh() {
