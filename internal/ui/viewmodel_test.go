@@ -86,8 +86,10 @@ func TestFormatUsedRounding(t *testing.T) {
 		{0.28, "28% used"},
 		{0.586, "59% used"}, // rounds to nearest
 		{0.0, "0% used"},
+		{0.004, "<1% used"}, // positive but rounds to zero
+		{0.005, "1% used"},  // the exact half boundary rounds up, no "<1%"
 		{1.0, "100% used"},
-		{-0.5, "0% used"}, // clamped
+		{-0.5, "0% used"}, // clamped, not positive usage
 		{1.5, "100% used"},
 	}
 	for _, c := range cases {
@@ -751,6 +753,9 @@ func TestOverviewPctTextNoUsed(t *testing.T) {
 	}
 	if got := formatPctOnly(0.0); got != "0%" {
 		t.Errorf("formatPctOnly(0) = %q, want \"0%%\"", got)
+	}
+	if got := formatPctOnly(0.004); got != "<1%" {
+		t.Errorf("formatPctOnly(0.004) = %q, want \"<1%%\"", got)
 	}
 	if got := formatPctOnly(1.0); got != "100%" {
 		t.Errorf("formatPctOnly(1) = %q, want \"100%%\"", got)

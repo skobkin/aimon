@@ -407,9 +407,15 @@ func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 	return sorted
 }
 
-// formatPctOnly renders a percentage without the "used" suffix.
+// formatPctOnly renders the rounded used percentage without the "used"
+// suffix. A positive usage that rounds to 0% reads "<1%" so real usage
+// never displays as zero; only true zero shows "0%".
 func formatPctOnly(fraction float64) string {
-	return fmt.Sprintf("%d%%", int(math.Round(domain.Clamp01(fraction)*100)))
+	pct := int(math.Round(domain.Clamp01(fraction) * 100))
+	if pct == 0 && fraction > 0 {
+		return "<1%"
+	}
+	return fmt.Sprintf("%d%%", pct)
 }
 
 // FreshnessText renders the per-source freshness label (DECISIONS D7).
@@ -636,8 +642,9 @@ func FormatAge(t, now time.Time) string {
 }
 
 // FormatUsed renders the NN% used label (used-oriented quota display).
+// Sub-rounding usage reads "<1% used"; only true zero shows "0% used".
 func FormatUsed(fraction float64) string {
-	return fmt.Sprintf("%d%% used", int(math.Round(domain.Clamp01(fraction)*100)))
+	return formatPctOnly(fraction) + " used"
 }
 
 // FormatBytesGiB renders a byte count in GiB with one decimal.
