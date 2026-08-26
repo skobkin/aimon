@@ -3,13 +3,20 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // TestMetadataMirrorsFyneAppToml guards the duplication between
@@ -107,5 +114,77 @@ func TestOverrideStoreDelegatesOtherAccounts(t *testing.T) {
 	got, err := o.Get(context.Background(), credentials.AccountMiniMax)
 	if err != nil || got != "stored-value" {
 		t.Errorf("Get for other account = %q, %v; want stored-value", got, err)
+	}
+}
+
+func TestReadOnlyStoreRejectsMutations(t *testing.T) {
+	r := readOnlyStore{inner: &memStore{secret: "stored-value"}}
+
+	if got, err := r.Get(context.Background(), "any"); err != nil || got != "stored-value" {
+		t.Errorf("Get must delegate: %q, %v", got, err)
+	}
+	if err := r.Set(context.Background(), "any", "x"); err == nil {
+		t.Error("Set must be rejected")
+	}
+	if err := r.Delete(context.Background(), "any"); err == nil {
+		t.Error("Delete must be rejected")
+	}
+	if got, err := r.Get(context.Background(), "any"); err != nil || got != "stored-value" {
+		t.Errorf("rejected mutations must leave the store untouched: %q, %v", got, err)
+	}
+}
+
+// gpuInst builds a minimal valid amdgputop-web instance.
+func gpuInst(id, name, baseURL string, enabled bool) config.SourceInstance {
+	return config.SourceInstance{
+		ID:           domain.InstanceID(id),
+		Kind:         domain.KindAMDGPUWeb,
+		Name:         name,
+		Enabled:      enabled,
+		PollInterval: time.Hour, // no scheduled churn during the test
+		AMDGPUWeb:    &config.AMDGPUWebSettings{BaseURL: baseURL},
+	}
+}
+
+// Rename, reorder and enable/disable must reuse the built adapter (so the
+// manager never restarts the poller); a material settings change must
+// rebuild it (so the manager clears the old endpoint's snapshot).
+func TestApplyInstancesAdapterReuseAndRebuild(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := &App{
+		log:      logger,
+		client:   &http.Client{},
+		creds:    &memStore{},
+		mgr:      source.NewManager(logger),
+		adapters: map[domain.InstanceID]adapterEntry{},
+	}
+	defer a.mgr.Stop()
+
+	a.applyInstances([]config.SourceInstance{
+		gpuInst("gpu-a", "Old name", "http://127.0.0.1:49001", true),
+		gpuInst("gpu-b", "GPU B", "http://127.0.0.1:49002", true),
+	})
+	first := a.adapters["gpu-a"].src
+
+	a.applyInstances([]config.SourceInstance{
+		gpuInst("gpu-b", "GPU B renamed", "http://127.0.0.1:49002", false), // reordered first
+		gpuInst("gpu-a", "New name", "http://127.0.0.1:49001", true),       // renamed
+	})
+	if a.adapters["gpu-a"].src != first {
+		t.Error("rename/reorder/enable changes must reuse the adapter (no poller restart)")
+	}
+
+	// Material settings change: a new adapter pointer, which the manager
+	// treats as a reset-worthy reconfiguration.
+	a.applyInstances([]config.SourceInstance{
+		gpuInst("gpu-a", "New name", "http://127.0.0.1:49003", true),
+	})
+	if a.adapters["gpu-a"].src == first {
+		t.Error("a settings change must rebuild the adapter")
+	}
+
+	// The authoritative list follows the last applied one.
+	if got := a.Instances(); len(got) != 1 || got[0].ID != "gpu-a" {
+		t.Errorf("Instances() = %+v, want only gpu-a", got)
 	}
 }

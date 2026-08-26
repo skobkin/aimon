@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
@@ -131,10 +132,10 @@ type QuotaOverviewVM struct {
 
 // OverviewCardVM is one card in the Overview tab.
 type OverviewCardVM struct {
-	ID     domain.SourceKind
-	Kind   OverviewKind
-	Title  string
-	Status string
+	Instance domain.InstanceID
+	Kind     OverviewKind
+	Title    string
+	Status   string
 
 	Metrics MetricsOverviewVM
 	Runtime RuntimeOverviewVM
@@ -145,11 +146,11 @@ type OverviewCardVM struct {
 // ("5s ago", "1m ago · stale", "Unavailable", "Loading…"); Footer carries
 // the last refresh failure for Stale/Unavailable cards.
 type CardVM struct {
-	ID     domain.SourceKind
-	Kind   CardKind
-	Title  string
-	Status string
-	Footer string
+	Instance domain.InstanceID
+	Kind     CardKind
+	Title    string
+	Status   string
+	Footer   string
 
 	GPU   GPUVM
 	Swap  SwapVM
@@ -163,102 +164,132 @@ type OverviewVM struct {
 	NothingEnabled bool
 }
 
-// localOrder and remoteOrder fix the card order within each category.
-var (
-	localOrder  = []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap}
-	remoteOrder = []domain.SourceKind{domain.KindMiniMax, domain.KindZAI}
-)
-
 // overviewSwapLines caps the model list on the overview card.
 const overviewSwapLines = 3
 
-// BuildOverview derives the overview tab from the current runtimes.
-// Disabled sources are omitted entirely; enabled ones appear even before
+// BuildOverview derives the overview tab from the configured instances and
+// their runtimes. Cards follow the configured order within each category;
+// disabled instances are omitted entirely; enabled ones appear even before
 // their first snapshot lands.
-func BuildOverview(states map[domain.SourceKind]domain.Runtime, now time.Time) OverviewVM {
+func BuildOverview(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, now time.Time) OverviewVM {
 	vm := OverviewVM{
-		LocalCards:  buildOverviewCards(localOrder, states, now),
-		RemoteCards: buildOverviewCards(remoteOrder, states, now),
+		LocalCards:  buildOverviewCards(instances, domain.CategoryLocal, states, now),
+		RemoteCards: buildOverviewCards(instances, domain.CategoryRemote, states, now),
 	}
 	vm.NothingEnabled = len(vm.LocalCards) == 0 && len(vm.RemoteCards) == 0
 	return vm
 }
 
-func buildOverviewCards(order []domain.SourceKind, states map[domain.SourceKind]domain.Runtime, now time.Time) []OverviewCardVM {
-	cards := make([]OverviewCardVM, 0, len(order))
-	for _, id := range order {
-		rt, ok := states[id]
+func buildOverviewCards(instances []config.SourceInstance, category domain.Category, states map[domain.InstanceID]domain.Runtime, now time.Time) []OverviewCardVM {
+	cards := make([]OverviewCardVM, 0, len(instances))
+	for _, inst := range instances {
+		if inst.Kind.Category() != category {
+			continue
+		}
+		rt, ok := states[inst.ID]
 		if !ok || !rt.Enabled {
 			continue
 		}
-		cards = append(cards, BuildOverviewCard(id, rt, now))
+		cards = append(cards, BuildOverviewCard(inst, rt, now))
 	}
 	return cards
 }
 
 // BuildLocalTab derives the local tab cards (full detail bodies).
-func BuildLocalTab(states map[domain.SourceKind]domain.Runtime, now time.Time) []CardVM {
-	return buildCards(localOrder, states, now, true)
+func BuildLocalTab(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, now time.Time) []CardVM {
+	return buildCards(instances, domain.CategoryLocal, states, now)
 }
 
 // BuildRemoteTab derives the remote tab cards (full detail bodies).
-func BuildRemoteTab(states map[domain.SourceKind]domain.Runtime, now time.Time) []CardVM {
-	return buildCards(remoteOrder, states, now, true)
+func BuildRemoteTab(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, now time.Time) []CardVM {
+	return buildCards(instances, domain.CategoryRemote, states, now)
 }
 
-func buildCards(order []domain.SourceKind, states map[domain.SourceKind]domain.Runtime, now time.Time, detail bool) []CardVM {
-	cards := make([]CardVM, 0, len(order))
-	for _, id := range order {
-		rt, ok := states[id]
+func buildCards(instances []config.SourceInstance, category domain.Category, states map[domain.InstanceID]domain.Runtime, now time.Time) []CardVM {
+	cards := make([]CardVM, 0, len(instances))
+	for _, inst := range instances {
+		if inst.Kind.Category() != category {
+			continue
+		}
+		rt, ok := states[inst.ID]
 		if !ok || !rt.Enabled {
 			continue
 		}
-		cards = append(cards, BuildCard(id, rt, now, detail))
+		cards = append(cards, BuildCard(inst, rt, now, true))
 	}
 	return cards
 }
 
-// BuildCard derives one source card.
-func BuildCard(id domain.SourceKind, rt domain.Runtime, now time.Time, detail bool) CardVM {
+// cardKind maps the configured kind onto the card body kind. It comes from
+// the configuration, not the snapshot, so a card presents its configured
+// kind even before the first snapshot lands.
+func cardKind(kind domain.SourceKind) CardKind {
+	switch kind {
+	case domain.KindAMDGPUWeb:
+		return KindGPU
+	case domain.KindLlamaSwap:
+		return KindSwap
+	case domain.KindMiniMax, domain.KindZAI:
+		return KindQuota
+	default:
+		return KindNone
+	}
+}
+
+// overviewKind maps the configured kind onto the overview card kind.
+func overviewKind(kind domain.SourceKind) OverviewKind {
+	switch kind {
+	case domain.KindAMDGPUWeb:
+		return OverviewMetrics
+	case domain.KindLlamaSwap:
+		return OverviewRuntime
+	case domain.KindMiniMax, domain.KindZAI:
+		return OverviewQuota
+	default:
+		return OverviewKind("")
+	}
+}
+
+// BuildCard derives one source card. The title is the instance's
+// user-chosen name; the body is filled only when a snapshot of the
+// matching type has landed.
+func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, detail bool) CardVM {
 	card := CardVM{
-		ID:     id,
-		Kind:   KindNone,
-		Title:  id.DisplayName(),
-		Status: FreshnessText(rt, now),
-		Footer: FooterText(rt),
+		Instance: inst.ID,
+		Kind:     cardKind(inst.Kind),
+		Title:    inst.Name,
+		Status:   FreshnessText(rt, now),
+		Footer:   FooterText(rt),
 	}
 
 	switch snap := rt.Snapshot.(type) {
 	case domain.GPUSnapshot:
-		card.Kind = KindGPU
 		card.GPU = BuildGPUVM(snap, detail)
 	case domain.LlamaSwapSnapshot:
-		card.Kind = KindSwap
 		card.Swap = BuildSwapVM(snap, detail)
 	case domain.QuotaSnapshot:
-		card.Kind = KindQuota
 		card.Quota = BuildQuotaVM(snap, now, detail)
 	}
 	return card
 }
 
-// BuildOverviewCard derives one overview card from a runtime.
-func BuildOverviewCard(id domain.SourceKind, rt domain.Runtime, now time.Time) OverviewCardVM {
+// BuildOverviewCard derives one overview card from an instance and its
+// runtime. The title is the instance's user-chosen name; the body is
+// filled only when a snapshot of the matching type has landed.
+func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.Time) OverviewCardVM {
 	card := OverviewCardVM{
-		ID:     id,
-		Title:  id.DisplayName(),
-		Status: FreshnessText(rt, now),
+		Instance: inst.ID,
+		Kind:     overviewKind(inst.Kind),
+		Title:    inst.Name,
+		Status:   FreshnessText(rt, now),
 	}
 
 	switch snap := rt.Snapshot.(type) {
 	case domain.GPUSnapshot:
-		card.Kind = OverviewMetrics
 		card.Metrics = BuildMetricsOverview(snap)
 	case domain.LlamaSwapSnapshot:
-		card.Kind = OverviewRuntime
 		card.Runtime = BuildRuntimeOverview(snap)
 	case domain.QuotaSnapshot:
-		card.Kind = OverviewQuota
 		card.Quota = BuildQuotaOverview(snap, now)
 	}
 	return card

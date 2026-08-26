@@ -38,22 +38,6 @@ func (kind SourceKind) Category() Category {
 	}
 }
 
-// DisplayName returns the kind's human-readable default name used in cards
-// and settings.
-func (kind SourceKind) DisplayName() string {
-	switch kind {
-	case KindAMDGPUWeb:
-		return "amdgputop-web"
-	case KindLlamaSwap:
-		return "llama-swap"
-	case KindMiniMax:
-		return "MiniMax"
-	case KindZAI:
-		return "Z.AI / GLM"
-	}
-	return string(kind)
-}
-
 // InstanceID is the stable opaque identity of one configured source
 // instance. It is generated once when the instance is created and survives
 // rename, reorder, enable/disable, and application restarts. It keys

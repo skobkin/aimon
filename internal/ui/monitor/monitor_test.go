@@ -12,8 +12,8 @@ import (
 // stubCtrl is the minimal controller for building the real window.
 type stubCtrl struct{}
 
-func (stubCtrl) States() map[domain.SourceKind]domain.Runtime { return nil }
-func (stubCtrl) Config() config.Config                        { return config.Default() }
+func (stubCtrl) Instances() []config.SourceInstance           { return nil }
+func (stubCtrl) States() map[domain.InstanceID]domain.Runtime { return nil }
 func (stubCtrl) RefreshAll()                                  {}
 func (stubCtrl) OpenSettings()                                {}
 

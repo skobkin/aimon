@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
@@ -11,6 +12,29 @@ import (
 func f(v float64) *float64         { return &v }
 func u(v uint64) *uint64           { return &v }
 func ts(d time.Duration) time.Time { return time.Unix(1770000000, 0).Add(-d) }
+
+// inst builds a minimal valid instance for view-model tests; the provider
+// settings are placeholders the view models never read.
+func inst(id, name string, kind domain.SourceKind, enabled bool) config.SourceInstance {
+	i := config.SourceInstance{
+		ID:           domain.InstanceID(id),
+		Kind:         kind,
+		Name:         name,
+		Enabled:      enabled,
+		PollInterval: 5 * time.Second,
+	}
+	switch kind {
+	case domain.KindAMDGPUWeb:
+		i.AMDGPUWeb = &config.AMDGPUWebSettings{BaseURL: "http://127.0.0.1:9990"}
+	case domain.KindLlamaSwap:
+		i.LlamaSwap = &config.LlamaSwapSettings{BaseURL: "http://127.0.0.1:9991"}
+	case domain.KindMiniMax:
+		i.MiniMax = &config.MiniMaxSettings{}
+	case domain.KindZAI:
+		i.ZAI = &config.ZAISettings{BaseURL: "https://api.z.ai"}
+	}
+	return i
+}
 
 var now = time.Unix(1770000000, 0)
 
@@ -323,13 +347,18 @@ func TestBuildQuotaVM(t *testing.T) {
 }
 
 func TestBuildOverviewOmitsDisabled(t *testing.T) {
-	states := map[domain.SourceKind]domain.Runtime{
-		domain.KindAMDGPUWeb: {Enabled: true, LastSuccessAt: ts(5 * time.Second), Snapshot: gpuSnap()},
-		domain.KindLlamaSwap: {Enabled: false},
-		domain.KindMiniMax:   {Enabled: true, LastError: &source.Error{Category: source.CatConnection, Detail: "refused"}},
+	instances := []config.SourceInstance{
+		inst("gpu1", "Main GPU", domain.KindAMDGPUWeb, true),
+		inst("swap1", "swap", domain.KindLlamaSwap, false),
+		inst("mm1", "MiniMax Personal", domain.KindMiniMax, true),
+	}
+	states := map[domain.InstanceID]domain.Runtime{
+		"gpu1":  {Enabled: true, LastSuccessAt: ts(5 * time.Second), Snapshot: gpuSnap()},
+		"swap1": {Enabled: false},
+		"mm1":   {Enabled: true, LastError: &source.Error{Category: source.CatConnection, Detail: "refused"}},
 	}
 
-	vm := BuildOverview(states, now)
+	vm := BuildOverview(instances, states, now)
 	if len(vm.LocalCards) != 1 {
 		t.Fatalf("local cards = %d, want 1 (llama-swap disabled)", len(vm.LocalCards))
 	}
@@ -341,7 +370,7 @@ func TestBuildOverviewOmitsDisabled(t *testing.T) {
 	}
 
 	gpu := vm.LocalCards[0]
-	if gpu.Kind != OverviewMetrics || gpu.Title != "amdgputop-web" || gpu.Status != "5s ago" {
+	if gpu.Instance != "gpu1" || gpu.Kind != OverviewMetrics || gpu.Title != "Main GPU" || gpu.Status != "5s ago" {
 		t.Errorf("gpu card = %+v", gpu)
 	}
 	if !gpu.Metrics.HasData {
@@ -349,47 +378,100 @@ func TestBuildOverviewOmitsDisabled(t *testing.T) {
 	}
 
 	mm := vm.RemoteCards[0]
-	if mm.Kind != OverviewKind("") || mm.Status != "Unavailable" {
+	// Kind comes from the configuration, so a quota card presents as quota
+	// even before its first snapshot; the body reports no data.
+	if mm.Kind != OverviewQuota || mm.Status != "Unavailable" || mm.Quota.HasData {
 		t.Errorf("minimax card = %+v", mm)
 	}
 }
 
 func TestBuildOverviewNothingEnabled(t *testing.T) {
-	vm := BuildOverview(map[domain.SourceKind]domain.Runtime{}, now)
+	vm := BuildOverview(nil, map[domain.InstanceID]domain.Runtime{}, now)
 	if !vm.NothingEnabled {
 		t.Error("empty states must set NothingEnabled")
 	}
 
-	vm = BuildOverview(map[domain.SourceKind]domain.Runtime{
-		domain.KindZAI: {Enabled: false},
-	}, now)
+	vm = BuildOverview(
+		[]config.SourceInstance{inst("z1", "Z.AI", domain.KindZAI, true)},
+		map[domain.InstanceID]domain.Runtime{"z1": {Enabled: false}},
+		now,
+	)
 	if !vm.NothingEnabled {
 		t.Error("all-disabled must set NothingEnabled")
 	}
 }
 
-func TestBuildLocalAndRemoteTabs(t *testing.T) {
-	states := map[domain.SourceKind]domain.Runtime{
-		domain.KindLlamaSwap: {Enabled: true, LastSuccessAt: now, Snapshot: domain.LlamaSwapSnapshot{RunningModels: []domain.RunningModel{{ID: "m1"}}}},
-		domain.KindZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "5-hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
+// Spec §10: two same-kind instances both appear, in configured order, and
+// each carries its own instance identity and name; interleaved categories
+// still group into Local/Remote without reordering within a category.
+func TestBuildOverviewTwoSameKindAndConfiguredOrder(t *testing.T) {
+	instances := []config.SourceInstance{
+		inst("z1", "Z.AI work", domain.KindZAI, true),
+		inst("gpu1", "GPU server", domain.KindAMDGPUWeb, true),
+		inst("mm1", "MiniMax Personal", domain.KindMiniMax, true),
+		inst("mm2", "MiniMax Side", domain.KindMiniMax, true),
+	}
+	states := map[domain.InstanceID]domain.Runtime{
+		"z1":   {Enabled: true, LastSuccessAt: now},
+		"gpu1": {Enabled: true, LastSuccessAt: now},
+		"mm1":  {Enabled: true, LastSuccessAt: now},
+		"mm2":  {Enabled: true, LastSuccessAt: now},
 	}
 
-	local := BuildLocalTab(states, now)
-	if len(local) != 1 || local[0].Kind != KindSwap {
+	vm := BuildOverview(instances, states, now)
+	if len(vm.LocalCards) != 1 || vm.LocalCards[0].Title != "GPU server" {
+		t.Fatalf("local cards = %+v, want only GPU server", vm.LocalCards)
+	}
+	if len(vm.RemoteCards) != 3 {
+		t.Fatalf("remote cards = %d, want 3", len(vm.RemoteCards))
+	}
+	want := []struct{ id, title string }{
+		{"z1", "Z.AI work"},
+		{"mm1", "MiniMax Personal"},
+		{"mm2", "MiniMax Side"},
+	}
+	for i, w := range want {
+		c := vm.RemoteCards[i]
+		if c.Instance != domain.InstanceID(w.id) || c.Title != w.title {
+			t.Errorf("remote[%d] = (%s, %q), want (%s, %q)", i, c.Instance, c.Title, w.id, w.title)
+		}
+	}
+
+	remote := BuildRemoteTab(instances, states, now)
+	if len(remote) != 3 {
+		t.Fatalf("remote tab = %d cards, want 3", len(remote))
+	}
+	if remote[1].Instance != "mm1" || remote[2].Instance != "mm2" {
+		t.Errorf("same-kind instances missing from the remote tab: %+v", remote)
+	}
+}
+
+func TestBuildLocalAndRemoteTabs(t *testing.T) {
+	instances := []config.SourceInstance{
+		inst("swap1", "swap", domain.KindLlamaSwap, true),
+		inst("z1", "Z.AI", domain.KindZAI, true),
+	}
+	states := map[domain.InstanceID]domain.Runtime{
+		"swap1": {Enabled: true, LastSuccessAt: now, Snapshot: domain.LlamaSwapSnapshot{RunningModels: []domain.RunningModel{{ID: "m1"}}}},
+		"z1":    {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "5-hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
+	}
+
+	local := BuildLocalTab(instances, states, now)
+	if len(local) != 1 || local[0].Kind != KindSwap || local[0].Title != "swap" {
 		t.Fatalf("local tab = %+v", local)
 	}
-	remote := BuildRemoteTab(states, now)
-	if len(remote) != 1 || remote[0].Kind != KindQuota {
+	remote := BuildRemoteTab(instances, states, now)
+	if len(remote) != 1 || remote[0].Kind != KindQuota || remote[0].Title != "Z.AI" {
 		t.Fatalf("remote tab = %+v", remote)
 	}
 	if w := remote[0].Quota.Windows[0]; w.UsedText != "42% used" {
 		t.Errorf("used = %q", w.UsedText)
 	}
 
-	if got := BuildLocalTab(map[domain.SourceKind]domain.Runtime{}, now); len(got) != 0 {
+	if got := BuildLocalTab(nil, map[domain.InstanceID]domain.Runtime{}, now); len(got) != 0 {
 		t.Errorf("empty local tab = %+v", got)
 	}
-	if got := BuildRemoteTab(map[domain.SourceKind]domain.Runtime{}, now); len(got) != 0 {
+	if got := BuildRemoteTab(nil, map[domain.InstanceID]domain.Runtime{}, now); len(got) != 0 {
 		t.Errorf("empty remote tab = %+v", got)
 	}
 }

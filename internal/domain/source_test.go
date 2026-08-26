@@ -24,23 +24,6 @@ func TestSourceKindCategory(t *testing.T) {
 	}
 }
 
-func TestSourceKindDisplayName(t *testing.T) {
-	cases := []struct {
-		id   SourceKind
-		want string
-	}{
-		{KindAMDGPUWeb, "amdgputop-web"},
-		{KindLlamaSwap, "llama-swap"},
-		{KindMiniMax, "MiniMax"},
-		{KindZAI, "Z.AI / GLM"},
-	}
-	for _, tc := range cases {
-		if got := tc.id.DisplayName(); got != tc.want {
-			t.Errorf("%s.DisplayName() = %q, want %q", tc.id, got, tc.want)
-		}
-	}
-}
-
 func TestDeriveState(t *testing.T) {
 	snap := GPUSnapshot{CollectedAt: time.Now()}
 	err := errors.New("boom")

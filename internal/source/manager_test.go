@@ -68,20 +68,25 @@ func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func reg(src Source, enabled bool, interval time.Duration) map[domain.SourceKind]Registration {
-	return map[domain.SourceKind]Registration{
-		src.Kind(): {Source: src, Enabled: enabled, Interval: interval},
+func reg(id domain.InstanceID, src Source, enabled bool, interval time.Duration) map[domain.InstanceID]Registration {
+	return map[domain.InstanceID]Registration{
+		id: {Kind: src.Kind(), Source: src, Enabled: enabled, Interval: interval},
 	}
 }
 
+func snapOf(kind domain.SourceKind) domain.Snapshot {
+	return fakeSnap{id: kind, at: time.Now()}
+}
+
 func TestManagerStaleRetentionAndRecovery(t *testing.T) {
+	const inst = domain.InstanceID("minimax-1")
 	src := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindMiniMax, at: time.Now()}, nil
+		return snapOf(domain.KindMiniMax), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(src, true, 10*time.Millisecond))
+	m.Apply(reg(inst, src, true, 10*time.Millisecond))
 	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
 
 	// Fail everything afterwards.
@@ -89,11 +94,11 @@ func TestManagerStaleRetentionAndRecovery(t *testing.T) {
 		return nil, errors.New("provider down")
 	})
 	waitFor(t, 500*time.Millisecond, func() bool {
-		st := m.States()[domain.KindMiniMax]
+		st := m.States()[inst]
 		return st.LastError != nil
 	})
 
-	st := m.States()[domain.KindMiniMax]
+	st := m.States()[inst]
 	if st.Snapshot == nil {
 		t.Fatal("last successful snapshot must be retained after failures")
 	}
@@ -103,28 +108,29 @@ func TestManagerStaleRetentionAndRecovery(t *testing.T) {
 
 	// Recover.
 	src.setBehavior(func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindMiniMax, at: time.Now()}, nil
+		return snapOf(domain.KindMiniMax), nil
 	})
 	waitFor(t, 500*time.Millisecond, func() bool {
-		st := m.States()[domain.KindMiniMax]
+		st := m.States()[inst]
 		return st.LastError == nil
 	})
-	if got := m.States()[domain.KindMiniMax].DeriveState(); got != domain.StateHealthy {
+	if got := m.States()[inst].DeriveState(); got != domain.StateHealthy {
 		t.Errorf("state after recovery = %s, want Healthy", got)
 	}
 }
 
 func TestManagerNoOverlapAndCoalescing(t *testing.T) {
+	const inst = domain.InstanceID("zai-1")
 	// Long interval so scheduled ticks never fire; only manual triggers
 	// produce refreshes in the measurement window.
 	src := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
 		time.Sleep(120 * time.Millisecond)
-		return fakeSnap{id: domain.KindZAI, at: time.Now()}, nil
+		return snapOf(domain.KindZAI), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(src, true, 10*time.Second))
+	m.Apply(reg(inst, src, true, 10*time.Second))
 	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
 	time.Sleep(30 * time.Millisecond) // first refresh is now in flight
 
@@ -157,23 +163,23 @@ func TestManagerIndependentLoops(t *testing.T) {
 	var fastRefreshes atomic.Int64
 	slow := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
 		time.Sleep(400 * time.Millisecond) // blocks a full refresh
-		return fakeSnap{id: domain.KindMiniMax, at: time.Now()}, nil
+		return snapOf(domain.KindMiniMax), nil
 	})
 	fast := &fakeSource{
 		id:      domain.KindZAI,
 		timeout: 2 * time.Second,
 		behavior: func(ctx context.Context) (domain.Snapshot, error) {
 			fastRefreshes.Add(1)
-			return fakeSnap{id: domain.KindZAI, at: time.Now()}, nil
+			return snapOf(domain.KindZAI), nil
 		},
 	}
 
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(map[domain.SourceKind]Registration{
-		domain.KindMiniMax: {Source: slow, Enabled: true, Interval: 100 * time.Millisecond},
-		domain.KindZAI:     {Source: fast, Enabled: true, Interval: 20 * time.Millisecond},
+	m.Apply(map[domain.InstanceID]Registration{
+		domain.InstanceID("minimax-slow"): {Kind: domain.KindMiniMax, Source: slow, Enabled: true, Interval: 100 * time.Millisecond},
+		domain.InstanceID("zai-fast"):     {Kind: domain.KindZAI, Source: fast, Enabled: true, Interval: 20 * time.Millisecond},
 	})
 
 	time.Sleep(300 * time.Millisecond)
@@ -182,42 +188,97 @@ func TestManagerIndependentLoops(t *testing.T) {
 	}
 }
 
-func TestManagerDisabledSourceNeverRefreshes(t *testing.T) {
-	src := newFakeSource(domain.KindLlamaSwap, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindLlamaSwap, at: time.Now()}, nil
+func TestManagerTwoSameKindInstancesAreIndependent(t *testing.T) {
+	const (
+		instA = domain.InstanceID("mm-a")
+		instB = domain.InstanceID("mm-b")
+	)
+	a := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindMiniMax), nil
+	})
+	b := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindMiniMax), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(src, false, 10*time.Millisecond))
+	regs := func() map[domain.InstanceID]Registration {
+		return map[domain.InstanceID]Registration{
+			instA: {Kind: domain.KindMiniMax, Source: a, Enabled: true, Interval: 20 * time.Millisecond},
+			instB: {Kind: domain.KindMiniMax, Source: b, Enabled: true, Interval: 20 * time.Millisecond},
+		}
+	}
+	m.Apply(regs())
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return a.refreshes.Load() >= 1 && b.refreshes.Load() >= 1
+	})
+
+	states := m.States()
+	sa, okA := states[instA]
+	sb, okB := states[instB]
+	if !okA || !okB {
+		t.Fatalf("both same-kind instances need their own runtime: a=%v b=%v", okA, okB)
+	}
+	if sa.Snapshot == nil || sb.Snapshot == nil {
+		t.Error("both instances must collect snapshots independently")
+	}
+
+	// Removing one instance cancels only its loop; the other keeps polling,
+	// and the removed instance leaves no runtime state behind.
+	baseB := b.refreshes.Load()
+	only := regs()
+	delete(only, instA)
+	m.Apply(only)
+	waitFor(t, 500*time.Millisecond, func() bool { return b.refreshes.Load() > baseB })
+	if frozen := a.refreshes.Load(); frozen > 0 {
+		time.Sleep(120 * time.Millisecond)
+		if m2 := a.refreshes.Load(); m2 != frozen {
+			t.Error("removed instance's loop kept running")
+		}
+	}
+	if _, present := m.States()[instA]; present {
+		t.Error("removed instance must leave no runtime state behind")
+	}
+}
+
+func TestManagerDisabledSourceNeverRefreshes(t *testing.T) {
+	const inst = domain.InstanceID("swap-1")
+	src := newFakeSource(domain.KindLlamaSwap, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindLlamaSwap), nil
+	})
+	m := NewManager(quietLogger())
+	defer m.Stop()
+
+	m.Apply(reg(inst, src, false, 10*time.Millisecond))
 	time.Sleep(120 * time.Millisecond)
 
 	if src.refreshes.Load() != 0 {
 		t.Errorf("disabled source refreshed %d times", src.refreshes.Load())
 	}
 	// Apply with enabled=false and no prior loop creates no runtime at
-	// all; States() simply omits the source.
-	if _, present := m.States()[domain.KindLlamaSwap]; present {
+	// all; States() simply omits the instance.
+	if _, present := m.States()[inst]; present {
 		t.Errorf("disabled source unexpectedly has a runtime entry")
 	}
 }
 
 func TestManagerRestartPreservesSnapshot(t *testing.T) {
+	const inst = domain.InstanceID("gpu-1")
 	src := newFakeSource(domain.KindAMDGPUWeb, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindAMDGPUWeb, at: time.Now()}, nil
+		return snapOf(domain.KindAMDGPUWeb), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(src, true, 20*time.Millisecond))
+	m.Apply(reg(inst, src, true, 20*time.Millisecond))
 	waitFor(t, 500*time.Millisecond, func() bool {
-		return m.States()[domain.KindAMDGPUWeb].Snapshot != nil
+		return m.States()[inst].Snapshot != nil
 	})
 
 	// Interval change restarts the loop with the same runtime.
-	m.Apply(reg(src, true, 200*time.Millisecond))
+	m.Apply(reg(inst, src, true, 200*time.Millisecond))
 
-	st := m.States()[domain.KindAMDGPUWeb]
+	st := m.States()[inst]
 	if st.Snapshot == nil {
 		t.Fatal("snapshot lost across interval restart")
 	}
@@ -231,44 +292,81 @@ func TestManagerRestartPreservesSnapshot(t *testing.T) {
 	})
 }
 
-func TestManagerAdapterSwapRestarts(t *testing.T) {
-	first := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindZAI, at: time.Now()}, nil
-	})
-	second := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindZAI, at: time.Now()}, nil
+func TestManagerIdenticalApplyDoesNotRestart(t *testing.T) {
+	const inst = domain.InstanceID("gpu-1")
+	src := newFakeSource(domain.KindAMDGPUWeb, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindAMDGPUWeb), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(first, true, 20*time.Millisecond))
-	waitFor(t, 500*time.Millisecond, func() bool { return first.refreshes.Load() >= 1 })
+	// Long interval: after the initial refresh, no scheduled tick fires in
+	// the measurement window, so any extra refresh means a restart.
+	m.Apply(reg(inst, src, true, 500*time.Millisecond))
+	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
+	time.Sleep(50 * time.Millisecond)
 
-	m.Apply(reg(second, true, 20*time.Millisecond))
-	waitFor(t, 500*time.Millisecond, func() bool { return second.refreshes.Load() >= 1 })
-
-	if got := first.refreshes.Load(); got == 0 {
-		t.Error("first adapter never ran")
-	}
-	// Snapshot survives the swap.
-	if m.States()[domain.KindZAI].Snapshot == nil {
-		t.Error("snapshot lost across adapter swap")
+	base := src.refreshes.Load()
+	m.Apply(reg(inst, src, true, 500*time.Millisecond)) // identical re-Apply
+	time.Sleep(200 * time.Millisecond)
+	if got := src.refreshes.Load(); got != base {
+		t.Errorf("identical re-Apply restarted the loop (%d -> %d refreshes); rename/reorder must not disturb polling", base, got)
 	}
 }
 
-func TestManagerRemovesSourcesAbsentFromApply(t *testing.T) {
-	src := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindMiniMax, at: time.Now()}, nil
+func TestManagerAdapterSwapRestartsAndClearsSnapshot(t *testing.T) {
+	const inst = domain.InstanceID("zai-1")
+	first := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindZAI), nil
+	})
+	release := make(chan struct{})
+	second := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
+		<-release // hold the first refresh until the swap is asserted
+		return snapOf(domain.KindZAI), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(src, true, 20*time.Millisecond))
+	m.Apply(reg(inst, first, true, 20*time.Millisecond))
+	waitFor(t, 500*time.Millisecond, func() bool { return first.refreshes.Load() >= 1 })
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return m.States()[inst].Snapshot != nil
+	})
+
+	m.Apply(reg(inst, second, true, 20*time.Millisecond))
+	// The new loop's first refresh is blocked, so any snapshot visible now
+	// would be the old endpoint's — it must have been cleared.
+	if st := m.States()[inst]; st.Snapshot != nil {
+		t.Fatal("old endpoint's snapshot must not pass as the new configuration's data")
+	}
+
+	close(release)
+	waitFor(t, 500*time.Millisecond, func() bool { return second.refreshes.Load() >= 1 })
+	if got := first.refreshes.Load(); got == 0 {
+		t.Error("first adapter never ran")
+	}
+	waitFor(t, 500*time.Millisecond, func() bool {
+		return m.States()[inst].Snapshot != nil
+	})
+}
+
+func TestManagerRemovesSourcesAbsentFromApply(t *testing.T) {
+	const inst = domain.InstanceID("minimax-1")
+	src := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindMiniMax), nil
+	})
+	m := NewManager(quietLogger())
+	defer m.Stop()
+
+	m.Apply(reg(inst, src, true, 20*time.Millisecond))
 	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
 
-	m.Apply(map[domain.SourceKind]Registration{}) // empty desired set
+	m.Apply(map[domain.InstanceID]Registration{}) // empty desired set
 	time.Sleep(100 * time.Millisecond)
 
+	if _, present := m.States()[inst]; present {
+		t.Error("removed instance must leave no runtime state behind")
+	}
 	frozen := src.refreshes.Load()
 	time.Sleep(120 * time.Millisecond)
 	if src.refreshes.Load() != frozen {
@@ -277,25 +375,26 @@ func TestManagerRemovesSourcesAbsentFromApply(t *testing.T) {
 }
 
 func TestManagerDisableThenReenableStartsFresh(t *testing.T) {
+	const inst = domain.InstanceID("zai-1")
 	src := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindZAI, at: time.Now()}, nil
+		return snapOf(domain.KindZAI), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
-	m.Apply(reg(src, true, 20*time.Millisecond))
+	m.Apply(reg(inst, src, true, 20*time.Millisecond))
 	waitFor(t, 500*time.Millisecond, func() bool {
-		return m.States()[domain.KindZAI].Snapshot != nil
+		return m.States()[inst].Snapshot != nil
 	})
 
-	m.Apply(reg(src, false, 20*time.Millisecond))
-	st, ok := m.States()[domain.KindZAI]
+	m.Apply(reg(inst, src, false, 20*time.Millisecond))
+	st, ok := m.States()[inst]
 	if !ok || st.Enabled || st.Snapshot != nil {
 		t.Fatalf("after disable: present=%v state=%+v", ok, st)
 	}
 
-	m.Apply(reg(src, true, 20*time.Millisecond))
-	st = m.States()[domain.KindZAI]
+	m.Apply(reg(inst, src, true, 20*time.Millisecond))
+	st = m.States()[inst]
 	if !st.Enabled {
 		t.Fatal("re-enable must set Enabled")
 	}
@@ -303,11 +402,48 @@ func TestManagerDisableThenReenableStartsFresh(t *testing.T) {
 		t.Error("re-enabled source must not resurrect the old snapshot")
 	}
 	waitFor(t, 500*time.Millisecond, func() bool {
-		return m.States()[domain.KindZAI].Snapshot != nil
+		return m.States()[inst].Snapshot != nil
 	})
 }
 
+func TestManagerRefreshSingleInstance(t *testing.T) {
+	const (
+		instA = domain.InstanceID("mm-a")
+		instB = domain.InstanceID("mm-b")
+	)
+	a := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindMiniMax), nil
+	})
+	b := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindMiniMax), nil
+	})
+	m := NewManager(quietLogger())
+	defer m.Stop()
+
+	// Long interval: no scheduled ticks, only Refresh() triggers.
+	m.Apply(map[domain.InstanceID]Registration{
+		instA: {Kind: domain.KindMiniMax, Source: a, Enabled: true, Interval: 10 * time.Second},
+		instB: {Kind: domain.KindMiniMax, Source: b, Enabled: true, Interval: 10 * time.Second},
+	})
+	waitFor(t, 1*time.Second, func() bool {
+		return a.refreshes.Load() >= 1 && b.refreshes.Load() >= 1
+	})
+
+	baseA, baseB := a.refreshes.Load(), b.refreshes.Load()
+	m.Refresh(instA)
+	waitFor(t, 1*time.Second, func() bool { return a.refreshes.Load() > baseA })
+	time.Sleep(100 * time.Millisecond)
+	if got := b.refreshes.Load(); got != baseB {
+		t.Errorf("Refresh(one instance) also refreshed another (%d -> %d)", baseB, got)
+	}
+
+	m.Refresh(domain.InstanceID("unknown")) // must be a safe no-op
+	m.Refresh(instB)                        // disabled/absent paths covered above; running path here
+	waitFor(t, 1*time.Second, func() bool { return b.refreshes.Load() > baseB })
+}
+
 func TestManagerStopCancelsInFlight(t *testing.T) {
+	const inst = domain.InstanceID("minimax-1")
 	entered := make(chan struct{})
 	src := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
 		close(entered)
@@ -316,7 +452,7 @@ func TestManagerStopCancelsInFlight(t *testing.T) {
 	})
 	m := NewManager(quietLogger())
 
-	m.Apply(reg(src, true, 10*time.Millisecond))
+	m.Apply(reg(inst, src, true, 10*time.Millisecond))
 	<-entered
 
 	done := make(chan struct{})
@@ -332,36 +468,37 @@ func TestManagerStopCancelsInFlight(t *testing.T) {
 }
 
 func TestManagerSubscribe(t *testing.T) {
+	const inst = domain.InstanceID("minimax-1")
 	src := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
-		return fakeSnap{id: domain.KindMiniMax, at: time.Now()}, nil
+		return snapOf(domain.KindMiniMax), nil
 	})
 	m := NewManager(quietLogger())
 	defer m.Stop()
 
 	var mu sync.Mutex
-	events := map[domain.SourceKind]int{}
-	cancel := m.Subscribe(func(id domain.SourceKind) {
+	events := map[domain.InstanceID]int{}
+	cancel := m.Subscribe(func(id domain.InstanceID) {
 		mu.Lock()
 		events[id]++
 		mu.Unlock()
 	})
 	defer cancel()
 
-	m.Apply(reg(src, true, 20*time.Millisecond))
+	m.Apply(reg(inst, src, true, 20*time.Millisecond))
 	waitFor(t, 1*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return events[domain.KindMiniMax] >= 2 // start + completion
+		return events[inst] >= 2 // start + completion
 	})
 
 	cancel()
 	time.Sleep(100 * time.Millisecond)
 	mu.Lock()
-	after := events[domain.KindMiniMax]
+	after := events[inst]
 	mu.Unlock()
 	time.Sleep(150 * time.Millisecond)
 	mu.Lock()
-	final := events[domain.KindMiniMax]
+	final := events[inst]
 	mu.Unlock()
 	if final != after {
 		t.Errorf("subscriber still receiving events after cancel (%d -> %d)", after, final)

@@ -14,6 +14,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/resources"
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
 	"git.skobk.in/skobkin/aimonitor/internal/ui/components"
@@ -22,8 +23,8 @@ import (
 // MonitorController is everything the monitor window needs from the app.
 // All methods are safe to call on the UI thread.
 type MonitorController interface {
-	States() map[domain.SourceKind]domain.Runtime
-	Config() config.Config
+	Instances() []config.SourceInstance
+	States() map[domain.InstanceID]domain.Runtime
 	RefreshAll()
 	OpenSettings()
 }
@@ -188,18 +189,19 @@ func (m *Monitor) onRefresh() {
 	})
 }
 
-// rebuild regenerates all three tab bodies from the current runtimes.
+// rebuild regenerates all three tab bodies from the configured instances
+// and their runtimes.
 func (m *Monitor) rebuild() {
+	instances := m.ctrl.Instances()
 	states := m.ctrl.States()
 	now := time.Now()
-	cfg := m.ctrl.Config()
 
-	m.rebuildOverview(ui.BuildOverview(states, now), cfg)
-	replaceObjects(m.localBox, m.localTabObjects(ui.BuildLocalTab(states, now), cfg)...)
-	replaceObjects(m.remoteBox, m.remoteTabObjects(ui.BuildRemoteTab(states, now), cfg)...)
+	m.rebuildOverview(ui.BuildOverview(instances, states, now))
+	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, now), instances, "No local sources enabled.")...)
+	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, now), instances, "No remote sources enabled.")...)
 }
 
-func (m *Monitor) rebuildOverview(vm ui.OverviewVM, cfg config.Config) {
+func (m *Monitor) rebuildOverview(vm ui.OverviewVM) {
 	var objs []fyne.CanvasObject
 	if vm.NothingEnabled {
 		objs = append(objs, components.NewEmptyState("No sources enabled.\nConfigure sources in Settings.", m.ctrl.OpenSettings))
@@ -218,20 +220,19 @@ func (m *Monitor) rebuildOverview(vm ui.OverviewVM, cfg config.Config) {
 	replaceObjects(m.overviewBox, objs...)
 }
 
-// overviewRow lays out overview cards: two cards side-by-side in equal
-// columns (GridWithColumns), one card at full width, or nothing.
+// overviewRow lays out overview cards in pairs of equal columns
+// (GridWithColumns); with an odd count the final card takes the full width.
 func overviewRow(cards []ui.OverviewCardVM) []fyne.CanvasObject {
-	if len(cards) == 2 {
-		return []fyne.CanvasObject{
-			container.NewGridWithColumns(2,
-				overviewSourceCard(cards[0], overviewCardBody(cards[0])),
-				overviewSourceCard(cards[1], overviewCardBody(cards[1])),
-			),
+	objs := make([]fyne.CanvasObject, 0, (len(cards)+1)/2)
+	for i := 0; i < len(cards); i += 2 {
+		if i+1 < len(cards) {
+			objs = append(objs, container.NewGridWithColumns(2,
+				overviewSourceCard(cards[i], overviewCardBody(cards[i])),
+				overviewSourceCard(cards[i+1], overviewCardBody(cards[i+1])),
+			))
+			continue
 		}
-	}
-	objs := make([]fyne.CanvasObject, 0, len(cards))
-	for _, c := range cards {
-		objs = append(objs, overviewSourceCard(c, overviewCardBody(c)))
+		objs = append(objs, overviewSourceCard(cards[i], overviewCardBody(cards[i])))
 	}
 	return objs
 }
@@ -261,39 +262,43 @@ func overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
 	}
 }
 
-func (m *Monitor) localTabObjects(cards []ui.CardVM, cfg config.Config) []fyne.CanvasObject {
+// tabObjects renders one detail tab: the cards with per-instance web UI
+// buttons, or the empty state when the category has no enabled instances.
+func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstance, emptyText string) []fyne.CanvasObject {
 	if len(cards) == 0 {
-		return []fyne.CanvasObject{components.NewEmptyState("No local sources enabled.", m.ctrl.OpenSettings)}
+		return []fyne.CanvasObject{components.NewEmptyState(emptyText, m.ctrl.OpenSettings)}
 	}
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
-		body := cardBody(c, cfg)
-		if link, ok := ui.SourceWebLink(c.ID, cfg); ok {
-			body = withWebUILink(body, "Open "+link.Label, link.URL)
+		body := cardBody(c)
+		if label, target, ok := webLink(c, instances); ok {
+			body = withWebUILink(body, "Open "+label, target)
 		}
 		objs = append(objs, components.NewSourceCard(c, body))
 	}
 	return objs
 }
 
-func (m *Monitor) remoteTabObjects(cards []ui.CardVM, cfg config.Config) []fyne.CanvasObject {
-	if len(cards) == 0 {
-		return []fyne.CanvasObject{components.NewEmptyState("No remote sources enabled.", m.ctrl.OpenSettings)}
-	}
-	objs := make([]fyne.CanvasObject, 0, len(cards))
-	for _, c := range cards {
-		body := cardBody(c, cfg)
-		if link, ok := ui.SourceWebLink(c.ID, cfg); ok {
-			body = withWebUILink(body, "Open "+link.Label, link.URL)
+// webLink resolves a card's provider web UI from its configured instance;
+// ok is false for unknown instances or kinds without a web UI.
+func webLink(c ui.CardVM, instances []config.SourceInstance) (label, target string, ok bool) {
+	for _, inst := range instances {
+		if inst.ID != c.Instance {
+			continue
 		}
-		objs = append(objs, components.NewSourceCard(c, body))
+		def, found := registry.Get(inst.Kind)
+		if !found {
+			return "", "", false
+		}
+		url, has := def.WebURL(inst)
+		return def.WebLabel, url, has
 	}
-	return objs
+	return "", "", false
 }
 
 // cardBody renders the card's data body from its view model. Which rows
 // appear depends on the VM the builder produced (overview vs detail).
-func cardBody(c ui.CardVM, _ config.Config) fyne.CanvasObject {
+func cardBody(c ui.CardVM) fyne.CanvasObject {
 	switch c.Kind {
 	case ui.KindGPU:
 		rows := c.GPU.Overview

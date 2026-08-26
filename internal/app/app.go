@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -24,13 +25,13 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/resources"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
 	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
 	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
 	"git.skobk.in/skobkin/aimonitor/internal/source/zai"
-	"git.skobk.in/skobkin/aimonitor/internal/ui"
 	"git.skobk.in/skobkin/aimonitor/internal/ui/monitor"
 	"git.skobk.in/skobkin/aimonitor/internal/ui/settings"
 )
@@ -64,21 +65,32 @@ type App struct {
 	monitor  *monitor.Monitor
 	settings *settings.Settings
 
+	// loadErr records a failed document load from New; Run surfaces it.
+	// It is written once before any reader exists.
+	loadErr error
+
 	done    chan struct{}
 	running atomic.Bool
 	unsub   func()
 	trayEnd func()
 
-	mu  sync.RWMutex // guards cfg and the adapters
-	cfg config.Config
+	mu        sync.RWMutex // guards instances and the adapter cache
+	instances []config.SourceInstance
+	adapters  map[domain.InstanceID]adapterEntry
+}
 
-	amdAdapter  *amdgpuweb.Adapter
-	swapAdapter *llamaswap.Adapter
-	mmAdapter   *minimax.Adapter
-	zaiAdapter  *zai.Adapter
+// adapterEntry caches one instance's built adapter together with the
+// provider settings it was built from. Settings equality drives rebuilds:
+// rename, reorder and enable/disable reuse the adapter (and its poller),
+// while a material settings change builds a new one.
+type adapterEntry struct {
+	settings config.ProviderSettings
+	src      source.Source
 }
 
 // New creates the application (windows built, sources not yet started).
+// A failed configuration load is recorded, not fatal: Run reports it and
+// continues with zero sources, leaving the stored document untouched.
 func New() (*App, error) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -93,33 +105,37 @@ func New() (*App, error) {
 	fa.SetIcon(resources.Icon())
 
 	repo := config.NewRepository(fa.Preferences())
-	cfg := repo.Load()
+	instances, loadErr := repo.LoadInstances()
 
 	creds := credentials.NewKeyringStore()
 	client := &http.Client{}
 	mgr := source.NewManager(logger)
 
 	a := &App{
-		fyneApp: fa,
-		log:     logger,
-		client:  client,
-		creds:   creds,
-		repo:    repo,
-		mgr:     mgr,
-		cfg:     cfg,
-		done:    make(chan struct{}),
+		fyneApp:   fa,
+		log:       logger,
+		client:    client,
+		creds:     creds,
+		repo:      repo,
+		mgr:       mgr,
+		instances: instances,
+		adapters:  map[domain.InstanceID]adapterEntry{},
+		loadErr:   loadErr,
+		done:      make(chan struct{}),
 	}
 	a.running.Store(true)
 
-	// The MiniMax adapter is config-independent (fixed endpoint, key read
-	// at refresh time): built once, never rebuilt.
-	a.mmAdapter = minimax.New(credentials.AccountMiniMax, creds, client, logger)
-
 	a.monitor = monitor.NewMonitor(fa, a, a.done)
 	a.settings = settings.NewSettings(fa, settings.Deps{
-		LoadConfig: a.Config,
-		OnSave:     a.onSaveConfig,
-		Creds:      creds,
+		// Transitional wiring: the fixed-form window is replaced by the
+		// per-instance CRUD editor in the next change. Until then it
+		// opens with defaults, cannot persist anything, and cannot touch
+		// the keychain, so it cannot fight the instance document.
+		LoadConfig: func() config.Config { return config.Default() },
+		OnSave: func(config.Config) error {
+			return errors.New("sources are configured per instance; this window is disabled during the transition")
+		},
+		Creds: readOnlyStore{inner: creds},
 		TestAMDGPU: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
@@ -138,7 +154,7 @@ func New() (*App, error) {
 	})
 
 	a.setupTray()
-	a.unsub = a.mgr.Subscribe(func(domain.SourceKind) {
+	a.unsub = a.mgr.Subscribe(func(domain.InstanceID) {
 		if !a.running.Load() {
 			return
 		}
@@ -171,11 +187,19 @@ func (a *App) Run() {
 		a.log.Warn("keychain not available", "state", string(st.State), "backend", st.Backend, "message", st.Message)
 	}
 
+	// A failed load is surfaced, never papered over: the stored document
+	// stays untouched and the app runs with zero sources.
+	if a.loadErr != nil {
+		a.log.Error("loading source configuration failed; continuing with no sources", "error", a.loadErr)
+		a.fyneApp.SendNotification(fyne.NewNotification("AI Monitor",
+			"Failed to load source configuration; see the log. The stored configuration was left untouched."))
+	}
+
 	// Apply before the event loop exists: no contention with the UI.
-	a.applyConfig(a.Config())
-	// First run (nothing ever saved): open Settings once the loop is up,
-	// so the app is not just a tray icon with nothing configured.
-	if !a.repo.Configured() {
+	a.applyInstances(a.Instances())
+	// First run (no document ever saved): open Settings once the loop is
+	// up, so the app is not just a tray icon with nothing configured.
+	if !a.repo.HasDocument() {
 		a.fyneApp.Lifecycle().SetOnStarted(a.settings.Show)
 	}
 	a.fyneApp.Run()
@@ -237,13 +261,14 @@ func (a *App) rebuildTrayMenu() {
 	mShow := systray.AddMenuItem("Show Monitor", "")
 	mRefresh := systray.AddMenuItem("Refresh", "")
 
-	// Open submenu lists the configured sources' web UIs.
+	// Open submenu lists every configured instance's web UI — including
+	// disabled ones: navigation stays useful independently of polling.
 	var mOpen *systray.MenuItem
-	if links := ui.SourceLinks(a.Config()); len(links) > 0 {
+	if links := registry.WebLinks(a.Instances()); len(links) > 0 {
 		mOpen = systray.AddMenuItem("Web UIs", "")
 		for _, l := range links {
 			link := l
-			sub := mOpen.AddSubMenuItem(link.Label, "")
+			sub := mOpen.AddSubMenuItem(link.Name, "")
 			go func() {
 				for range sub.ClickedCh {
 					if u, err := url.Parse(link.URL); err == nil && u.Scheme != "" {
@@ -280,15 +305,19 @@ func (a *App) rebuildTrayMenu() {
 	}()
 }
 
-// Config implements monitor.MonitorController.
-func (a *App) Config() config.Config {
+// Instances implements monitor.MonitorController: the authoritative
+// configured instance list, in persisted order. The copy is deliberate —
+// callers must not mutate the app's list.
+func (a *App) Instances() []config.SourceInstance {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.cfg
+	out := make([]config.SourceInstance, len(a.instances))
+	copy(out, a.instances)
+	return out
 }
 
 // States implements monitor.MonitorController.
-func (a *App) States() map[domain.SourceKind]domain.Runtime { return a.mgr.States() }
+func (a *App) States() map[domain.InstanceID]domain.Runtime { return a.mgr.States() }
 
 // RefreshAll implements monitor.MonitorController.
 func (a *App) RefreshAll() { a.mgr.RefreshAll() }
@@ -296,56 +325,74 @@ func (a *App) RefreshAll() { a.mgr.RefreshAll() }
 // OpenSettings implements monitor.MonitorController.
 func (a *App) OpenSettings() { a.settings.Show() }
 
-// onSaveConfig persists the config and reconfigures the manager. It runs
-// on the Settings save goroutine, never on the UI thread (Apply may wait
-// out a request timeout). A save racing Quit still persists, but skips
-// reconfiguring an already-cancelled manager and poking the tray through
-// a dying event loop.
-func (a *App) onSaveConfig(cfg config.Config) error {
-	a.repo.Save(cfg)
+// SaveInstances is the single mutation path for the configured sources:
+// the candidate list is persisted first, and only a successful persist
+// replaces the authoritative in-memory list and reconfigures the manager
+// and the tray. On failure nothing changes — the caller keeps the previous
+// runtime and configuration. It runs on a background goroutine, never on
+// the UI thread (Apply may wait out a request timeout). A save racing Quit
+// still persists, but skips reconfiguring an already-cancelled manager and
+// poking the tray through a dying event loop.
+func (a *App) SaveInstances(list []config.SourceInstance) error {
+	if err := a.repo.SaveInstances(list); err != nil {
+		return err
+	}
 	if !a.running.Load() {
 		return nil
 	}
-	a.applyConfig(cfg)
-	// The tray's Open submenu follows the enabled-source set.
+	a.applyInstances(list)
+	// The tray's Web UIs submenu follows the configured instance set.
 	if a.deskApp != nil {
 		a.rebuildTrayMenu()
 	}
 	return nil
 }
 
-// applyConfig diffs the new config against the current one and hands the
-// manager a registration set. Adapters are rebuilt only when their
-// sub-config changed (the manager also diffs by pointer identity).
-func (a *App) applyConfig(cfg config.Config) {
+// applyInstances reconfigures the manager for the given list, keyed by
+// instance ID. An adapter is rebuilt only when its provider settings
+// changed (settings equality); rename, reorder and enable/disable reuse
+// the cached adapter, so their manager registration is unchanged and the
+// poller is never restarted. Instances that cannot be built are logged and
+// skipped — the persisted list stays authoritative for the UI.
+func (a *App) applyInstances(list []config.SourceInstance) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	regs := map[domain.SourceKind]source.Registration{}
-	if cfg.AMDGPUWeb.Enabled {
-		if a.amdAdapter == nil || a.cfg.AMDGPUWeb != cfg.AMDGPUWeb {
-			a.amdAdapter = amdgpuweb.New(cfg.AMDGPUWeb.BaseURL, cfg.AMDGPUWeb.SelectedGPUID, a.client, a.log)
+	regs := make(map[domain.InstanceID]source.Registration, len(list))
+	live := make(map[domain.InstanceID]adapterEntry, len(list))
+	deps := registry.Deps{Creds: a.creds, Client: a.client, Log: a.log}
+	for _, inst := range list {
+		def, ok := registry.Get(inst.Kind)
+		if !ok {
+			a.log.Error("unknown source kind; instance skipped", "kind", string(inst.Kind), "instance", string(inst.ID))
+			continue
 		}
-		regs[domain.KindAMDGPUWeb] = source.Registration{Source: a.amdAdapter, Enabled: true, Interval: cfg.AMDGPUWeb.PollInterval}
-	}
-	if cfg.LlamaSwap.Enabled {
-		if a.swapAdapter == nil || a.cfg.LlamaSwap != cfg.LlamaSwap {
-			a.swapAdapter = llamaswap.New(cfg.LlamaSwap.BaseURL, credentials.AccountLlamaSwap, a.creds, a.client, a.log)
+		settings, ok := inst.Settings()
+		if !ok {
+			a.log.Error("instance settings missing or mismatched; instance skipped", "kind", string(inst.Kind), "instance", string(inst.ID))
+			continue
 		}
-		regs[domain.KindLlamaSwap] = source.Registration{Source: a.swapAdapter, Enabled: true, Interval: cfg.LlamaSwap.PollInterval}
-	}
-	if cfg.MiniMax.Enabled {
-		regs[domain.KindMiniMax] = source.Registration{Source: a.mmAdapter, Enabled: true, Interval: cfg.MiniMax.PollInterval}
-	}
-	if cfg.ZAI.Enabled {
-		if a.zaiAdapter == nil || a.cfg.ZAI != cfg.ZAI {
-			a.zaiAdapter = zai.New(cfg.ZAI.BaseURL, credentials.AccountZAI, a.creds, a.client, a.log)
+		entry, cached := a.adapters[inst.ID]
+		if !cached || !config.SameSettings(entry.settings, settings) {
+			src, err := def.Build(inst, deps)
+			if err != nil {
+				a.log.Error("building source instance failed; instance skipped", "instance", string(inst.ID), "error", err)
+				continue
+			}
+			entry = adapterEntry{settings: settings, src: src}
 		}
-		regs[domain.KindZAI] = source.Registration{Source: a.zaiAdapter, Enabled: true, Interval: cfg.ZAI.PollInterval}
+		live[inst.ID] = entry
+		regs[inst.ID] = source.Registration{
+			Kind:     inst.Kind,
+			Source:   entry.src,
+			Enabled:  inst.Enabled,
+			Interval: inst.PollInterval,
+		}
 	}
 
+	a.adapters = live
 	a.mgr.Apply(regs)
-	a.cfg = cfg
+	a.instances = list
 }
 
 // quit is the single shutdown path (tray Quit). It is idempotent: the
@@ -371,6 +418,28 @@ func (a *App) quit() {
 // to the real keychain, so Settings tests reuse the real adapters.
 func (a *App) testerStore(override string, account credentials.AccountID) credentials.Store {
 	return &overrideStore{inner: a.creds, account: account, override: override}
+}
+
+// readOnlyStore delegates reads to the backing store and rejects every
+// mutation. It keeps the transitional fixed-form Settings window from
+// writing or deleting keychain entries while the per-instance editor that
+// owns credentials is being wired up.
+type readOnlyStore struct {
+	inner credentials.Store
+}
+
+func (r readOnlyStore) Status(ctx context.Context) credentials.Status { return r.inner.Status(ctx) }
+
+func (r readOnlyStore) Get(ctx context.Context, id credentials.AccountID) (string, error) {
+	return r.inner.Get(ctx, id)
+}
+
+func (r readOnlyStore) Set(ctx context.Context, id credentials.AccountID, secret string) error {
+	return errors.New("credential changes are disabled during the settings transition")
+}
+
+func (r readOnlyStore) Delete(ctx context.Context, id credentials.AccountID) error {
+	return errors.New("credential changes are disabled during the settings transition")
 }
 
 // overrideStore layers a typed-in credential over a backing store.
