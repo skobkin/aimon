@@ -57,6 +57,9 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	return nil
 }
 
+// testAccount is a stand-in instance-scoped account for adapter tests.
+const testAccount = credentials.AccountID("source/test-instance/api-key")
+
 func withStore(secret string, notFound bool, stateErr *credentials.StateError) credentials.Store {
 	return &memStore{secret: secret, notFound: notFound, stateErr: stateErr}
 }
@@ -94,7 +97,7 @@ func (s *quotaServer) headers() (auth, langs []string) {
 }
 
 func adapterAt(url string, creds credentials.Store) *Adapter {
-	return New(url, creds, &http.Client{}, testLogger())
+	return New(url, testAccount, creds, &http.Client{}, testLogger())
 }
 
 func asSourceError(t *testing.T, err error) *source.Error {
@@ -361,7 +364,7 @@ func TestMissingKeyIsCredentialError(t *testing.T) {
 
 func TestKeychainLockedIsCredentialError(t *testing.T) {
 	locked := &credentials.StateError{State: credentials.StateLocked, Message: "collection is locked"}
-	a := New("http://127.0.0.1:1", withStore("", false, locked), &http.Client{}, testLogger())
+	a := New("http://127.0.0.1:1", testAccount, withStore("", false, locked), &http.Client{}, testLogger())
 
 	_, err := a.Refresh(context.Background())
 	if serr := asSourceError(t, err); serr.Category != source.CatCredentials {

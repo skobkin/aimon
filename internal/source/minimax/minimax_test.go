@@ -57,6 +57,9 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	return nil
 }
 
+// testAccount is a stand-in instance-scoped account for adapter tests.
+const testAccount = credentials.AccountID("source/test-instance/api-key")
+
 func withStore(secret string, notFound bool, stateErr *credentials.StateError) credentials.Store {
 	return &memStore{secret: secret, notFound: notFound, stateErr: stateErr}
 }
@@ -92,7 +95,7 @@ func (s *planServer) authHeaders() []string {
 }
 
 func adapterAt(url string, creds credentials.Store) *Adapter {
-	return &Adapter{creds: creds, client: &http.Client{}, log: testLogger(), endpoint: url}
+	return &Adapter{account: testAccount, creds: creds, client: &http.Client{}, log: testLogger(), endpoint: url}
 }
 
 func asSourceError(t *testing.T, err error) *source.Error {
@@ -697,7 +700,7 @@ func TestMissingKeyIsCredentialError(t *testing.T) {
 
 func TestKeychainLockedIsCredentialError(t *testing.T) {
 	locked := &credentials.StateError{State: credentials.StateLocked, Message: "collection is locked"}
-	a := &Adapter{creds: withStore("", false, locked), client: &http.Client{}, log: testLogger(), endpoint: "http://127.0.0.1:1"}
+	a := &Adapter{account: testAccount, creds: withStore("", false, locked), client: &http.Client{}, log: testLogger(), endpoint: "http://127.0.0.1:1"}
 
 	_, err := a.Refresh(context.Background())
 	serr := asSourceError(t, err)

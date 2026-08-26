@@ -55,6 +55,9 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	return nil
 }
 
+// testAccount is a stand-in instance-scoped account for adapter tests.
+const testAccount = credentials.AccountID("source/test-instance/api-key")
+
 func withStore(secret string, notFound bool, stateErr *credentials.StateError) credentials.Store {
 	return &memStore{secret: secret, notFound: notFound, stateErr: stateErr}
 }
@@ -110,7 +113,7 @@ func TestRefreshHappyPath(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	a := New(server.URL, withStore("token-1", false, nil), &http.Client{}, testLogger())
+	a := New(server.URL, testAccount, withStore("token-1", false, nil), &http.Client{}, testLogger())
 	snap, err := a.Refresh(context.Background())
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
@@ -142,7 +145,7 @@ func TestRefreshUnauthenticatedWhenNoKeyStored(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	a := New(server.URL, withStore("", true, nil), &http.Client{}, testLogger())
+	a := New(server.URL, testAccount, withStore("", true, nil), &http.Client{}, testLogger())
 	if _, err := a.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -158,7 +161,7 @@ func TestRefreshNilStoreIsUnauthenticated(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	a := New(server.URL, nil, &http.Client{}, testLogger())
+	a := New(server.URL, testAccount, nil, &http.Client{}, testLogger())
 	if _, err := a.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -174,7 +177,7 @@ func TestKeychainLockedIsCredentialsError(t *testing.T) {
 	defer server.Close()
 
 	locked := &credentials.StateError{State: credentials.StateLocked, Message: "collection is locked"}
-	a := New(server.URL, withStore("", false, locked), &http.Client{}, testLogger())
+	a := New(server.URL, testAccount, withStore("", false, locked), &http.Client{}, testLogger())
 
 	_, err := a.Refresh(context.Background())
 	var serr *source.Error
@@ -192,7 +195,7 @@ func TestHealthAuthFailure(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	_, err := New(server.URL, nil, &http.Client{}, testLogger()).Refresh(context.Background())
+	_, err := New(server.URL, testAccount, nil, &http.Client{}, testLogger()).Refresh(context.Background())
 	var serr *source.Error
 	if !errors.As(err, &serr) || serr.Category != source.CatAuth {
 		t.Fatalf("401 on /health must be auth, got %v", err)
@@ -205,7 +208,7 @@ func TestRunningServerError(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	_, err := New(server.URL, nil, &http.Client{}, testLogger()).Refresh(context.Background())
+	_, err := New(server.URL, testAccount, nil, &http.Client{}, testLogger()).Refresh(context.Background())
 	var serr *source.Error
 	if !errors.As(err, &serr) || serr.Category != source.CatProvider {
 		t.Fatalf("500 on /running must be provider, got %v", err)
@@ -218,7 +221,7 @@ func TestRunningMalformed(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	_, err := New(server.URL, nil, &http.Client{}, testLogger()).Refresh(context.Background())
+	_, err := New(server.URL, testAccount, nil, &http.Client{}, testLogger()).Refresh(context.Background())
 	var serr *source.Error
 	if !errors.As(err, &serr) || serr.Category != source.CatInvalidResponse {
 		t.Fatalf("malformed /running must be invalid-response, got %v", err)
@@ -231,7 +234,7 @@ func TestEmptyRunningList(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	snap, err := New(server.URL, nil, &http.Client{}, testLogger()).Refresh(context.Background())
+	snap, err := New(server.URL, testAccount, nil, &http.Client{}, testLogger()).Refresh(context.Background())
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -245,7 +248,7 @@ func TestTestProbesHealthOnly(t *testing.T) {
 	server := httptest.NewServer(srv.handler())
 	defer server.Close()
 
-	if err := New(server.URL, nil, &http.Client{}, testLogger()).Test(context.Background()); err != nil {
+	if err := New(server.URL, testAccount, nil, &http.Client{}, testLogger()).Test(context.Background()); err != nil {
 		t.Fatalf("Test: %v", err)
 	}
 	if got := len(srv.authHeaders()); got != 1 {

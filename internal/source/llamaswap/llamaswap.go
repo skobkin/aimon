@@ -31,18 +31,21 @@ type runningEntry struct {
 }
 
 // Adapter polls one llama-swap instance. creds may be nil, meaning the
-// instance is known to run without an API key. Pointer type: the manager
-// detects configuration changes by pointer identity.
+// instance is known to run without an API key. account scopes the keychain
+// entry to this instance (credentials.AccountForInstance). Pointer type:
+// the manager detects configuration changes by pointer identity.
 type Adapter struct {
 	baseURL string
+	account credentials.AccountID
 	creds   credentials.Store
 	client  *http.Client
 	log     *slog.Logger
 }
 
-// New creates an adapter for the given base URL.
-func New(baseURL string, creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
-	return &Adapter{baseURL: baseURL, creds: creds, client: client, log: log}
+// New creates an adapter for the given base URL, reading the API key (when
+// used) from the instance-scoped account on each refresh.
+func New(baseURL string, account credentials.AccountID, creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
+	return &Adapter{baseURL: baseURL, account: account, creds: creds, client: client, log: log}
 }
 
 // Kind implements source.Source.
@@ -99,7 +102,7 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 	if a.creds == nil {
 		return "", nil
 	}
-	token, err := a.creds.Get(ctx, credentials.AccountLlamaSwap)
+	token, err := a.creds.Get(ctx, a.account)
 	if err == nil {
 		return token, nil
 	}

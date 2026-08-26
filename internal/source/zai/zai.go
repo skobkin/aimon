@@ -106,15 +106,17 @@ var (
 // detects configuration changes by pointer identity.
 type Adapter struct {
 	baseURL string
+	account credentials.AccountID
 	creds   credentials.Store
 	client  *http.Client
 	log     *slog.Logger
 }
 
 // New creates a Z.AI adapter for the given base URL (default
-// https://api.z.ai).
-func New(baseURL string, creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
-	return &Adapter{baseURL: baseURL, creds: creds, client: client, log: log}
+// https://api.z.ai), reading the plan token from the instance-scoped
+// account on each refresh.
+func New(baseURL string, account credentials.AccountID, creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
+	return &Adapter{baseURL: baseURL, account: account, creds: creds, client: client, log: log}
 }
 
 // Kind implements source.Source.
@@ -183,7 +185,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 // token resolves the plan token; a missing token is a config problem
 // surfaced to the user, a broken keychain a credentials problem.
 func (a *Adapter) token(ctx context.Context) (string, error) {
-	token, err := a.creds.Get(ctx, credentials.AccountZAI)
+	token, err := a.creds.Get(ctx, a.account)
 	if err == nil {
 		return token, nil
 	}

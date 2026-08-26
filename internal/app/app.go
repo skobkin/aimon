@@ -113,7 +113,7 @@ func New() (*App, error) {
 
 	// The MiniMax adapter is config-independent (fixed endpoint, key read
 	// at refresh time): built once, never rebuilt.
-	a.mmAdapter = minimax.New(creds, client, logger)
+	a.mmAdapter = minimax.New(credentials.AccountMiniMax, creds, client, logger)
 
 	a.monitor = monitor.NewMonitor(fa, a, a.done)
 	a.settings = settings.NewSettings(fa, settings.Deps{
@@ -124,14 +124,14 @@ func New() (*App, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
 		TestLlamaSwap: func(ctx context.Context, baseURL, override string) error {
-			return llamaswap.New(baseURL, a.testerStore(override, credentials.AccountLlamaSwap), client, logger).Test(ctx)
+			return llamaswap.New(baseURL, credentials.AccountLlamaSwap, a.testerStore(override, credentials.AccountLlamaSwap), client, logger).Test(ctx)
 		},
 		TestMiniMax: func(ctx context.Context, override string) error {
-			_, err := minimax.New(a.testerStore(override, credentials.AccountMiniMax), client, logger).Refresh(ctx)
+			_, err := minimax.New(credentials.AccountMiniMax, a.testerStore(override, credentials.AccountMiniMax), client, logger).Refresh(ctx)
 			return err
 		},
 		TestZAI: func(ctx context.Context, baseURL, override string) error {
-			_, err := zai.New(baseURL, a.testerStore(override, credentials.AccountZAI), client, logger).Refresh(ctx)
+			_, err := zai.New(baseURL, credentials.AccountZAI, a.testerStore(override, credentials.AccountZAI), client, logger).Refresh(ctx)
 			return err
 		},
 		Done: a.done,
@@ -330,7 +330,7 @@ func (a *App) applyConfig(cfg config.Config) {
 	}
 	if cfg.LlamaSwap.Enabled {
 		if a.swapAdapter == nil || a.cfg.LlamaSwap != cfg.LlamaSwap {
-			a.swapAdapter = llamaswap.New(cfg.LlamaSwap.BaseURL, a.creds, a.client, a.log)
+			a.swapAdapter = llamaswap.New(cfg.LlamaSwap.BaseURL, credentials.AccountLlamaSwap, a.creds, a.client, a.log)
 		}
 		regs[domain.KindLlamaSwap] = source.Registration{Source: a.swapAdapter, Enabled: true, Interval: cfg.LlamaSwap.PollInterval}
 	}
@@ -339,7 +339,7 @@ func (a *App) applyConfig(cfg config.Config) {
 	}
 	if cfg.ZAI.Enabled {
 		if a.zaiAdapter == nil || a.cfg.ZAI != cfg.ZAI {
-			a.zaiAdapter = zai.New(cfg.ZAI.BaseURL, a.creds, a.client, a.log)
+			a.zaiAdapter = zai.New(cfg.ZAI.BaseURL, credentials.AccountZAI, a.creds, a.client, a.log)
 		}
 		regs[domain.KindZAI] = source.Registration{Source: a.zaiAdapter, Enabled: true, Interval: cfg.ZAI.PollInterval}
 	}

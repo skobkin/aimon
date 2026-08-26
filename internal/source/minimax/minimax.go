@@ -103,22 +103,24 @@ func (e modelRemainEntry) name() string {
 	return e.Model
 }
 
-// Adapter polls the MiniMax Token Plan endpoint. It is config-independent
-// (the endpoint is fixed), reading the key from the store at refresh time,
-// so the manager never needs to rebuild it. Pointer type per manager
-// contract.
+// Adapter polls the MiniMax Token Plan endpoint. The endpoint is fixed, so
+// the adapter never needs rebuilding for configuration changes; the key is
+// read from the instance-scoped account at refresh time. Pointer type per
+// manager contract.
 type Adapter struct {
-	creds  credentials.Store
-	client *http.Client
-	log    *slog.Logger
+	account credentials.AccountID
+	creds   credentials.Store
+	client  *http.Client
+	log     *slog.Logger
 
 	// endpoint is Endpoint; tests point it at an httptest server.
 	endpoint string
 }
 
-// New creates a MiniMax adapter using the subscription key from creds.
-func New(creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
-	return &Adapter{creds: creds, client: client, log: log, endpoint: Endpoint}
+// New creates a MiniMax adapter using the subscription key from the
+// instance-scoped account in creds.
+func New(account credentials.AccountID, creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
+	return &Adapter{account: account, creds: creds, client: client, log: log, endpoint: Endpoint}
 }
 
 // Kind implements source.Source.
@@ -170,7 +172,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 // token resolves the subscription key; a missing key is a config problem
 // surfaced to the user, a broken keychain a credentials problem.
 func (a *Adapter) token(ctx context.Context) (string, error) {
-	token, err := a.creds.Get(ctx, credentials.AccountMiniMax)
+	token, err := a.creds.Get(ctx, a.account)
 	if err == nil {
 		return token, nil
 	}
