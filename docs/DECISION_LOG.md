@@ -9,6 +9,126 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+
+## 2026-08-25 — S2 Overview becomes a compact 2×2 presentation surface
+
+Overview is no longer a vertical reuse of the Local/Remote detail card bodies.
+It remains split into Local and Remote sections, but when both sources in a
+section are enabled they are rendered as two cards side by side. A single card
+in a section may use the full available width rather than leaving a blank
+second column.
+
+Overview rendering is presentation-oriented rather than provider-oriented:
+
+- `MetricsOverview` for metric/telemetry summaries (`amdgputop-web`);
+- `RuntimeOverview` for running-model/runtime summaries (`llama-swap`);
+- `QuotaOverview` for quota-only providers (MiniMax and Z.AI / GLM).
+
+Provider-specific API semantics still end at the adapter/domain boundary.
+These presentation kinds belong to the UI/view-model layer and must not become
+provider base classes or leak back into source adapters.
+
+Why: after real use, Overview was useful but too similar to the detail tabs.
+The 2×2 layout makes it a genuine glance surface while Local and Remote keep
+full detail.
+
+Updates/supersedes: `docs/UI_UX.md` §7 and the old assumption that Overview and
+detail tabs share one card body renderer.
+
+## 2026-08-25 — Quota reset time is normalized as absolute `ResetAt`
+
+Both remote quota providers expose enough information to show time until each
+quota window resets. The normalized domain representation remains an absolute
+`QuotaWindow.ResetAt`; the UI derives a relative countdown locally so the text
+can update without polling the provider more often.
+
+Verified source semantics used for S2:
+
+- MiniMax `model_remains[model_name == "general"].remains_time` is the remaining
+  milliseconds until the current 5-hour window reset;
+- MiniMax `weekly_remains_time` is the remaining milliseconds until the weekly
+  window reset;
+- Z.AI `nextResetTime` is an absolute epoch-millisecond reset time and is
+  already normalized by the current adapter.
+
+For MiniMax, `remains_time` / `weekly_remains_time` now take precedence for the
+corresponding reset countdown. Do not interpret `start_time` / `end_time` as
+quota-window reset times in S2 merely because the old adapter did so. Legacy
+explicit reset fields may remain defensive fallbacks when their semantics are
+already covered by tests.
+
+Why: the same APIs are already used successfully by the user's Claude Code
+statusline integrations, and reset countdown is high-value information that
+costs no extra vertical space when placed inline.
+
+Updates/supersedes: MiniMax adapter comments/tests that intentionally ignored
+`remains_time` / `weekly_remains_time`, and any use of `end_time` as the primary
+5-hour reset source.
+
+## 2026-08-25 — Reset countdown is inline and quota UI stays used-oriented
+
+Quota display remains **used-oriented**: percentage text and visualization fill
+show the consumed fraction; threshold color continues to represent quota
+pressure using remaining quota.
+
+In the Remote detail tab, reset time is added to the existing quota header line
+without adding another vertical row:
+
+`5-hour · 2h14m                         17% used`
+
+No literal `reset` word is shown. When reset time is unavailable, the suffix is
+simply omitted. Raw counts/credits remain on their existing secondary line.
+
+In Overview, quota counts are omitted. Each quota donut shows the used
+percentage and a short window label (`5h`, `week`) in/around the ring, with the
+relative reset countdown immediately below it.
+
+Why: users of subscription LLM plans understand the time as the window reset;
+spelling out `reset` adds visual noise and no useful information.
+
+Updates/supersedes: quota wireframes in `docs/UI_UX.md` and the 2026-08-23
+compact quota-row entry by adding inline reset text.
+
+## 2026-08-25 — S2 Overview custom visualizations are narrowly approved
+
+The S1 restriction against circular gauges/custom visualizations is relaxed
+only for the new compact Overview:
+
+- `amdgputop-web` uses compact current-value usage bars for GPU and VRAM. The
+  label and value are combined inside a neutral semi-transparent pill over the
+  bar so no separate left-side label column consumes width/height. Temperature
+  remains a plain colored metric row.
+- quota providers use two small donut/ring gauges side by side (normally 5-hour
+  and weekly). Arc length is **used** fraction. Ring color uses the existing
+  quota threshold color derived from remaining quota.
+- Remote detail continues to use the existing linear `QuotaBar`; Local detail
+  keeps its existing metric rows.
+
+The first implementation deliberately uses a neutral translucent pill on the
+metric bars instead of a more complex split-color/clipped text renderer. A
+future iteration may improve the text rendering if necessary.
+
+No historical charts, sparklines, persistence, or charting dependency are part
+of this task.
+
+Why: these forms improve glanceability and density in the constrained 2×2
+Overview, while detail tabs already have a good textual/linear representation.
+
+Updates/supersedes: `AGENTS.md` old single-custom-widget/circular-gauge rules
+and `docs/DECISIONS.md` D11/D14 for the current S2 task only.
+
+## 2026-08-25 — Tray submenu label and deferred scope
+
+The tray submenu currently labelled `Open` is renamed to `Web UIs` while
+keeping the same enabled-source links and behavior.
+
+Dynamic tray telemetry (one/two configurable bars or other selected metrics) is
+explicitly deferred to a later iteration. Historical GPU/VRAM charts are also
+deferred. Detail-tab Web UI buttons are not redesigned in this task.
+
+Why: `Web UIs` states what the submenu contains; the deferred features should
+not be mixed into the focused Overview-density pass.
+
 ## 2026-08-23 — Rebrand: LLM Monitor → AI Monitor (`aimon`)
 
 The product is renamed AI Monitor. The binary is `aimon` (`cmd/aimon`),

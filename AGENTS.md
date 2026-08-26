@@ -9,21 +9,26 @@ This project is a small, tray-first desktop monitor for:
 - MiniMax Token Plan quota;
 - Z.AI / GLM Coding Plan quota.
 
-S1 is a **read-only monitor**, not an administration console.
+The product remains a **read-only monitor** in the current S2 task, not an administration console.
 
 ## Authoritative documents
 
-Read these before implementation:
+Read these before implementation. The repository contains historical S1 specs as well as the current S2 / v0.2 UI-density task.
 
-1. `docs/DECISIONS.md`
-2. `docs/S1_IMPLEMENTATION_SPEC.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/UI_UX.md`
-5. `docs/INTEGRATIONS.md`
-6. `docs/tasks/S1-agent-task.md`
-7. `docs/DECISION_LOG.md`
+For the current S2 task, precedence is:
 
-When documents overlap, the order above is the precedence order. `docs/DECISION_LOG.md` is different in kind: it records dated implementation-time decisions, and an entry there supersedes the affected document from its date onward. Do not redesign the product or UI while implementing it.
+1. `docs/DECISION_LOG.md` — dated implementation-time decisions; newest applicable entry wins.
+2. `docs/S2_UI_UX.md` — current UI contract for the S2 changes.
+3. `docs/S2_IMPLEMENTATION_SPEC.md` — current implementation/acceptance contract.
+4. `docs/tasks/S2-ui-density-agent-task.md` — execution plan and scope.
+5. `docs/DECISIONS.md`
+6. `docs/S1_IMPLEMENTATION_SPEC.md`
+7. `docs/ARCHITECTURE.md`
+8. `docs/UI_UX.md`
+9. `docs/INTEGRATIONS.md`
+10. `docs/tasks/S1-agent-task.md`
+
+S1 documents remain useful architectural history, but S2 documents and later Decision Log entries explicitly supersede them where they conflict. Do not rewrite old specs retroactively merely to remove historical differences. Do not redesign the product or UI while implementing the current task.
 
 ## Decision log
 
@@ -36,33 +41,33 @@ diverge silently.
 ## Non-negotiable constraints
 
 - Use Go and Fyne.
-- Target Fyne 2.8.x APIs; S1 is primarily a Linux desktop application.
+- Target Fyne 2.8.x APIs; the application is primarily a Linux desktop application.
 - Runtime UI is tray-first: a compact borderless monitor window plus a separate normal Settings window.
-- S1 is read-only. Do not add model unload/load, process killing, quota management, log viewing, or other control operations.
+- The current task remains read-only. Do not add model unload/load, process killing, quota management, log viewing, or other control operations.
 - All data sources are optional and independent.
 - One failed or disabled source must not break other sources or the application.
 - Never discard the last successful snapshot just because a later refresh failed.
 - Disabled sources are omitted from Overview. Enabled but unavailable sources remain visible and report their state.
 - Do not store API keys/tokens/passwords in Fyne Preferences, config files, source code, logs, test fixtures, or documentation.
 - Secrets must use the system keychain through `github.com/zalando/go-keyring`, following the same general store/status pattern as `skobkin/qBtRemoteGo`.
-- There is no plaintext secret fallback in S1.
+- There is no plaintext secret fallback.
 - Provider/source-specific DTOs must stop at the adapter boundary. UI code consumes normalized domain snapshots/view models only.
 - Network I/O must never run synchronously in a Fyne event callback.
 - Any Fyne API call made from an application-created goroutine must be scheduled with `fyne.Do` or `fyne.DoAndWait` as appropriate.
-- Do not add historical persistence or charts in S1.
+- Do not add historical persistence, historical charts, or dynamic tray telemetry in the current S2 task. The new Overview donut gauges are current-value visualizations, not history charts.
 
 ## UI implementation rules
 
-Treat `docs/UI_UX.md` as a UI contract, not inspiration.
+For the current task, treat `docs/S2_UI_UX.md` as the UI contract; use historical `docs/UI_UX.md` only where S2 does not supersede it.
 
 - Use `container.AppTabs` for the monitor's Overview / Local / Remote navigation.
-- Use `widget.Card` for source cards.
+- Detail Local/Remote source cards continue to use the established standard Fyne card/container grammar. Overview is now allowed to use presentation-specific compact bodies while preserving the common source header/status grammar.
 - Use standard Fyne controls for forms: `widget.Form`, `widget.Entry`, `widget.NewPasswordEntry()`, `widget.Select`, `widget.Check`, and normal buttons.
 - Do not use free-text inputs for enumerated polling intervals.
 - Do not create custom dropdowns, tabs, toggles, forms, card systems, or dialogs.
-- The one explicitly approved custom visualization is the reusable `QuotaBar`, because standard `widget.ProgressBar` has no per-instance fill-color API.
-- Do not introduce circular gauges.
-- Do not introduce charts.
+- Approved custom presentation-only visualizations are narrowly scoped: existing `QuotaBar`; an Overview-only labeled metric usage bar; and an Overview-only quota donut/ring gauge. Do not turn them into a general widget framework.
+- Circular gauges are allowed only for quota usage in the Overview as specified by `docs/S2_UI_UX.md`; Remote detail keeps linear quota bars.
+- Do not introduce historical charts, sparklines, history storage, or chart dependencies in this task.
 - Do not use color as the only status signal; always pair status color with text/iconography.
 - High GPU utilization is not an error and must not be colored as a warning merely because it is high. (User-directed exception, 2026-08-23: GPU utilization, VRAM and temperature values are colored by load with agreed thresholds — recorded in `docs/DECISION_LOG.md`.)
 - Keep equivalent metrics visually consistent across providers.
