@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -15,6 +16,9 @@ import (
 const (
 	// donutSize is the widget size in DIP (compact for two side-by-side).
 	donutSize = 80
+	// donutTextGap is the deliberate gap between the percentage and the
+	// short label inside the hole.
+	donutTextGap = 2
 )
 
 // QuotaDonut is a ring gauge showing used quota as a colored arc over a
@@ -103,21 +107,27 @@ func (r *donutRenderer) Layout(size fyne.Size) {
 	r.arc.Move(fyne.NewPos(0, 0))
 	r.arc.Resize(size)
 
-	// Center percentage in upper half.
+	// Both center lines form one block centered in the hole.
 	pctSize := r.pct.MinSize()
-	r.pct.Move(fyne.NewPos(
-		(size.Width-pctSize.Width)/2,
-		(size.Height/2-pctSize.Height)/2,
-	))
-	r.pct.Resize(pctSize)
-
-	// Center label in lower half.
 	lblSize := r.lbl.MinSize()
-	r.lbl.Move(fyne.NewPos(
-		(size.Width-lblSize.Width)/2,
-		size.Height/2+(size.Height/2-lblSize.Height)/2,
-	))
+	pctPos, lblPos := donutTextBlock(size, pctSize, lblSize)
+	r.pct.Move(pctPos)
+	r.pct.Resize(pctSize)
+	r.lbl.Move(lblPos)
 	r.lbl.Resize(lblSize)
+}
+
+// donutTextBlock positions the percentage and the short label as one block,
+// vertically centered in the donut and horizontally centered line by line.
+// Centering the block (not each line in its own half) keeps both lines
+// clustered inside the hole — the doughnut's CutoutRatio 0.5 leaves the
+// inner half of the widget clear — instead of spread onto the ring.
+func donutTextBlock(size, pctSize, lblSize fyne.Size) (pctPos, lblPos fyne.Position) {
+	block := pctSize.Height + float32(donutTextGap) + lblSize.Height
+	top := (size.Height - block) / 2
+	pctPos = fyne.NewPos((size.Width-pctSize.Width)/2, top)
+	lblPos = fyne.NewPos((size.Width-lblSize.Width)/2, top+pctSize.Height+float32(donutTextGap))
+	return pctPos, lblPos
 }
 
 func (r *donutRenderer) Refresh() {
@@ -136,18 +146,25 @@ func (r *donutRenderer) Refresh() {
 }
 
 // NewQuotaOverviewBody builds the compact quota overview body with up to
-// two side-by-side donut gauges.
+// two quota donut gauges. The available width is split into equal columns
+// (one per window, full width for a single one); each donut is centered in
+// its column at its natural size — a stretched cell would squash the ring
+// into an ellipse — with its reset countdown centered directly beneath it.
+// Windows without a reliable reset time show no countdown line at all.
 func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) fyne.CanvasObject {
 	if !vm.HasData {
 		return widget.NewLabelWithStyle("No data yet", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 	}
 
-	columns := make([]fyne.CanvasObject, 0, len(vm.Windows))
+	cells := make([]fyne.CanvasObject, 0, len(vm.Windows))
 	for _, w := range vm.Windows {
-		donut := NewQuotaDonut(w.PctText, w.Label, w.Used, w.Remaining)
-		reset := widget.NewLabel(w.ResetText)
-		reset.Alignment = fyne.TextAlignCenter
-		columns = append(columns, container.NewVBox(donut, reset))
+		col := container.NewVBox(NewQuotaDonut(w.PctText, w.Label, w.Used, w.Remaining))
+		if w.ResetText != "" {
+			reset := widget.NewLabel(w.ResetText)
+			reset.Alignment = fyne.TextAlignCenter
+			col.Add(reset)
+		}
+		cells = append(cells, container.New(layout.NewCenterLayout(), col))
 	}
-	return container.NewHBox(columns...)
+	return container.NewGridWithColumns(len(cells), cells...)
 }
