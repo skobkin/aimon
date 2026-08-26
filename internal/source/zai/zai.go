@@ -9,7 +9,8 @@
 // is only a fallback and is scale-resolved per entry by cross-check
 // against currentValue/usage. Newer plans report two CREDIT_LIMIT entries
 // — one per window — distinguishable only by reset time: the one resetting
-// sooner is the 5-hour window, the later one the weekly window.
+// sooner (or with no reset time yet, as an unused 5-hour window has) is
+// the 5-hour window, the later one the weekly window.
 package zai
 
 import (
@@ -208,8 +209,11 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 }
 
 // creditWindows maps the CREDIT_LIMIT entries onto the 5-hour and weekly
-// windows. The entries carry no window name; the one resetting sooner is
-// the 5-hour window, the one resetting later the weekly one. A lone entry
+// windows. The entries carry no window name; they are told apart by reset
+// time only. Ordering follows the verified statusline adapter: entries
+// sort by nextResetTime with a missing or zero one sorting FIRST — an
+// unused 5-hour window carries no reset time yet, so the earlier-or-empty
+// entry is the 5-hour window and the later one the weekly. A lone entry
 // can only be the 5-hour window; beyond two, the extremes by reset time
 // win and the middle ones are skipped.
 func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
@@ -222,7 +226,7 @@ func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
 		return resetKey(sorted[i]) < resetKey(sorted[j])
 	})
 	for _, e := range sorted {
-		if resetKey(e) == math.MaxInt64 {
+		if resetKey(e) == math.MinInt64 {
 			a.log.Warn("zai: credit limit entry without nextResetTime; window ordering may be wrong")
 			break
 		}
@@ -261,12 +265,14 @@ func creditUnit(w *domain.QuotaWindow) {
 }
 
 // resetKey is the entry's reset time as a sortable integer; entries
-// without a usable one sort last.
+// without a usable one (missing or non-positive) sort first, matching the
+// statusline adapter's null-first sort_by — an unused 5-hour window has
+// no reset time yet.
 func resetKey(e limitEntry) int64 {
 	if ms, ok := toFloat(e.NextResetMs); ok && ms > 0 {
 		return int64(ms)
 	}
-	return math.MaxInt64
+	return math.MinInt64
 }
 
 // limitWindow normalizes one limits[] entry under its window spec. The

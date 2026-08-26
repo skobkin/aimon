@@ -437,6 +437,73 @@ func TestDualCreditWindowsByResetTime(t *testing.T) {
 	}
 }
 
+// Real-world regression: the 5-hour window has just reset (0% used, no
+// nextResetTime) while the weekly window is part-used with a reset days
+// out. The empty-reset entry must be the 5-hour window (matching the
+// statusline adapter's null-first sort), not the weekly one — each
+// entry's counts and reset stay one unit through the ordering.
+func TestUnusedFiveHourWindowWithoutResetTime(t *testing.T) {
+	const weeklyResetMs = int64(1750000000000) // ~3 days out when observed
+	body := fmt.Sprintf(`{"data":{"limits":[
+		{"type":"CREDIT_LIMIT","remaining":40,"usage":40,"currentValue":0,"unit":1,"nextResetTime":0},
+		{"type":"CREDIT_LIMIT","remaining":13.6,"usage":40,"currentValue":26.4,"unit":1,"nextResetTime":%d}
+	]}}`, weeklyResetMs)
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+
+	fiveHour := windowByID(q, "credits-5h")
+	if fiveHour == nil {
+		t.Fatal("credits-5h window missing")
+	}
+	assertFraction(t, "5h remaining", fiveHour.RemainingFraction, 1.0)
+	if fiveHour.ResetAt != nil {
+		t.Errorf("5h ResetAt = %v, want nil (zero nextResetTime is not a reset)", fiveHour.ResetAt)
+	}
+
+	weekly := windowByID(q, "credits-weekly")
+	if weekly == nil {
+		t.Fatal("credits-weekly window missing")
+	}
+	// 13.6 / 40 = 34% remaining → 66% used, as observed live.
+	assertFraction(t, "weekly remaining", weekly.RemainingFraction, 0.34)
+	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(time.UnixMilli(weeklyResetMs)) {
+		t.Errorf("weekly ResetAt = %v, want %v", weekly.ResetAt, time.UnixMilli(weeklyResetMs))
+	}
+}
+
+// A missing nextResetTime field (rather than an explicit zero) orders the
+// same way: the entry without one is the 5-hour window.
+func TestMissingResetTimeFieldSortsFirst(t *testing.T) {
+	const soonResetMs = int64(1740000000000)
+	body := fmt.Sprintf(`{"data":{"limits":[
+		{"type":"CREDIT_LIMIT","remaining":10,"usage":100,"currentValue":90,"unit":1},
+		{"type":"CREDIT_LIMIT","remaining":50,"usage":100,"currentValue":50,"unit":1,"nextResetTime":%d}
+	]}}`, soonResetMs)
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+
+	fiveHour := windowByID(q, "credits-5h")
+	if fiveHour == nil {
+		t.Fatal("credits-5h window missing")
+	}
+	assertFraction(t, "5h remaining", fiveHour.RemainingFraction, 0.1)
+	if fiveHour.ResetAt != nil {
+		t.Errorf("5h ResetAt = %v, want nil", fiveHour.ResetAt)
+	}
+	weekly := windowByID(q, "credits-weekly")
+	if weekly == nil {
+		t.Fatal("credits-weekly window missing")
+	}
+	assertFraction(t, "weekly remaining", weekly.RemainingFraction, 0.5)
+	if weekly.ResetAt == nil || !weekly.ResetAt.Equal(time.UnixMilli(soonResetMs)) {
+		t.Errorf("weekly ResetAt = %v, want %v", weekly.ResetAt, time.UnixMilli(soonResetMs))
+	}
+}
+
 // Counts have verified semantics and win over a disagreeing percentage:
 // counts say 90% remaining while the usage-oriented percentage claims 90%
 // used.

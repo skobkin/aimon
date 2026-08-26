@@ -564,6 +564,58 @@ func TestBuildQuotaOverview(t *testing.T) {
 	}
 }
 
+// Normalized Z.AI dual-credit regression (observed live): the 5-hour
+// window has just reset (0% used, no ResetAt) while the weekly window is
+// part-used with a reset days out. Both presentations must carry the
+// windows as the domain adapter normalized them — counts and resets stay
+// with their own window.
+func TestZAINormalizedWindowsRender(t *testing.T) {
+	weeklyReset := now.Add(72*time.Hour + 9*time.Hour)
+	snap := domain.QuotaSnapshot{
+		Source: domain.SourceZAI,
+		Windows: []domain.QuotaWindow{
+			{ID: "credits-5h", Name: "5-hour", UsedFraction: 0, RemainingFraction: 1},
+			{ID: "credits-weekly", Name: "Weekly", UsedFraction: 0.66, RemainingFraction: 0.34, ResetAt: &weeklyReset},
+		},
+	}
+
+	// Remote detail rows.
+	detail := BuildQuotaVM(snap, now, true)
+	if len(detail.Windows) != 2 {
+		t.Fatalf("detail windows = %d, want 2", len(detail.Windows))
+	}
+	if detail.Windows[0].Name != "5-hour" || detail.Windows[0].UsedText != "0% used" {
+		t.Errorf("detail 5h = %q/%q", detail.Windows[0].Name, detail.Windows[0].UsedText)
+	}
+	if detail.Windows[0].ResetText != "" {
+		t.Errorf("detail 5h reset = %q, want empty (no reliable reset)", detail.Windows[0].ResetText)
+	}
+	if detail.Windows[1].Name != "Weekly" || detail.Windows[1].UsedText != "66% used" {
+		t.Errorf("detail weekly = %q/%q", detail.Windows[1].Name, detail.Windows[1].UsedText)
+	}
+	if detail.Windows[1].ResetText != "3d9h" {
+		t.Errorf("detail weekly reset = %q, want \"3d9h\"", detail.Windows[1].ResetText)
+	}
+
+	// Overview donuts.
+	ov := BuildQuotaOverview(snap, now)
+	if len(ov.Windows) != 2 {
+		t.Fatalf("overview windows = %d, want 2", len(ov.Windows))
+	}
+	if ov.Windows[0].Label != "5h" || ov.Windows[0].PctText != "0%" {
+		t.Errorf("overview 5h = %q/%q", ov.Windows[0].Label, ov.Windows[0].PctText)
+	}
+	if ov.Windows[0].ResetText != "" {
+		t.Errorf("overview 5h reset = %q, want empty", ov.Windows[0].ResetText)
+	}
+	if ov.Windows[1].Label != "week" || ov.Windows[1].PctText != "66%" {
+		t.Errorf("overview weekly = %q/%q", ov.Windows[1].Label, ov.Windows[1].PctText)
+	}
+	if ov.Windows[1].ResetText != "3d9h" {
+		t.Errorf("overview weekly reset = %q, want \"3d9h\"", ov.Windows[1].ResetText)
+	}
+}
+
 func TestShortLabelMapping(t *testing.T) {
 	cases := []struct {
 		id, name, want string
