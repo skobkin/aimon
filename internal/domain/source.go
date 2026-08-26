@@ -54,6 +54,13 @@ func (kind SourceKind) DisplayName() string {
 	return string(kind)
 }
 
+// InstanceID is the stable opaque identity of one configured source
+// instance. It is generated once when the instance is created and survives
+// rename, reorder, enable/disable, and application restarts. It keys
+// credentials and runtime state, and is never derived from the source kind
+// or the user-visible name.
+type InstanceID string
+
 // Snapshot is one successful observation from a source. Implementations are
 // immutable once Refresh returns; the manager hands them to the UI as-is.
 type Snapshot interface {
