@@ -291,7 +291,7 @@ func TestBuildSwapVMCapsOverviewAndPrefersNames(t *testing.T) {
 func TestBuildQuotaVM(t *testing.T) {
 	rem, lim := 690.0, 1000.0
 	snap := domain.QuotaSnapshot{
-		Source: domain.SourceMiniMax,
+		Kind: domain.KindMiniMax,
 		Windows: []domain.QuotaWindow{
 			{ID: "interval", Name: "5-hour", RemainingFraction: 0.69, UsedFraction: 0.31, Remaining: &rem, Limit: &lim, Unit: "requests"},
 			{ID: "weekly", Name: "Weekly", RemainingFraction: 0.87, UsedFraction: 0.13},
@@ -323,10 +323,10 @@ func TestBuildQuotaVM(t *testing.T) {
 }
 
 func TestBuildOverviewOmitsDisabled(t *testing.T) {
-	states := map[domain.SourceID]domain.Runtime{
-		domain.SourceAMDGPUWeb: {Enabled: true, LastSuccessAt: ts(5 * time.Second), Snapshot: gpuSnap()},
-		domain.SourceLlamaSwap: {Enabled: false},
-		domain.SourceMiniMax:   {Enabled: true, LastError: &source.Error{Category: source.CatConnection, Detail: "refused"}},
+	states := map[domain.SourceKind]domain.Runtime{
+		domain.KindAMDGPUWeb: {Enabled: true, LastSuccessAt: ts(5 * time.Second), Snapshot: gpuSnap()},
+		domain.KindLlamaSwap: {Enabled: false},
+		domain.KindMiniMax:   {Enabled: true, LastError: &source.Error{Category: source.CatConnection, Detail: "refused"}},
 	}
 
 	vm := BuildOverview(states, now)
@@ -355,13 +355,13 @@ func TestBuildOverviewOmitsDisabled(t *testing.T) {
 }
 
 func TestBuildOverviewNothingEnabled(t *testing.T) {
-	vm := BuildOverview(map[domain.SourceID]domain.Runtime{}, now)
+	vm := BuildOverview(map[domain.SourceKind]domain.Runtime{}, now)
 	if !vm.NothingEnabled {
 		t.Error("empty states must set NothingEnabled")
 	}
 
-	vm = BuildOverview(map[domain.SourceID]domain.Runtime{
-		domain.SourceZAI: {Enabled: false},
+	vm = BuildOverview(map[domain.SourceKind]domain.Runtime{
+		domain.KindZAI: {Enabled: false},
 	}, now)
 	if !vm.NothingEnabled {
 		t.Error("all-disabled must set NothingEnabled")
@@ -369,9 +369,9 @@ func TestBuildOverviewNothingEnabled(t *testing.T) {
 }
 
 func TestBuildLocalAndRemoteTabs(t *testing.T) {
-	states := map[domain.SourceID]domain.Runtime{
-		domain.SourceLlamaSwap: {Enabled: true, LastSuccessAt: now, Snapshot: domain.LlamaSwapSnapshot{RunningModels: []domain.RunningModel{{ID: "m1"}}}},
-		domain.SourceZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "5-hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
+	states := map[domain.SourceKind]domain.Runtime{
+		domain.KindLlamaSwap: {Enabled: true, LastSuccessAt: now, Snapshot: domain.LlamaSwapSnapshot{RunningModels: []domain.RunningModel{{ID: "m1"}}}},
+		domain.KindZAI:       {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "5-hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
 	}
 
 	local := BuildLocalTab(states, now)
@@ -386,10 +386,10 @@ func TestBuildLocalAndRemoteTabs(t *testing.T) {
 		t.Errorf("used = %q", w.UsedText)
 	}
 
-	if got := BuildLocalTab(map[domain.SourceID]domain.Runtime{}, now); len(got) != 0 {
+	if got := BuildLocalTab(map[domain.SourceKind]domain.Runtime{}, now); len(got) != 0 {
 		t.Errorf("empty local tab = %+v", got)
 	}
-	if got := BuildRemoteTab(map[domain.SourceID]domain.Runtime{}, now); len(got) != 0 {
+	if got := BuildRemoteTab(map[domain.SourceKind]domain.Runtime{}, now); len(got) != 0 {
 		t.Errorf("empty remote tab = %+v", got)
 	}
 }
@@ -422,7 +422,7 @@ func TestFormatResetCountdownBoundaries(t *testing.T) {
 func TestBuildQuotaVMResetText(t *testing.T) {
 	reset := now.Add(2*time.Hour + 14*time.Minute)
 	snap := domain.QuotaSnapshot{
-		Source: domain.SourceMiniMax,
+		Kind: domain.KindMiniMax,
 		Windows: []domain.QuotaWindow{
 			{ID: "interval", Name: "5-hour", RemainingFraction: 0.83, UsedFraction: 0.17, ResetAt: &reset},
 			{ID: "weekly", Name: "Weekly", RemainingFraction: 0.50, UsedFraction: 0.50},
@@ -572,7 +572,7 @@ func TestBuildQuotaOverview(t *testing.T) {
 func TestZAINormalizedWindowsRender(t *testing.T) {
 	weeklyReset := now.Add(72*time.Hour + 9*time.Hour)
 	snap := domain.QuotaSnapshot{
-		Source: domain.SourceZAI,
+		Kind: domain.KindZAI,
 		Windows: []domain.QuotaWindow{
 			{ID: "credits-5h", Name: "5-hour", UsedFraction: 0, RemainingFraction: 1},
 			{ID: "credits-weekly", Name: "Weekly", UsedFraction: 0.66, RemainingFraction: 0.34, ResetAt: &weeklyReset},

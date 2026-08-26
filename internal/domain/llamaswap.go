@@ -17,8 +17,8 @@ type LlamaSwapSnapshot struct {
 	RunningModels []RunningModel
 }
 
-// SnapshotSource implements Snapshot.
-func (s LlamaSwapSnapshot) SnapshotSource() SourceID { return SourceLlamaSwap }
+// SnapshotKind implements Snapshot.
+func (s LlamaSwapSnapshot) SnapshotKind() SourceKind { return KindLlamaSwap }
 
 // Timestamp implements Snapshot.
 func (s LlamaSwapSnapshot) Timestamp() time.Time { return s.CollectedAt }

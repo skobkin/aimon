@@ -13,8 +13,9 @@ import (
 // pointer types: the manager detects adapter replacement by pointer
 // identity and restarts the loop when the pointer changes.
 type Source interface {
-	// ID reports the domain source this adapter serves.
-	ID() domain.SourceID
+	// Kind reports which compiled adapter kind this source serves. It is
+	// kind metadata only, never a unique configured-source identity.
+	Kind() domain.SourceKind
 	// RequestTimeout is the per-request timeout applied on top of the
 	// loop context (3s local, 10s remote by convention).
 	RequestTimeout() time.Duration
@@ -31,7 +32,7 @@ type Registration struct {
 
 // loop is the running state of one source's polling goroutine.
 type loop struct {
-	id       domain.SourceID
+	id       domain.SourceKind
 	source   Source
 	interval time.Duration
 	ctx      context.Context
@@ -56,11 +57,11 @@ type Manager struct {
 	wg         sync.WaitGroup
 
 	mu       sync.Mutex
-	loops    map[domain.SourceID]*loop
-	runtimes map[domain.SourceID]*domain.Runtime
+	loops    map[domain.SourceKind]*loop
+	runtimes map[domain.SourceKind]*domain.Runtime
 
 	subMu       sync.Mutex
-	subscribers map[int]func(domain.SourceID)
+	subscribers map[int]func(domain.SourceKind)
 	nextSubID   int
 }
 
@@ -71,9 +72,9 @@ func NewManager(log *slog.Logger) *Manager {
 		log:         log,
 		rootCtx:     ctx,
 		rootCancel:  cancel,
-		loops:       map[domain.SourceID]*loop{},
-		runtimes:    map[domain.SourceID]*domain.Runtime{},
-		subscribers: map[int]func(domain.SourceID){},
+		loops:       map[domain.SourceKind]*loop{},
+		runtimes:    map[domain.SourceKind]*domain.Runtime{},
+		subscribers: map[int]func(domain.SourceKind){},
 	}
 }
 
@@ -82,7 +83,7 @@ func NewManager(log *slog.Logger) *Manager {
 // A source whose interval or adapter (pointer) changed restarts, handing
 // its runtime — including any last-good snapshot — to the new loop.
 // Stopped loops are waited for before returning.
-func (m *Manager) Apply(regs map[domain.SourceID]Registration) {
+func (m *Manager) Apply(regs map[domain.SourceKind]Registration) {
 	var stopped []*loop
 
 	m.mu.Lock()
@@ -146,11 +147,11 @@ func (m *Manager) RefreshAll() {
 }
 
 // States returns a copy of the current runtime of every known source.
-func (m *Manager) States() map[domain.SourceID]domain.Runtime {
+func (m *Manager) States() map[domain.SourceKind]domain.Runtime {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	states := make(map[domain.SourceID]domain.Runtime, len(m.runtimes))
+	states := make(map[domain.SourceKind]domain.Runtime, len(m.runtimes))
 	for id, rt := range m.runtimes {
 		states[id] = *rt
 	}
@@ -159,7 +160,7 @@ func (m *Manager) States() map[domain.SourceID]domain.Runtime {
 
 // Subscribe registers fn to be called (from the loop goroutine) whenever
 // a source's runtime changes. The returned cancel function unsubscribes.
-func (m *Manager) Subscribe(fn func(domain.SourceID)) (cancel func()) {
+func (m *Manager) Subscribe(fn func(domain.SourceKind)) (cancel func()) {
 	m.subMu.Lock()
 	id := m.nextSubID
 	m.nextSubID++
@@ -195,7 +196,7 @@ func (m *Manager) Stop() {
 // startLoopLocked launches the polling goroutine for a source. The
 // existing runtime (if any) is reused so last-good data survives
 // interval/adapter restarts.
-func (m *Manager) startLoopLocked(id domain.SourceID, reg Registration) {
+func (m *Manager) startLoopLocked(id domain.SourceKind, reg Registration) {
 	rt, ok := m.runtimes[id]
 	if !ok {
 		rt = &domain.Runtime{}
@@ -221,7 +222,7 @@ func (m *Manager) startLoopLocked(id domain.SourceID, reg Registration) {
 // detachLoopLocked stops a loop's scheduling but leaves its runtime in
 // place for whoever starts next. The caller must wait on l.done outside
 // the lock.
-func (m *Manager) detachLoopLocked(id domain.SourceID) *loop {
+func (m *Manager) detachLoopLocked(id domain.SourceKind) *loop {
 	l := m.loops[id]
 	delete(m.loops, id)
 	if l != nil {
@@ -232,7 +233,7 @@ func (m *Manager) detachLoopLocked(id domain.SourceID) *loop {
 
 // disableRuntimeLocked resets the runtime of a disabled source: disabled
 // sources hold no snapshot, so a later re-enable starts from Loading.
-func (m *Manager) disableRuntimeLocked(id domain.SourceID) {
+func (m *Manager) disableRuntimeLocked(id domain.SourceKind) {
 	m.runtimes[id] = &domain.Runtime{}
 }
 
@@ -302,9 +303,9 @@ func (m *Manager) refreshOnce(l *loop) {
 	m.notify(l.id)
 }
 
-func (m *Manager) notify(id domain.SourceID) {
+func (m *Manager) notify(id domain.SourceKind) {
 	m.subMu.Lock()
-	subs := make([]func(domain.SourceID), 0, len(m.subscribers))
+	subs := make([]func(domain.SourceKind), 0, len(m.subscribers))
 	for _, fn := range m.subscribers {
 		subs = append(subs, fn)
 	}

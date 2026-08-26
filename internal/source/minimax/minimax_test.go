@@ -114,8 +114,8 @@ func refresh(t *testing.T, a *Adapter) domain.QuotaSnapshot {
 	if !ok {
 		t.Fatalf("snapshot type = %T", snap)
 	}
-	if q.Source != domain.SourceMiniMax {
-		t.Errorf("source = %q, want minimax", q.Source)
+	if q.Kind != domain.KindMiniMax {
+		t.Errorf("source = %q, want minimax", q.Kind)
 	}
 	return q
 }

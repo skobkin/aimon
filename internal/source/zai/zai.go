@@ -117,8 +117,8 @@ func New(baseURL string, creds credentials.Store, client *http.Client, log *slog
 	return &Adapter{baseURL: baseURL, creds: creds, client: client, log: log}
 }
 
-// ID implements source.Source.
-func (a *Adapter) ID() domain.SourceID { return domain.SourceZAI }
+// Kind implements source.Source.
+func (a *Adapter) Kind() domain.SourceKind { return domain.KindZAI }
 
 // RequestTimeout implements source.Source.
 func (a *Adapter) RequestTimeout() time.Duration { return requestTimeout }
@@ -174,7 +174,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 
 	return domain.QuotaSnapshot{
-		Source:      domain.SourceZAI,
+		Kind:        domain.KindZAI,
 		CollectedAt: time.Now(),
 		Windows:     windows,
 	}, nil

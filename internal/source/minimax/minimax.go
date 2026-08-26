@@ -121,8 +121,8 @@ func New(creds credentials.Store, client *http.Client, log *slog.Logger) *Adapte
 	return &Adapter{creds: creds, client: client, log: log, endpoint: Endpoint}
 }
 
-// ID implements source.Source.
-func (a *Adapter) ID() domain.SourceID { return domain.SourceMiniMax }
+// Kind implements source.Source.
+func (a *Adapter) Kind() domain.SourceKind { return domain.KindMiniMax }
 
 // RequestTimeout implements source.Source.
 func (a *Adapter) RequestTimeout() time.Duration { return requestTimeout }
@@ -161,7 +161,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 
 	return domain.QuotaSnapshot{
-		Source:      domain.SourceMiniMax,
+		Kind:        domain.KindMiniMax,
 		CollectedAt: now,
 		Windows:     windows,
 	}, nil

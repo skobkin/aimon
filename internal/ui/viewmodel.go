@@ -131,7 +131,7 @@ type QuotaOverviewVM struct {
 
 // OverviewCardVM is one card in the Overview tab.
 type OverviewCardVM struct {
-	ID     domain.SourceID
+	ID     domain.SourceKind
 	Kind   OverviewKind
 	Title  string
 	Status string
@@ -145,7 +145,7 @@ type OverviewCardVM struct {
 // ("5s ago", "1m ago · stale", "Unavailable", "Loading…"); Footer carries
 // the last refresh failure for Stale/Unavailable cards.
 type CardVM struct {
-	ID     domain.SourceID
+	ID     domain.SourceKind
 	Kind   CardKind
 	Title  string
 	Status string
@@ -165,8 +165,8 @@ type OverviewVM struct {
 
 // localOrder and remoteOrder fix the card order within each category.
 var (
-	localOrder  = []domain.SourceID{domain.SourceAMDGPUWeb, domain.SourceLlamaSwap}
-	remoteOrder = []domain.SourceID{domain.SourceMiniMax, domain.SourceZAI}
+	localOrder  = []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap}
+	remoteOrder = []domain.SourceKind{domain.KindMiniMax, domain.KindZAI}
 )
 
 // overviewSwapLines caps the model list on the overview card.
@@ -175,7 +175,7 @@ const overviewSwapLines = 3
 // BuildOverview derives the overview tab from the current runtimes.
 // Disabled sources are omitted entirely; enabled ones appear even before
 // their first snapshot lands.
-func BuildOverview(states map[domain.SourceID]domain.Runtime, now time.Time) OverviewVM {
+func BuildOverview(states map[domain.SourceKind]domain.Runtime, now time.Time) OverviewVM {
 	vm := OverviewVM{
 		LocalCards:  buildOverviewCards(localOrder, states, now),
 		RemoteCards: buildOverviewCards(remoteOrder, states, now),
@@ -184,7 +184,7 @@ func BuildOverview(states map[domain.SourceID]domain.Runtime, now time.Time) Ove
 	return vm
 }
 
-func buildOverviewCards(order []domain.SourceID, states map[domain.SourceID]domain.Runtime, now time.Time) []OverviewCardVM {
+func buildOverviewCards(order []domain.SourceKind, states map[domain.SourceKind]domain.Runtime, now time.Time) []OverviewCardVM {
 	cards := make([]OverviewCardVM, 0, len(order))
 	for _, id := range order {
 		rt, ok := states[id]
@@ -197,16 +197,16 @@ func buildOverviewCards(order []domain.SourceID, states map[domain.SourceID]doma
 }
 
 // BuildLocalTab derives the local tab cards (full detail bodies).
-func BuildLocalTab(states map[domain.SourceID]domain.Runtime, now time.Time) []CardVM {
+func BuildLocalTab(states map[domain.SourceKind]domain.Runtime, now time.Time) []CardVM {
 	return buildCards(localOrder, states, now, true)
 }
 
 // BuildRemoteTab derives the remote tab cards (full detail bodies).
-func BuildRemoteTab(states map[domain.SourceID]domain.Runtime, now time.Time) []CardVM {
+func BuildRemoteTab(states map[domain.SourceKind]domain.Runtime, now time.Time) []CardVM {
 	return buildCards(remoteOrder, states, now, true)
 }
 
-func buildCards(order []domain.SourceID, states map[domain.SourceID]domain.Runtime, now time.Time, detail bool) []CardVM {
+func buildCards(order []domain.SourceKind, states map[domain.SourceKind]domain.Runtime, now time.Time, detail bool) []CardVM {
 	cards := make([]CardVM, 0, len(order))
 	for _, id := range order {
 		rt, ok := states[id]
@@ -219,7 +219,7 @@ func buildCards(order []domain.SourceID, states map[domain.SourceID]domain.Runti
 }
 
 // BuildCard derives one source card.
-func BuildCard(id domain.SourceID, rt domain.Runtime, now time.Time, detail bool) CardVM {
+func BuildCard(id domain.SourceKind, rt domain.Runtime, now time.Time, detail bool) CardVM {
 	card := CardVM{
 		ID:     id,
 		Kind:   KindNone,
@@ -243,7 +243,7 @@ func BuildCard(id domain.SourceID, rt domain.Runtime, now time.Time, detail bool
 }
 
 // BuildOverviewCard derives one overview card from a runtime.
-func BuildOverviewCard(id domain.SourceID, rt domain.Runtime, now time.Time) OverviewCardVM {
+func BuildOverviewCard(id domain.SourceKind, rt domain.Runtime, now time.Time) OverviewCardVM {
 	card := OverviewCardVM{
 		ID:     id,
 		Title:  id.DisplayName(),

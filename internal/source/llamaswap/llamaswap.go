@@ -45,8 +45,8 @@ func New(baseURL string, creds credentials.Store, client *http.Client, log *slog
 	return &Adapter{baseURL: baseURL, creds: creds, client: client, log: log}
 }
 
-// ID implements source.Source.
-func (a *Adapter) ID() domain.SourceID { return domain.SourceLlamaSwap }
+// Kind implements source.Source.
+func (a *Adapter) Kind() domain.SourceKind { return domain.KindLlamaSwap }
 
 // RequestTimeout implements source.Source.
 func (a *Adapter) RequestTimeout() time.Duration { return requestTimeout }

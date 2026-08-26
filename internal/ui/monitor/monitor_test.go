@@ -12,10 +12,10 @@ import (
 // stubCtrl is the minimal controller for building the real window.
 type stubCtrl struct{}
 
-func (stubCtrl) States() map[domain.SourceID]domain.Runtime { return nil }
-func (stubCtrl) Config() config.Config                      { return config.Default() }
-func (stubCtrl) RefreshAll()                                {}
-func (stubCtrl) OpenSettings()                              {}
+func (stubCtrl) States() map[domain.SourceKind]domain.Runtime { return nil }
+func (stubCtrl) Config() config.Config                        { return config.Default() }
+func (stubCtrl) RefreshAll()                                  {}
+func (stubCtrl) OpenSettings()                                {}
 
 // The actions overlay must keep its buttons at their natural height: a
 // Stack stretches its children to the full window size and an HBox then

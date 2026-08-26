@@ -138,7 +138,7 @@ func New() (*App, error) {
 	})
 
 	a.setupTray()
-	a.unsub = a.mgr.Subscribe(func(domain.SourceID) {
+	a.unsub = a.mgr.Subscribe(func(domain.SourceKind) {
 		if !a.running.Load() {
 			return
 		}
@@ -288,7 +288,7 @@ func (a *App) Config() config.Config {
 }
 
 // States implements monitor.MonitorController.
-func (a *App) States() map[domain.SourceID]domain.Runtime { return a.mgr.States() }
+func (a *App) States() map[domain.SourceKind]domain.Runtime { return a.mgr.States() }
 
 // RefreshAll implements monitor.MonitorController.
 func (a *App) RefreshAll() { a.mgr.RefreshAll() }
@@ -321,27 +321,27 @@ func (a *App) applyConfig(cfg config.Config) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	regs := map[domain.SourceID]source.Registration{}
+	regs := map[domain.SourceKind]source.Registration{}
 	if cfg.AMDGPUWeb.Enabled {
 		if a.amdAdapter == nil || a.cfg.AMDGPUWeb != cfg.AMDGPUWeb {
 			a.amdAdapter = amdgpuweb.New(cfg.AMDGPUWeb.BaseURL, cfg.AMDGPUWeb.SelectedGPUID, a.client, a.log)
 		}
-		regs[domain.SourceAMDGPUWeb] = source.Registration{Source: a.amdAdapter, Enabled: true, Interval: cfg.AMDGPUWeb.PollInterval}
+		regs[domain.KindAMDGPUWeb] = source.Registration{Source: a.amdAdapter, Enabled: true, Interval: cfg.AMDGPUWeb.PollInterval}
 	}
 	if cfg.LlamaSwap.Enabled {
 		if a.swapAdapter == nil || a.cfg.LlamaSwap != cfg.LlamaSwap {
 			a.swapAdapter = llamaswap.New(cfg.LlamaSwap.BaseURL, a.creds, a.client, a.log)
 		}
-		regs[domain.SourceLlamaSwap] = source.Registration{Source: a.swapAdapter, Enabled: true, Interval: cfg.LlamaSwap.PollInterval}
+		regs[domain.KindLlamaSwap] = source.Registration{Source: a.swapAdapter, Enabled: true, Interval: cfg.LlamaSwap.PollInterval}
 	}
 	if cfg.MiniMax.Enabled {
-		regs[domain.SourceMiniMax] = source.Registration{Source: a.mmAdapter, Enabled: true, Interval: cfg.MiniMax.PollInterval}
+		regs[domain.KindMiniMax] = source.Registration{Source: a.mmAdapter, Enabled: true, Interval: cfg.MiniMax.PollInterval}
 	}
 	if cfg.ZAI.Enabled {
 		if a.zaiAdapter == nil || a.cfg.ZAI != cfg.ZAI {
 			a.zaiAdapter = zai.New(cfg.ZAI.BaseURL, a.creds, a.client, a.log)
 		}
-		regs[domain.SourceZAI] = source.Registration{Source: a.zaiAdapter, Enabled: true, Interval: cfg.ZAI.PollInterval}
+		regs[domain.KindZAI] = source.Registration{Source: a.zaiAdapter, Enabled: true, Interval: cfg.ZAI.PollInterval}
 	}
 
 	a.mgr.Apply(regs)

@@ -22,7 +22,7 @@ import (
 // MonitorController is everything the monitor window needs from the app.
 // All methods are safe to call on the UI thread.
 type MonitorController interface {
-	States() map[domain.SourceID]domain.Runtime
+	States() map[domain.SourceKind]domain.Runtime
 	Config() config.Config
 	RefreshAll()
 	OpenSettings()

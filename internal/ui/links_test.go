@@ -12,14 +12,14 @@ func TestSourceWebLinkPerSource(t *testing.T) {
 	cfg.AMDGPUWeb.BaseURL = "http://127.0.0.1:19999"
 	cfg.LlamaSwap.BaseURL = "http://127.0.0.1:9999"
 	cases := []struct {
-		id    domain.SourceID
+		id    domain.SourceKind
 		label string
 		url   string
 	}{
-		{domain.SourceAMDGPUWeb, "AMDGPUTOP web UI", "http://127.0.0.1:19999"},
-		{domain.SourceLlamaSwap, "llama-swap UI", "http://127.0.0.1:9999/ui"},
-		{domain.SourceMiniMax, "MiniMax usage", MiniMaxConsoleURL},
-		{domain.SourceZAI, "Z.ai usage", ZAIUsageURL},
+		{domain.KindAMDGPUWeb, "AMDGPUTOP web UI", "http://127.0.0.1:19999"},
+		{domain.KindLlamaSwap, "llama-swap UI", "http://127.0.0.1:9999/ui"},
+		{domain.KindMiniMax, "MiniMax usage", MiniMaxConsoleURL},
+		{domain.KindZAI, "Z.ai usage", ZAIUsageURL},
 	}
 	for _, c := range cases {
 		l, ok := SourceWebLink(c.id, cfg)
@@ -27,7 +27,7 @@ func TestSourceWebLinkPerSource(t *testing.T) {
 			t.Errorf("SourceWebLink(%s) = %+v ok=%v; want %q %q", c.id, l, ok, c.label, c.url)
 		}
 	}
-	if _, ok := SourceWebLink(domain.SourceID("nope"), cfg); ok {
+	if _, ok := SourceWebLink(domain.SourceKind("nope"), cfg); ok {
 		t.Error("unknown source must have no link")
 	}
 }

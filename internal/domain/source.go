@@ -14,50 +14,51 @@ const (
 	CategoryRemote Category = "remote"
 )
 
-// SourceID identifies one monitored source. Values are stable identifiers
-// (they also key the preference storage) rather than display names.
-type SourceID string
+// SourceKind identifies one compiled source adapter kind, such as
+// "amdgputop-web". It distinguishes adapter implementations, not configured
+// source instances, and never serves as a unique configured identity.
+type SourceKind string
 
-// The four S1 sources.
+// The four compiled source kinds.
 const (
-	SourceAMDGPUWeb SourceID = "amdgputop-web"
-	SourceLlamaSwap SourceID = "llama-swap"
-	SourceMiniMax   SourceID = "minimax"
-	SourceZAI       SourceID = "zai"
+	KindAMDGPUWeb SourceKind = "amdgputop-web"
+	KindLlamaSwap SourceKind = "llama-swap"
+	KindMiniMax   SourceKind = "minimax"
+	KindZAI       SourceKind = "zai"
 )
 
-// Category reports where the source runs. Source IDs are compile-time
+// Category reports where the source runs. Source kinds are compile-time
 // constants in this application; any other value groups with remote.
-func (id SourceID) Category() Category {
-	switch id {
-	case SourceAMDGPUWeb, SourceLlamaSwap:
+func (kind SourceKind) Category() Category {
+	switch kind {
+	case KindAMDGPUWeb, KindLlamaSwap:
 		return CategoryLocal
 	default:
 		return CategoryRemote
 	}
 }
 
-// DisplayName returns the human-readable source name used in cards and
-// settings.
-func (id SourceID) DisplayName() string {
-	switch id {
-	case SourceAMDGPUWeb:
+// DisplayName returns the kind's human-readable default name used in cards
+// and settings.
+func (kind SourceKind) DisplayName() string {
+	switch kind {
+	case KindAMDGPUWeb:
 		return "amdgputop-web"
-	case SourceLlamaSwap:
+	case KindLlamaSwap:
 		return "llama-swap"
-	case SourceMiniMax:
+	case KindMiniMax:
 		return "MiniMax"
-	case SourceZAI:
+	case KindZAI:
 		return "Z.AI / GLM"
 	}
-	return string(id)
+	return string(kind)
 }
 
 // Snapshot is one successful observation from a source. Implementations are
 // immutable once Refresh returns; the manager hands them to the UI as-is.
 type Snapshot interface {
-	// SnapshotSource reports which source produced this snapshot.
-	SnapshotSource() SourceID
+	// SnapshotKind reports which source produced this snapshot.
+	SnapshotKind() SourceKind
 	// Timestamp reports when the data was collected.
 	Timestamp() time.Time
 }

@@ -32,16 +32,16 @@ type QuotaWindow struct {
 }
 
 // QuotaSnapshot is the quota state of one remote plan provider. Both quota
-// sources share this shape; Source carries the identity.
+// kinds share this shape; Kind carries the adapter kind.
 type QuotaSnapshot struct {
-	Source      SourceID
+	Kind        SourceKind
 	CollectedAt time.Time
 	Plan        string
 	Windows     []QuotaWindow
 }
 
-// SnapshotSource implements Snapshot.
-func (s QuotaSnapshot) SnapshotSource() SourceID { return s.Source }
+// SnapshotKind implements Snapshot.
+func (s QuotaSnapshot) SnapshotKind() SourceKind { return s.Kind }
 
 // Timestamp implements Snapshot.
 func (s QuotaSnapshot) Timestamp() time.Time { return s.CollectedAt }

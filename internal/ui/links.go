@@ -23,15 +23,15 @@ type SourceLink struct {
 // SourceWebLink returns the web UI link shown on one source's card
 // (navigation only — S1 never calls control APIs). ok is false for
 // sources without a web UI.
-func SourceWebLink(id domain.SourceID, cfg config.Config) (SourceLink, bool) {
+func SourceWebLink(id domain.SourceKind, cfg config.Config) (SourceLink, bool) {
 	switch id {
-	case domain.SourceAMDGPUWeb:
+	case domain.KindAMDGPUWeb:
 		return SourceLink{Label: "AMDGPUTOP web UI", URL: cfg.AMDGPUWeb.BaseURL}, true
-	case domain.SourceLlamaSwap:
+	case domain.KindLlamaSwap:
 		return SourceLink{Label: "llama-swap UI", URL: cfg.LlamaSwap.BaseURL + "/ui"}, true
-	case domain.SourceMiniMax:
+	case domain.KindMiniMax:
 		return SourceLink{Label: "MiniMax usage", URL: MiniMaxConsoleURL}, true
-	case domain.SourceZAI:
+	case domain.KindZAI:
 		return SourceLink{Label: "Z.ai usage", URL: ZAIUsageURL}, true
 	}
 	return SourceLink{}, false
@@ -41,11 +41,11 @@ func SourceWebLink(id domain.SourceID, cfg config.Config) (SourceLink, bool) {
 // (local sources, then remote) — the tray's Open submenu. Disabled
 // sources are omitted.
 func SourceLinks(cfg config.Config) []SourceLink {
-	order := []domain.SourceID{
-		domain.SourceAMDGPUWeb,
-		domain.SourceLlamaSwap,
-		domain.SourceMiniMax,
-		domain.SourceZAI,
+	order := []domain.SourceKind{
+		domain.KindAMDGPUWeb,
+		domain.KindLlamaSwap,
+		domain.KindMiniMax,
+		domain.KindZAI,
 	}
 	links := make([]SourceLink, 0, len(order))
 	for _, id := range order {
@@ -60,15 +60,15 @@ func SourceLinks(cfg config.Config) []SourceLink {
 }
 
 // sourceEnabled reports whether the source is switched on in the config.
-func sourceEnabled(id domain.SourceID, cfg config.Config) bool {
+func sourceEnabled(id domain.SourceKind, cfg config.Config) bool {
 	switch id {
-	case domain.SourceAMDGPUWeb:
+	case domain.KindAMDGPUWeb:
 		return cfg.AMDGPUWeb.Enabled
-	case domain.SourceLlamaSwap:
+	case domain.KindLlamaSwap:
 		return cfg.LlamaSwap.Enabled
-	case domain.SourceMiniMax:
+	case domain.KindMiniMax:
 		return cfg.MiniMax.Enabled
-	case domain.SourceZAI:
+	case domain.KindZAI:
 		return cfg.ZAI.Enabled
 	}
 	return false

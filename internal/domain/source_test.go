@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-func TestSourceIDCategory(t *testing.T) {
+func TestSourceKindCategory(t *testing.T) {
 	cases := []struct {
-		id   SourceID
+		id   SourceKind
 		want Category
 	}{
-		{SourceAMDGPUWeb, CategoryLocal},
-		{SourceLlamaSwap, CategoryLocal},
-		{SourceMiniMax, CategoryRemote},
-		{SourceZAI, CategoryRemote},
+		{KindAMDGPUWeb, CategoryLocal},
+		{KindLlamaSwap, CategoryLocal},
+		{KindMiniMax, CategoryRemote},
+		{KindZAI, CategoryRemote},
 	}
 	for _, tc := range cases {
 		if got := tc.id.Category(); got != tc.want {
@@ -24,15 +24,15 @@ func TestSourceIDCategory(t *testing.T) {
 	}
 }
 
-func TestSourceIDDisplayName(t *testing.T) {
+func TestSourceKindDisplayName(t *testing.T) {
 	cases := []struct {
-		id   SourceID
+		id   SourceKind
 		want string
 	}{
-		{SourceAMDGPUWeb, "amdgputop-web"},
-		{SourceLlamaSwap, "llama-swap"},
-		{SourceMiniMax, "MiniMax"},
-		{SourceZAI, "Z.AI / GLM"},
+		{KindAMDGPUWeb, "amdgputop-web"},
+		{KindLlamaSwap, "llama-swap"},
+		{KindMiniMax, "MiniMax"},
+		{KindZAI, "Z.AI / GLM"},
 	}
 	for _, tc := range cases {
 		if got := tc.id.DisplayName(); got != tc.want {
@@ -69,11 +69,11 @@ func TestDeriveState(t *testing.T) {
 // fakeSnapshot verifies the Snapshot interface is satisfied structurally by
 // distinct implementations.
 type fakeSnapshot struct {
-	source SourceID
+	source SourceKind
 	at     time.Time
 }
 
-func (f fakeSnapshot) SnapshotSource() SourceID { return f.source }
+func (f fakeSnapshot) SnapshotKind() SourceKind { return f.source }
 func (f fakeSnapshot) Timestamp() time.Time     { return f.at }
 
 func TestSnapshotConformance(t *testing.T) {
@@ -81,22 +81,22 @@ func TestSnapshotConformance(t *testing.T) {
 	snaps := map[string]Snapshot{
 		"gpu":       GPUSnapshot{CollectedAt: at},
 		"llamaswap": LlamaSwapSnapshot{CollectedAt: at},
-		"minimax":   QuotaSnapshot{Source: SourceMiniMax, CollectedAt: at},
-		"zai":       QuotaSnapshot{Source: SourceZAI, CollectedAt: at},
-		"fake":      fakeSnapshot{source: SourceZAI, at: at},
+		"minimax":   QuotaSnapshot{Kind: KindMiniMax, CollectedAt: at},
+		"zai":       QuotaSnapshot{Kind: KindZAI, CollectedAt: at},
+		"fake":      fakeSnapshot{source: KindZAI, at: at},
 	}
 	for name, s := range snaps {
 		if s.Timestamp() != at {
 			t.Errorf("%s: Timestamp() = %v, want %v", name, s.Timestamp(), at)
 		}
 	}
-	if (GPUSnapshot{}).SnapshotSource() != SourceAMDGPUWeb {
+	if (GPUSnapshot{}).SnapshotKind() != KindAMDGPUWeb {
 		t.Error("GPUSnapshot source mismatch")
 	}
-	if (LlamaSwapSnapshot{}).SnapshotSource() != SourceLlamaSwap {
+	if (LlamaSwapSnapshot{}).SnapshotKind() != KindLlamaSwap {
 		t.Error("LlamaSwapSnapshot source mismatch")
 	}
-	if (QuotaSnapshot{Source: SourceZAI}).SnapshotSource() != SourceZAI {
+	if (QuotaSnapshot{Kind: KindZAI}).SnapshotKind() != KindZAI {
 		t.Error("QuotaSnapshot source mismatch")
 	}
 }

@@ -65,8 +65,8 @@ func New(baseURL, selectedID string, client *http.Client, log *slog.Logger) *Ada
 	return &Adapter{baseURL: baseURL, selectedID: selectedID, client: client, log: log}
 }
 
-// ID implements source.Source.
-func (a *Adapter) ID() domain.SourceID { return domain.SourceAMDGPUWeb }
+// Kind implements source.Source.
+func (a *Adapter) Kind() domain.SourceKind { return domain.KindAMDGPUWeb }
 
 // RequestTimeout implements source.Source.
 func (a *Adapter) RequestTimeout() time.Duration { return requestTimeout }

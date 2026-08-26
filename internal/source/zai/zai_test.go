@@ -116,8 +116,8 @@ func refresh(t *testing.T, a *Adapter) domain.QuotaSnapshot {
 	if !ok {
 		t.Fatalf("snapshot type = %T", snap)
 	}
-	if q.Source != domain.SourceZAI {
-		t.Errorf("source = %q, want zai", q.Source)
+	if q.Kind != domain.KindZAI {
+		t.Errorf("source = %q, want zai", q.Kind)
 	}
 	return q
 }

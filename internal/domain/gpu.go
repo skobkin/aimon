@@ -29,8 +29,8 @@ type GPUSnapshot struct {
 	GTTTotalBytes  *uint64
 }
 
-// SnapshotSource implements Snapshot.
-func (s GPUSnapshot) SnapshotSource() SourceID { return SourceAMDGPUWeb }
+// SnapshotKind implements Snapshot.
+func (s GPUSnapshot) SnapshotKind() SourceKind { return KindAMDGPUWeb }
 
 // Timestamp implements Snapshot.
 func (s GPUSnapshot) Timestamp() time.Time { return s.CollectedAt }
