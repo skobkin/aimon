@@ -1,129 +1,49 @@
 package config
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestDefault(t *testing.T) {
-	cfg := Default()
-
-	if cfg.AMDGPUWeb.Enabled || cfg.LlamaSwap.Enabled || cfg.MiniMax.Enabled || cfg.ZAI.Enabled {
-		t.Error("defaults must start with every source disabled")
+func TestValidateURL(t *testing.T) {
+	cases := []struct {
+		raw   string
+		valid bool
+	}{
+		{"", false},
+		{"http://127.0.0.1:8080", true},
+		{"https://api.z.ai", true},
+		{"ftp://127.0.0.1:8080", false},
+		{"not a url", false},
+		{"http://", false}, // scheme ok, host empty
 	}
-	if cfg.AMDGPUWeb.BaseURL != DefaultAMDGPUWebURL {
-		t.Errorf("amdgputop-web default URL = %q", cfg.AMDGPUWeb.BaseURL)
-	}
-	if cfg.LlamaSwap.BaseURL != DefaultLlamaSwapURL {
-		t.Errorf("llama-swap default URL = %q", cfg.LlamaSwap.BaseURL)
-	}
-	if cfg.ZAI.BaseURL != DefaultZAIURL {
-		t.Errorf("Z.AI default URL = %q", cfg.ZAI.BaseURL)
-	}
-	if cfg.AMDGPUWeb.PollInterval != 5*time.Second {
-		t.Errorf("local default interval = %v", cfg.AMDGPUWeb.PollInterval)
-	}
-	if cfg.MiniMax.PollInterval != 60*time.Second {
-		t.Errorf("remote default interval = %v", cfg.MiniMax.PollInterval)
-	}
-}
-
-func TestValidate(t *testing.T) {
-	valid := Default()
-	if errs := valid.Validate(); len(errs) != 0 {
-		t.Fatalf("default config should validate, got %v", errs)
-	}
-
-	bad := Default()
-	bad.AMDGPUWeb.BaseURL = "ftp://127.0.0.1:8080"
-	bad.LlamaSwap.BaseURL = "not a url"
-	bad.ZAI.BaseURL = "http://" // scheme ok, host empty
-	bad.AMDGPUWeb.PollInterval = 7 * time.Second
-	bad.MiniMax.PollInterval = 5 * time.Second // below remote minimum preset
-
-	errs := bad.Validate()
-	if len(errs) != 5 {
-		t.Fatalf("expected 5 validation errors, got %d: %v", len(errs), errs)
-	}
-
-	var sawScheme, sawHost, sawEmptyHost, sawLocalInterval, sawRemoteInterval bool
-	for _, e := range errs {
-		switch {
-		case e.Source == "amdgputop-web" && e.Field == "URL" && strings.Contains(e.Message, "scheme"):
-			sawScheme = true
-		case e.Source == "llama-swap" && e.Field == "URL":
-			sawHost = true
-		case e.Source == "Z.AI / GLM" && e.Field == "URL":
-			sawEmptyHost = true
-		case e.Source == "amdgputop-web" && e.Field == "Poll interval":
-			sawLocalInterval = true
-		case e.Source == "MiniMax" && e.Field == "Poll interval":
-			sawRemoteInterval = true
+	for _, c := range cases {
+		errs := validateURL("test", c.raw)
+		if (len(errs) == 0) != c.valid {
+			t.Errorf("validateURL(%q) errs = %v, valid = %v", c.raw, errs, c.valid)
 		}
 	}
-	if !(sawScheme && sawHost && sawEmptyHost && sawLocalInterval && sawRemoteInterval) {
-		t.Errorf("missing expected errors: scheme=%v host=%v emptyHost=%v localInterval=%v remoteInterval=%v",
-			sawScheme, sawHost, sawEmptyHost, sawLocalInterval, sawRemoteInterval)
+	if errs := validateURL("test", ""); len(errs) != 1 || errs[0].Message != "must not be empty" {
+		t.Errorf("empty-URL error = %v", errs)
 	}
 }
 
-func TestValidateEmptyURL(t *testing.T) {
-	bad := Default()
-	bad.LlamaSwap.BaseURL = ""
-	errs := bad.Validate()
-	if len(errs) != 1 || errs[0].Message != "must not be empty" {
-		t.Fatalf("expected empty-URL error, got %v", errs)
+func TestValidateInterval(t *testing.T) {
+	if errs := validateInterval("test", 5*time.Second, LocalIntervals); len(errs) != 0 {
+		t.Errorf("preset interval rejected: %v", errs)
 	}
-}
-
-func TestSanitize(t *testing.T) {
-	def := Default()
-
-	dirty := Config{
-		AMDGPUWeb: AMDGPUWeb{
-			BaseURL:      "  http://127.0.0.1:9999/  ",
-			PollInterval: 15 * time.Second,
-		},
-		LlamaSwap: LlamaSwap{
-			BaseURL:      "ftp://example.com",
-			PollInterval: 5 * time.Second,
-		},
-		MiniMax: MiniMax{PollInterval: 2 * time.Minute},
-		ZAI:     ZAI{BaseURL: "https://api.z.ai/", PollInterval: 1 * time.Minute},
+	errs := validateInterval("test", 7*time.Second, LocalIntervals)
+	if len(errs) != 1 || errs[0].Field != "Poll interval" {
+		t.Fatalf("non-preset interval errors = %v", errs)
 	}
-
-	got := dirty.Sanitize()
-
-	if got.AMDGPUWeb.BaseURL != "http://127.0.0.1:9999" {
-		t.Errorf("trim/slash-strip failed: %q", got.AMDGPUWeb.BaseURL)
+	if want := "must be one of 5s, 10s, 15s, 30s, 1m"; errs[0].Message != want {
+		t.Errorf("message = %q, want %q", errs[0].Message, want)
 	}
-	if got.AMDGPUWeb.PollInterval != 15*time.Second {
-		t.Error("valid interval must survive sanitize")
+	if errs := validateInterval("test", 30*time.Second, RemoteIntervals); len(errs) != 0 {
+		t.Errorf("remote preset rejected: %v", errs)
 	}
-	if got.LlamaSwap.BaseURL != def.LlamaSwap.BaseURL {
-		t.Errorf("invalid URL must fall back to default, got %q", got.LlamaSwap.BaseURL)
-	}
-	if got.ZAI.BaseURL != "https://api.z.ai" {
-		t.Errorf("trailing slash must be stripped: %q", got.ZAI.BaseURL)
-	}
-
-	worse := Default()
-	worse.AMDGPUWeb.PollInterval = 0
-	worse.MiniMax.PollInterval = -time.Second
-	s := worse.Sanitize()
-	if s.AMDGPUWeb.PollInterval != def.AMDGPUWeb.PollInterval {
-		t.Errorf("invalid interval must fall back to default, got %v", s.AMDGPUWeb.PollInterval)
-	}
-	if s.MiniMax.PollInterval != def.MiniMax.PollInterval {
-		t.Errorf("invalid remote interval must fall back to default, got %v", s.MiniMax.PollInterval)
-	}
-
-	// Empty URL falls back to default.
-	empty := Default()
-	empty.ZAI.BaseURL = ""
-	if got := empty.Sanitize().ZAI.BaseURL; got != DefaultZAIURL {
-		t.Errorf("empty URL must fall back to default, got %q", got)
+	if errs := validateInterval("test", 5*time.Second, RemoteIntervals); len(errs) != 1 {
+		t.Errorf("local preset must not validate as remote: %v", errs)
 	}
 }
 
@@ -143,5 +63,17 @@ func TestIntervalLabel(t *testing.T) {
 		if got := IntervalLabel(d); got != want {
 			t.Errorf("IntervalLabel(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+func TestIntervalDefaults(t *testing.T) {
+	if DefaultLocalInterval != 5*time.Second {
+		t.Errorf("local default = %v", DefaultLocalInterval)
+	}
+	if DefaultRemoteInterval != 60*time.Second {
+		t.Errorf("remote default = %v", DefaultRemoteInterval)
+	}
+	if LocalIntervals[0] != 5*time.Second || RemoteIntervals[0] != 30*time.Second {
+		t.Error("preset lists changed unexpectedly")
 	}
 }

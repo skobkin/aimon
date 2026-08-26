@@ -36,22 +36,11 @@ type Status struct {
 }
 
 // AccountID names one stored credential. Stable identifiers; changing one
-// orphans the stored secret.
+// orphans the stored secret. Accounts are built by AccountForInstance;
+// v0.2 installations may still hold old kind-keyed entries
+// ("source/llama-swap" and friends) that are intentionally never migrated
+// or deleted.
 type AccountID string
-
-// Legacy v0.2 kind-keyed accounts. Superseded by AccountForInstance for
-// dynamic instances; still used by the pre-S3 wiring until adapters take
-// instance-scoped accounts. Old keychain entries under these accounts are
-// intentionally never migrated or deleted.
-const (
-	// AccountLlamaSwap holds the llama-swap API key, used only when the
-	// local instance requires one.
-	AccountLlamaSwap AccountID = "source/llama-swap"
-	// AccountMiniMax holds the MiniMax subscription key.
-	AccountMiniMax AccountID = "source/minimax"
-	// AccountZAI holds the Z.AI / GLM coding plan token.
-	AccountZAI AccountID = "source/zai"
-)
 
 // Slot identifies one credential within a source instance. S3 needs only
 // the API key slot; the concept exists so a future kind with more than one

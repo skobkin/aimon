@@ -89,9 +89,9 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 
 func TestOverrideStorePrefersTypedValue(t *testing.T) {
 	inner := &memStore{secret: "stored-value"}
-	o := &overrideStore{inner: inner, account: credentials.AccountZAI, override: "typed-value"}
+	o := &overrideStore{inner: inner, account: credentials.AccountID("source/test-a/api-key"), override: "typed-value"}
 
-	got, err := o.Get(context.Background(), credentials.AccountZAI)
+	got, err := o.Get(context.Background(), credentials.AccountID("source/test-a/api-key"))
 	if err != nil || got != "typed-value" {
 		t.Errorf("Get with override = %q, %v; want typed-value", got, err)
 	}
@@ -99,9 +99,9 @@ func TestOverrideStorePrefersTypedValue(t *testing.T) {
 
 func TestOverrideStoreDelegatesWithoutOverride(t *testing.T) {
 	inner := &memStore{secret: "stored-value"}
-	o := &overrideStore{inner: inner, account: credentials.AccountZAI, override: ""}
+	o := &overrideStore{inner: inner, account: credentials.AccountID("source/test-a/api-key"), override: ""}
 
-	got, err := o.Get(context.Background(), credentials.AccountZAI)
+	got, err := o.Get(context.Background(), credentials.AccountID("source/test-a/api-key"))
 	if err != nil || got != "stored-value" {
 		t.Errorf("Get without override = %q, %v; want stored-value", got, err)
 	}
@@ -109,28 +109,11 @@ func TestOverrideStoreDelegatesWithoutOverride(t *testing.T) {
 
 func TestOverrideStoreDelegatesOtherAccounts(t *testing.T) {
 	inner := &memStore{secret: "stored-value"}
-	o := &overrideStore{inner: inner, account: credentials.AccountZAI, override: "typed-value"}
+	o := &overrideStore{inner: inner, account: credentials.AccountID("source/test-a/api-key"), override: "typed-value"}
 
-	got, err := o.Get(context.Background(), credentials.AccountMiniMax)
+	got, err := o.Get(context.Background(), credentials.AccountID("source/test-b/api-key"))
 	if err != nil || got != "stored-value" {
 		t.Errorf("Get for other account = %q, %v; want stored-value", got, err)
-	}
-}
-
-func TestReadOnlyStoreRejectsMutations(t *testing.T) {
-	r := readOnlyStore{inner: &memStore{secret: "stored-value"}}
-
-	if got, err := r.Get(context.Background(), "any"); err != nil || got != "stored-value" {
-		t.Errorf("Get must delegate: %q, %v", got, err)
-	}
-	if err := r.Set(context.Background(), "any", "x"); err == nil {
-		t.Error("Set must be rejected")
-	}
-	if err := r.Delete(context.Background(), "any"); err == nil {
-		t.Error("Delete must be rejected")
-	}
-	if got, err := r.Get(context.Background(), "any"); err != nil || got != "stored-value" {
-		t.Errorf("rejected mutations must leave the store untouched: %q, %v", got, err)
 	}
 }
 
@@ -143,6 +126,46 @@ func gpuInst(id, name, baseURL string, enabled bool) config.SourceInstance {
 		Enabled:      enabled,
 		PollInterval: time.Hour, // no scheduled churn during the test
 		AMDGPUWeb:    &config.AMDGPUWebSettings{BaseURL: baseURL},
+	}
+}
+
+// A failed SaveInstances (validation or persistence) must leave the
+// authoritative list and the runtime completely untouched — no partial
+// application of an unsaved configuration.
+func TestSaveInstancesFailureLeavesStateUntouched(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := &App{
+		log:      logger,
+		client:   &http.Client{},
+		creds:    &memStore{},
+		mgr:      source.NewManager(logger),
+		adapters: map[domain.InstanceID]adapterEntry{},
+	}
+	defer a.mgr.Stop()
+
+	good := []config.SourceInstance{
+		gpuInst("gpu-a", "GPU A", "http://127.0.0.1:49101", true),
+	}
+	a.applyInstances(good)
+
+	// Invalid candidate: duplicate instance IDs fail validation inside
+	// SaveInstances before anything is persisted or applied.
+	bad := []config.SourceInstance{
+		gpuInst("gpu-a", "GPU A", "http://127.0.0.1:49101", true),
+		gpuInst("gpu-a", "Duplicate", "http://127.0.0.1:49102", true),
+	}
+	if err := a.SaveInstances(bad); err == nil {
+		t.Fatal("the invalid candidate must be rejected")
+	}
+
+	if got := a.Instances(); len(got) != 1 || got[0].Name != "GPU A" {
+		t.Errorf("authoritative list changed: %+v", got)
+	}
+	if states := a.mgr.States(); len(states) != 1 {
+		t.Errorf("runtime changed after a failed save: %d entries", len(states))
+	}
+	if _, ok := a.mgr.States()["gpu-a"]; !ok {
+		t.Error("the running instance must be untouched")
 	}
 }
 

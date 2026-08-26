@@ -8,6 +8,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -29,9 +30,6 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/resources"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
-	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
-	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
-	"git.skobk.in/skobkin/aimonitor/internal/source/zai"
 	"git.skobk.in/skobkin/aimonitor/internal/ui/monitor"
 	"git.skobk.in/skobkin/aimonitor/internal/ui/settings"
 )
@@ -127,28 +125,13 @@ func New() (*App, error) {
 
 	a.monitor = monitor.NewMonitor(fa, a, a.done)
 	a.settings = settings.NewSettings(fa, settings.Deps{
-		// Transitional wiring: the fixed-form window is replaced by the
-		// per-instance CRUD editor in the next change. Until then it
-		// opens with defaults, cannot persist anything, and cannot touch
-		// the keychain, so it cannot fight the instance document.
-		LoadConfig: func() config.Config { return config.Default() },
-		OnSave: func(config.Config) error {
-			return errors.New("sources are configured per instance; this window is disabled during the transition")
-		},
-		Creds: readOnlyStore{inner: creds},
-		TestAMDGPU: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
+		LoadInstances:      a.Instances,
+		SaveInstances:      a.SaveInstances,
+		CleanupCredentials: a.cleanupCredentials,
+		Creds:              creds,
+		TestConnection:     a.testConnection,
+		DiscoverGPUs: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
-		},
-		TestLlamaSwap: func(ctx context.Context, baseURL, override string) error {
-			return llamaswap.New(baseURL, credentials.AccountLlamaSwap, a.testerStore(override, credentials.AccountLlamaSwap), client, logger).Test(ctx)
-		},
-		TestMiniMax: func(ctx context.Context, override string) error {
-			_, err := minimax.New(credentials.AccountMiniMax, a.testerStore(override, credentials.AccountMiniMax), client, logger).Refresh(ctx)
-			return err
-		},
-		TestZAI: func(ctx context.Context, baseURL, override string) error {
-			_, err := zai.New(baseURL, credentials.AccountZAI, a.testerStore(override, credentials.AccountZAI), client, logger).Refresh(ctx)
-			return err
 		},
 		Done: a.done,
 	})
@@ -420,26 +403,42 @@ func (a *App) testerStore(override string, account credentials.AccountID) creden
 	return &overrideStore{inner: a.creds, account: account, override: override}
 }
 
-// readOnlyStore delegates reads to the backing store and rejects every
-// mutation. It keeps the transitional fixed-form Settings window from
-// writing or deleting keychain entries while the per-instance editor that
-// owns credentials is being wired up.
-type readOnlyStore struct {
-	inner credentials.Store
+// testConnection runs one instance's kind test with the editor's unsaved
+// values. A typed-but-unsaved secret rides along through the override
+// store, so the test sees exactly what Save would use; nothing persists.
+func (a *App) testConnection(ctx context.Context, inst config.SourceInstance, typed string) error {
+	def, ok := registry.Get(inst.Kind)
+	if !ok {
+		return fmt.Errorf("unknown source kind %q", inst.Kind)
+	}
+	account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+	if err != nil {
+		return err
+	}
+	deps := registry.Deps{Creds: a.testerStore(typed, account), Client: a.client, Log: a.log}
+	return def.Test(ctx, inst, deps)
 }
 
-func (r readOnlyStore) Status(ctx context.Context) credentials.Status { return r.inner.Status(ctx) }
-
-func (r readOnlyStore) Get(ctx context.Context, id credentials.AccountID) (string, error) {
-	return r.inner.Get(ctx, id)
-}
-
-func (r readOnlyStore) Set(ctx context.Context, id credentials.AccountID, secret string) error {
-	return errors.New("credential changes are disabled during the settings transition")
-}
-
-func (r readOnlyStore) Delete(ctx context.Context, id credentials.AccountID) error {
-	return errors.New("credential changes are disabled during the settings transition")
+// cleanupCredentials best-effort deletes every credential slot of a
+// deleted instance. Missing entries already satisfy the request; anything
+// else is reported to the caller (as a warning — the deletion stands).
+func (a *App) cleanupCredentials(ctx context.Context, inst config.SourceInstance) error {
+	def, ok := registry.Get(inst.Kind)
+	if !ok || len(def.CredentialSlots) == 0 {
+		return nil
+	}
+	var errs []error
+	for _, slot := range def.CredentialSlots {
+		account, err := credentials.AccountForInstance(inst.ID, slot)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := a.creds.Delete(ctx, account); err != nil && !errors.Is(err, credentials.ErrNotFound) {
+			errs = append(errs, fmt.Errorf("%s: %w", slot, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // overrideStore layers a typed-in credential over a backing store.

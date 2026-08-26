@@ -8,12 +8,226 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
+func gpu(id, name, url string, enabled bool) config.SourceInstance {
+	return config.SourceInstance{
+		ID:           domain.InstanceID(id),
+		Kind:         domain.KindAMDGPUWeb,
+		Name:         name,
+		Enabled:      enabled,
+		PollInterval: 5 * time.Second,
+		AMDGPUWeb:    &config.AMDGPUWebSettings{BaseURL: url},
+	}
+}
+
+func mm(id, name string, enabled bool) config.SourceInstance {
+	return config.SourceInstance{
+		ID:           domain.InstanceID(id),
+		Kind:         domain.KindMiniMax,
+		Name:         name,
+		Enabled:      enabled,
+		PollInterval: time.Minute,
+		MiniMax:      &config.MiniMaxSettings{},
+	}
+}
+
+// interleaved is a list whose categories alternate; ordering operations
+// must respect category boundaries without re-sorting the whole list.
+func interleaved() []config.SourceInstance {
+	return []config.SourceInstance{
+		gpu("g1", "GPU one", "http://127.0.0.1:1", true),
+		mm("m1", "MiniMax one", true),
+		gpu("g2", "GPU two", "http://127.0.0.1:2", true),
+		mm("m2", "MiniMax two", false),
+	}
+}
+
+func ids(list []config.SourceInstance) []domain.InstanceID {
+	out := make([]domain.InstanceID, len(list))
+	for i, inst := range list {
+		out[i] = inst.ID
+	}
+	return out
+}
+
+func TestMoveUpWithinCategorySkipsOtherKinds(t *testing.T) {
+	// g2 moves above g1, jumping over the MiniMax instance between them.
+	got := ids(MoveUp(interleaved(), "g2"))
+	want := []domain.InstanceID{"g2", "m1", "g1", "m2"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("MoveUp = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMoveDownWithinCategorySkipsOtherKinds(t *testing.T) {
+	got := ids(MoveDown(interleaved(), "m1"))
+	want := []domain.InstanceID{"g1", "m2", "g2", "m1"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("MoveDown = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMoveCategoryEdgesAreNoOps(t *testing.T) {
+	list := interleaved()
+	if got := MoveUp(list, "g1"); len(got) != 4 || got[0].ID != "g1" {
+		t.Errorf("first local must not move up: %v", ids(got))
+	}
+	if got := MoveUp(list, "m1"); len(got) != 4 || got[1].ID != "m1" {
+		t.Errorf("first remote must not move up: %v", ids(got))
+	}
+	if got := MoveDown(list, "g2"); len(got) != 4 || got[2].ID != "g2" {
+		t.Errorf("last local must not move down: %v", ids(got))
+	}
+	if got := MoveDown(list, "m2"); len(got) != 4 || got[3].ID != "m2" {
+		t.Errorf("last remote must not move down: %v", ids(got))
+	}
+	if got := MoveUp(list, "missing"); len(got) != 4 || got[0].ID != "g1" {
+		t.Errorf("unknown ID must be a no-op: %v", ids(got))
+	}
+}
+
+func TestCanMoveEdges(t *testing.T) {
+	list := interleaved()
+	cases := []struct {
+		id       domain.InstanceID
+		up, down bool
+	}{
+		{"g1", false, true},
+		{"g2", true, false},
+		{"m1", false, true},
+		{"m2", true, false},
+		{"missing", false, false},
+	}
+	for _, c := range cases {
+		if got := CanMoveUp(list, c.id); got != c.up {
+			t.Errorf("CanMoveUp(%s) = %v, want %v", c.id, got, c.up)
+		}
+		if got := CanMoveDown(list, c.id); got != c.down {
+			t.Errorf("CanMoveDown(%s) = %v, want %v", c.id, got, c.down)
+		}
+	}
+}
+
+func TestSetEnabledKeyedByID(t *testing.T) {
+	list := interleaved()
+	got := SetEnabled(list, "m2", true)
+	if !got[3].Enabled {
+		t.Error("SetEnabled must flip the target")
+	}
+	// A rename-simulation: the same ID with a different name still matches.
+	renamed := append([]config.SourceInstance(nil), list...)
+	renamed[3] = gpu("m2", "renamed", "http://x", true) // wrong kind, same ID: still keyed
+	got = SetEnabled(renamed, "m2", false)
+	if got[3].Enabled {
+		t.Error("SetEnabled keys by instance ID, not name or kind")
+	}
+	if list[3].Enabled {
+		t.Error("the source list must not be mutated in place")
+	}
+}
+
+func TestRemoveInstanceRemovesExactlyOne(t *testing.T) {
+	got := RemoveInstance(interleaved(), "m1")
+	if len(got) != 3 {
+		t.Fatalf("RemoveInstance left %d entries", len(got))
+	}
+	for _, inst := range got {
+		if inst.ID == "m1" {
+			t.Error("the target survived")
+		}
+	}
+	if got := RemoveInstance(interleaved(), "missing"); len(got) != 4 {
+		t.Errorf("removing an unknown ID changed the list: %v", ids(got))
+	}
+}
+
+func TestReplaceInstanceEditsInPlaceAndAppendsNew(t *testing.T) {
+	list := interleaved()
+	edited := list[1]
+	edited.Name = "MiniMax renamed"
+	edited.Enabled = false
+
+	got := ReplaceInstance(list, edited)
+	if len(got) != 4 {
+		t.Fatalf("edit changed the list length: %d", len(got))
+	}
+	if got[1].Name != "MiniMax renamed" || got[1].Enabled {
+		t.Errorf("edit did not land in place: %+v", got[1])
+	}
+
+	fresh := gpu("new-1", "New GPU", "http://127.0.0.1:9", true)
+	got = ReplaceInstance(list, fresh)
+	if len(got) != 5 || got[4].ID != "new-1" {
+		t.Fatalf("append = %v", ids(got))
+	}
+	// Appending at the flat end renders last within its category section.
+	if got[4].Kind.Category() != domain.CategoryLocal {
+		t.Errorf("appended instance kind = %s", got[4].Kind)
+	}
+}
+
+// The Add editor's draft: default name prefilled, default interval, valid
+// default settings, and a unique stable ID generated at editor-open time.
+func TestNewDraftPrefillsAndGeneratesID(t *testing.T) {
+	draft, ok := newDraft(domain.KindMiniMax)
+	if !ok {
+		t.Fatal("known kind must produce a draft")
+	}
+	if draft.Name != "MiniMax" {
+		t.Errorf("draft name = %q, want the kind default", draft.Name)
+	}
+	if draft.PollInterval != config.DefaultRemoteInterval {
+		t.Errorf("draft interval = %v, want the category default", draft.PollInterval)
+	}
+	if !draft.Enabled {
+		t.Error("drafts start enabled")
+	}
+	if draft.MiniMax == nil {
+		t.Error("draft must carry the kind's default settings")
+	}
+	if draft.ID == "" {
+		t.Fatal("draft must have a generated instance ID")
+	}
+
+	other, _ := newDraft(domain.KindMiniMax)
+	if other.ID == draft.ID {
+		t.Error("each Add editor must get its own fresh ID")
+	}
+
+	amd, _ := newDraft(domain.KindAMDGPUWeb)
+	if amd.AMDGPUWeb == nil || amd.AMDGPUWeb.BaseURL != config.DefaultAMDGPUWebURL {
+		t.Errorf("amdgputop-web draft settings = %+v", amd.AMDGPUWeb)
+	}
+	if _, ok := newDraft(domain.SourceKind("nope")); ok {
+		t.Error("unknown kind must not produce a draft")
+	}
+}
+
+// The mutation gate: at most one configuration mutation may be in flight;
+// a second entry while one runs is rejected until the first leaves.
+func TestMutationGateSingleFlight(t *testing.T) {
+	s := &Settings{}
+	if !s.mutBusy.CompareAndSwap(false, true) {
+		t.Error("first entry must succeed")
+	}
+	if s.mutBusy.CompareAndSwap(false, true) {
+		t.Error("a concurrent second entry must be rejected")
+	}
+	s.mutBusy.Store(false)
+	if !s.mutBusy.CompareAndSwap(false, true) {
+		t.Error("the gate must reopen after the mutation finished")
+	}
+}
+
 func TestURLValidator(t *testing.T) {
 	cases := []struct {
 		in      string
 		wantErr bool
 	}{
-		{"", false}, // empty falls back to the default on sanitize
+		{"", false},
 		{"http://127.0.0.1:8080", false},
 		{"https://api.z.ai", false},
 		{"ftp://host", true},

@@ -23,6 +23,16 @@ func newFakeKeyring() *fakeKeyring {
 	return &fakeKeyring{stored: map[string]string{}}
 }
 
+// testAccount is one instance-scoped account, as production code builds
+// them. Tests never touch a real keychain.
+func testAccount() AccountID {
+	acc, err := AccountForInstance("test-instance-1", SlotAPIKey)
+	if err != nil {
+		panic(err)
+	}
+	return acc
+}
+
 func (f *fakeKeyring) get(service, user string) (string, error) {
 	if f.getErr != nil {
 		return "", f.getErr
@@ -53,7 +63,7 @@ func (f *fakeKeyring) delete(service, user string) error {
 func TestGetNotFoundPassesThrough(t *testing.T) {
 	s := newKeyringStore(keyringOps{get: newFakeKeyring().get, set: newFakeKeyring().set, delete: newFakeKeyring().delete})
 
-	_, err := s.Get(context.Background(), AccountMiniMax)
+	_, err := s.Get(context.Background(), testAccount())
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -64,15 +74,15 @@ func TestGetSetRoundTrip(t *testing.T) {
 	s := newKeyringStore(keyringOps{get: fake.get, set: fake.set, delete: fake.delete})
 	ctx := context.Background()
 
-	if err := s.Set(ctx, AccountZAI, "test-token"); err != nil {
+	if err := s.Set(ctx, testAccount(), "test-token"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	got, err := s.Get(ctx, AccountZAI)
+	got, err := s.Get(ctx, testAccount())
 	if err != nil || got != "test-token" {
 		t.Fatalf("Get = (%q, %v), want (test-token, nil)", got, err)
 	}
-	if v := fake.stored[ServiceName+"/source/zai"]; v != "test-token" {
-		t.Errorf("stored under %q with wrong value %q", ServiceName+"/source/zai", v)
+	if v := fake.stored[ServiceName+"/source/test-instance-1/api-key"]; v != "test-token" {
+		t.Errorf("stored under %q with wrong value %q", ServiceName+"/source/test-instance-1/api-key", v)
 	}
 }
 
@@ -81,16 +91,16 @@ func TestDeleteIdempotent(t *testing.T) {
 	s := newKeyringStore(keyringOps{get: fake.get, set: fake.set, delete: fake.delete})
 	ctx := context.Background()
 
-	if err := s.Delete(ctx, AccountLlamaSwap); err != nil {
+	if err := s.Delete(ctx, testAccount()); err != nil {
 		t.Fatalf("deleting an unset account must succeed, got %v", err)
 	}
-	if err := s.Set(ctx, AccountLlamaSwap, "k"); err != nil {
+	if err := s.Set(ctx, testAccount(), "k"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Delete(ctx, AccountLlamaSwap); err != nil {
+	if err := s.Delete(ctx, testAccount()); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := s.Get(ctx, AccountLlamaSwap); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Get(ctx, testAccount()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("after delete, Get should be ErrNotFound, got %v", err)
 	}
 }
@@ -113,7 +123,7 @@ func TestStateClassification(t *testing.T) {
 		fake.getErr = tc.err
 		s := newKeyringStore(keyringOps{get: fake.get, set: fake.set, delete: fake.delete})
 
-		_, err := s.Get(context.Background(), AccountMiniMax)
+		_, err := s.Get(context.Background(), testAccount())
 		var se *StateError
 		if !errors.As(err, &se) {
 			t.Errorf("%s: expected *StateError, got %T %v", tc.name, err, err)
@@ -164,25 +174,12 @@ func TestSetUsesServiceAndAccount(t *testing.T) {
 	fake := newFakeKeyring()
 	s := newKeyringStore(keyringOps{get: fake.get, set: fake.set, delete: fake.delete})
 
-	_ = s.Set(context.Background(), AccountLlamaSwap, "secret-value")
+	_ = s.Set(context.Background(), testAccount(), "secret-value")
 
 	if len(fake.stored) != 1 {
 		t.Fatalf("expected exactly one stored entry, got %d", len(fake.stored))
 	}
-	if _, ok := fake.stored["aimonitor/source/llama-swap"]; !ok {
+	if _, ok := fake.stored["aimonitor/source/test-instance-1/api-key"]; !ok {
 		t.Errorf("entry must be stored under service/account, have %v", fake.stored)
-	}
-}
-
-func TestAccountsStable(t *testing.T) {
-	cases := map[AccountID]string{
-		AccountLlamaSwap: "source/llama-swap",
-		AccountMiniMax:   "source/minimax",
-		AccountZAI:       "source/zai",
-	}
-	for id, want := range cases {
-		if string(id) != want {
-			t.Errorf("account %q != %q", id, want)
-		}
 	}
 }
