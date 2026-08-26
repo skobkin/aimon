@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
 // State describes the usability of the keychain backend.
@@ -37,7 +39,10 @@ type Status struct {
 // orphans the stored secret.
 type AccountID string
 
-// Credential accounts, one per source that authenticates.
+// Legacy v0.2 kind-keyed accounts. Superseded by AccountForInstance for
+// dynamic instances; still used by the pre-S3 wiring until adapters take
+// instance-scoped accounts. Old keychain entries under these accounts are
+// intentionally never migrated or deleted.
 const (
 	// AccountLlamaSwap holds the llama-swap API key, used only when the
 	// local instance requires one.
@@ -47,6 +52,30 @@ const (
 	// AccountZAI holds the Z.AI / GLM coding plan token.
 	AccountZAI AccountID = "source/zai"
 )
+
+// Slot identifies one credential within a source instance. S3 needs only
+// the API key slot; the concept exists so a future kind with more than one
+// secret needs no new key scheme.
+type Slot string
+
+// SlotAPIKey is the single API key/token slot used by the credentialed
+// kinds (llama-swap optional, MiniMax, Z.AI / GLM).
+const SlotAPIKey Slot = "api-key"
+
+// AccountForInstance builds the keychain account for one instance's
+// credential slot: "source/<instance-id>/<slot>". The account is scoped by
+// the stable opaque instance ID, so a rename, reorder, or enable change
+// never moves credentials, and two instances of the same kind never share
+// one. An empty instance ID or slot is a programming error and is rejected.
+func AccountForInstance(id domain.InstanceID, slot Slot) (AccountID, error) {
+	if id == "" {
+		return "", fmt.Errorf("credential account: empty instance ID")
+	}
+	if slot == "" {
+		return "", fmt.Errorf("credential account: empty slot")
+	}
+	return AccountID(fmt.Sprintf("source/%s/%s", id, slot)), nil
+}
 
 // ErrNotFound reports that no credential is stored for an account. It is
 // distinct from a broken keychain: callers treat it as "not configured".
