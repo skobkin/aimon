@@ -7,6 +7,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,14 +20,16 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
 	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
 	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
+	"git.skobk.in/skobkin/aimonitor/internal/source/openrouter"
 	"git.skobk.in/skobkin/aimonitor/internal/source/zai"
 )
 
 // Console pages of the remote providers (their own usage dashboards, not
 // the API endpoints the adapters poll).
 const (
-	MiniMaxConsoleURL = "https://platform.minimax.io/console/usage"
-	ZAIUsageURL       = "https://z.ai/manage-apikey/coding-plan/personal/usage"
+	MiniMaxConsoleURL     = "https://platform.minimax.io/console/usage"
+	ZAIUsageURL           = "https://z.ai/manage-apikey/coding-plan/personal/usage"
+	OpenRouterActivityURL = "https://openrouter.ai/activity"
 )
 
 // Deps are the shared construction dependencies handed to Build and Test.
@@ -55,6 +58,10 @@ type Definition struct {
 	// and (on delete) best-effort cleanup. Empty for credentialess kinds;
 	// llama-swap's single slot is optional.
 	CredentialSlots []credentials.Slot
+	// SlotHint optionally returns concise explanatory text for one of the
+	// kind's slots, shown under its editor password entry. Nil means no
+	// hint is shown.
+	SlotHint func(slot credentials.Slot) string
 	// WebLabel names the provider's own web UI on card buttons.
 	WebLabel string
 
@@ -66,8 +73,11 @@ type Definition struct {
 	// programming error reported as an error, not silently tolerated.
 	Build func(inst config.SourceInstance, deps Deps) (source.Source, error)
 	// Test performs a Settings connection test with the instance's unsaved
-	// editor values. It never persists anything.
-	Test func(ctx context.Context, inst config.SourceInstance, deps Deps) error
+	// editor values. It never persists anything. Kinds with several
+	// credentials report each capability separately in the report; with no
+	// capability configured the report lists every slot as skipped and is
+	// not successful (nothing was verified).
+	Test func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport
 	// WebURL derives the provider web UI URL from instance settings; ok is
 	// false for kinds without a web UI.
 	WebURL func(inst config.SourceInstance) (string, bool)
@@ -76,6 +86,11 @@ type Definition struct {
 // apiKeySlots is the single-slot credential set shared by the credentialed
 // kinds.
 var apiKeySlots = []credentials.Slot{credentials.SlotAPIKey}
+
+// openRouterSlots lists both OpenRouter credential slots in reporting
+// order: the ordinary inference/API key first, then the optional account
+// Management key. The two are never interchangeable.
+var openRouterSlots = []credentials.Slot{credentials.SlotAPIKey, credentials.SlotManagementKey}
 
 // definitions lists every compiled kind. Local kinds first, remote second;
 // within a category the list order is only a fallback for type choosers —
@@ -98,13 +113,13 @@ var definitions = []Definition{
 			}
 			return amdgpuweb.New(s.BaseURL, s.SelectedGPUID, deps.Client, deps.Log), nil
 		},
-		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) error {
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
 			s := inst.AMDGPUWeb
 			if s == nil {
-				return missingSettings(inst)
+				return failedTestReport(missingSettings(inst))
 			}
 			_, err := amdgpuweb.New(s.BaseURL, s.SelectedGPUID, deps.Client, deps.Log).Discover(ctx)
-			return err
+			return singleTestReport(err)
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.AMDGPUWeb == nil {
@@ -136,16 +151,16 @@ var definitions = []Definition{
 			// deps.Creds may be nil: a known-unauthenticated instance.
 			return llamaswap.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log), nil
 		},
-		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) error {
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
 			s := inst.LlamaSwap
 			if s == nil {
-				return missingSettings(inst)
+				return failedTestReport(missingSettings(inst))
 			}
 			account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
 			if err != nil {
-				return err
+				return failedTestReport(err)
 			}
-			return llamaswap.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log).Test(ctx)
+			return singleTestReport(llamaswap.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log).Test(ctx))
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.LlamaSwap == nil {
@@ -178,19 +193,19 @@ var definitions = []Definition{
 			}
 			return minimax.New(account, deps.Creds, deps.Client, deps.Log), nil
 		},
-		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) error {
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
 			if inst.MiniMax == nil {
-				return missingSettings(inst)
+				return failedTestReport(missingSettings(inst))
 			}
 			account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
 			if err != nil {
-				return err
+				return failedTestReport(err)
 			}
 			if deps.Creds == nil {
-				return fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID)
+				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
 			}
 			_, err = minimax.New(account, deps.Creds, deps.Client, deps.Log).Refresh(ctx)
-			return err
+			return singleTestReport(err)
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.MiniMax == nil {
@@ -224,20 +239,20 @@ var definitions = []Definition{
 			}
 			return zai.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log), nil
 		},
-		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) error {
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
 			s := inst.ZAI
 			if s == nil {
-				return missingSettings(inst)
+				return failedTestReport(missingSettings(inst))
 			}
 			account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
 			if err != nil {
-				return err
+				return failedTestReport(err)
 			}
 			if deps.Creds == nil {
-				return fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID)
+				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
 			}
 			_, err = zai.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log).Refresh(ctx)
-			return err
+			return singleTestReport(err)
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.ZAI == nil {
@@ -246,6 +261,93 @@ var definitions = []Definition{
 			return ZAIUsageURL, true
 		},
 	},
+	{
+		Kind:            domain.KindOpenRouter,
+		Category:        domain.CategoryRemote,
+		DefaultName:     "OpenRouter",
+		DefaultInterval: config.DefaultRemoteInterval,
+		Intervals:       config.RemoteIntervals,
+		CredentialSlots: openRouterSlots,
+		SlotHint: func(slot credentials.Slot) string {
+			switch slot {
+			case credentials.SlotManagementKey:
+				return "account credit balance"
+			default:
+				return "per-key usage and spending limit"
+			}
+		},
+		WebLabel: "OpenRouter activity",
+		DefaultSettings: func() config.ProviderSettings {
+			return config.OpenRouterSettings{}
+		},
+		Build: func(inst config.SourceInstance, deps Deps) (source.Source, error) {
+			s := inst.OpenRouter
+			if s == nil {
+				return nil, missingSettings(inst)
+			}
+			apiAccount, mgmtAccount, err := openRouterAccounts(inst)
+			if err != nil {
+				return nil, err
+			}
+			if deps.Creds == nil {
+				return nil, fmt.Errorf("build %s instance %s: a credential store is required", inst.Kind, inst.ID)
+			}
+			// An instance without stored credentials builds fine: its
+			// refresh then fails locally with zero requests (S4 rules §2),
+			// keeping credential removal recoverable.
+			return openrouter.New(apiAccount, mgmtAccount, deps.Creds, deps.Client, deps.Log), nil
+		},
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
+			s := inst.OpenRouter
+			if s == nil {
+				return failedTestReport(missingSettings(inst))
+			}
+			apiAccount, mgmtAccount, err := openRouterAccounts(inst)
+			if err != nil {
+				return failedTestReport(err)
+			}
+			if deps.Creds == nil {
+				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
+			}
+			a := openrouter.New(apiAccount, mgmtAccount, deps.Creds, deps.Client, deps.Log)
+			return capabilityTestReport(ctx, []namedCapability{
+				{
+					label: "API key",
+					run: func(ctx context.Context) (present bool, err error) {
+						key, err := a.FetchKeyUsage(ctx)
+						return key != nil, err
+					},
+				},
+				{
+					label: "Management key",
+					run: func(ctx context.Context) (present bool, err error) {
+						account, err := a.FetchAccountCredits(ctx)
+						return account != nil, err
+					},
+				},
+			})
+		},
+		WebURL: func(inst config.SourceInstance) (string, bool) {
+			if inst.OpenRouter == nil {
+				return "", false
+			}
+			return OpenRouterActivityURL, true
+		},
+	},
+}
+
+// openRouterAccounts resolves the two instance-scoped keychain accounts of
+// an OpenRouter instance in slot order.
+func openRouterAccounts(inst config.SourceInstance) (apiAccount, mgmtAccount credentials.AccountID, err error) {
+	apiAccount, err = credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+	if err != nil {
+		return "", "", err
+	}
+	mgmtAccount, err = credentials.AccountForInstance(inst.ID, credentials.SlotManagementKey)
+	if err != nil {
+		return "", "", err
+	}
+	return apiAccount, mgmtAccount, nil
 }
 
 // All returns every compiled kind's definition: local kinds first, then
@@ -292,4 +394,76 @@ func WebLinks(instances []config.SourceInstance) []Link {
 
 func missingSettings(inst config.SourceInstance) error {
 	return fmt.Errorf("build %s instance %s: provider settings missing", inst.Kind, inst.ID)
+}
+
+// TestReport is the outcome of a Settings connection test. Multi-credential
+// kinds report one line per capability so a partial configuration shows
+// exactly what was verified and what was skipped.
+type TestReport struct {
+	// Lines are user-presentable results in capability order.
+	Lines []string
+	// OK is true only when at least one capability was actually exercised
+	// and every exercised capability succeeded. An all-skipped report is
+	// NOT a success: with no credential configured nothing was verified.
+	OK bool
+}
+
+// namedCapability is one independently checkable credential capability.
+type namedCapability struct {
+	label string
+	// run exercises the capability. present reports whether a credential
+	// was configured for it at all; err carries any request failure.
+	run func(ctx context.Context) (present bool, err error)
+}
+
+// capabilityTestReport runs every configured capability against its own
+// endpoint and renders one line per capability:
+//
+//	<label>: OK / <label>: not configured (skipped) / <label>: <reason>
+//
+// Failure reasons are sanitized source messages — never raw provider
+// payloads or tokens. Nothing persists; the caller owns that boundary.
+func capabilityTestReport(ctx context.Context, checks []namedCapability) TestReport {
+	report := TestReport{Lines: make([]string, 0, len(checks))}
+	tested, failed := 0, 0
+	for _, c := range checks {
+		present, err := c.run(ctx)
+		switch {
+		case err != nil:
+			failed++
+			report.Lines = append(report.Lines, c.label+": "+sanitizedReason(err))
+		case !present:
+			report.Lines = append(report.Lines, c.label+": not configured (skipped)")
+		default:
+			tested++
+			report.Lines = append(report.Lines, c.label+": OK")
+		}
+	}
+	report.OK = tested > 0 && failed == 0
+	return report
+}
+
+// singleTestReport wraps a kind whose whole test is one operation,
+// preserving the historical single-line editor wording.
+func singleTestReport(err error) TestReport {
+	if err != nil {
+		return TestReport{Lines: []string{"Failed: " + err.Error()}}
+	}
+	return TestReport{Lines: []string{"OK"}, OK: true}
+}
+
+// failedTestReport wraps an infrastructure failure (bad settings, missing
+// store) for both report shapes.
+func failedTestReport(err error) TestReport {
+	return TestReport{Lines: []string{"Failed: " + err.Error()}}
+}
+
+// sanitizedReason prefers the categorized user-facing message of a source
+// error over its raw "category: detail" text.
+func sanitizedReason(err error) string {
+	var serr *source.Error
+	if errors.As(err, &serr) {
+		return serr.UserMessage()
+	}
+	return err.Error()
 }

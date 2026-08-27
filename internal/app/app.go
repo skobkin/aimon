@@ -399,23 +399,34 @@ func (a *App) quit() {
 // testerStore returns a credential store that answers Get for one account
 // with the typed override (when non-empty) and delegates everything else
 // to the real keychain, so Settings tests reuse the real adapters.
-func (a *App) testerStore(override string, account credentials.AccountID) credentials.Store {
-	return &overrideStore{inner: a.creds, account: account, override: override}
+func (a *App) testerStore(overrides map[credentials.AccountID]string) credentials.Store {
+	return &overrideStore{inner: a.creds, overrides: overrides}
 }
 
 // testConnection runs one instance's kind test with the editor's unsaved
-// values. A typed-but-unsaved secret rides along through the override
-// store, so the test sees exactly what Save would use; nothing persists.
-func (a *App) testConnection(ctx context.Context, inst config.SourceInstance, typed string) error {
+// values. Typed-but-unsaved secrets ride along through the override store,
+// keyed per slot so a multi-credential kind tests each capability exactly
+// as Save would; nothing persists.
+func (a *App) testConnection(ctx context.Context, inst config.SourceInstance, typed map[credentials.Slot]string) registry.TestReport {
 	def, ok := registry.Get(inst.Kind)
 	if !ok {
-		return fmt.Errorf("unknown source kind %q", inst.Kind)
+		return registry.TestReport{
+			Lines: []string{fmt.Sprintf("Failed: unknown source kind %q", inst.Kind)},
+		}
 	}
-	account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
-	if err != nil {
-		return err
+	overrides := make(map[credentials.AccountID]string, len(typed))
+	for _, slot := range def.CredentialSlots {
+		secret := typed[slot]
+		if secret == "" {
+			continue
+		}
+		account, err := credentials.AccountForInstance(inst.ID, slot)
+		if err != nil {
+			return registry.TestReport{Lines: []string{"Failed: " + err.Error()}}
+		}
+		overrides[account] = secret
 	}
-	deps := registry.Deps{Creds: a.testerStore(typed, account), Client: a.client, Log: a.log}
+	deps := registry.Deps{Creds: a.testerStore(overrides), Client: a.client, Log: a.log}
 	return def.Test(ctx, inst, deps)
 }
 
@@ -441,18 +452,17 @@ func (a *App) cleanupCredentials(ctx context.Context, inst config.SourceInstance
 	return errors.Join(errs...)
 }
 
-// overrideStore layers a typed-in credential over a backing store.
+// overrideStore layers typed-in credentials over a backing store.
 type overrideStore struct {
-	inner    credentials.Store
-	account  credentials.AccountID
-	override string
+	inner     credentials.Store
+	overrides map[credentials.AccountID]string
 }
 
 func (o *overrideStore) Status(ctx context.Context) credentials.Status { return o.inner.Status(ctx) }
 
 func (o *overrideStore) Get(ctx context.Context, id credentials.AccountID) (string, error) {
-	if id == o.account && o.override != "" {
-		return o.override, nil
+	if secret, ok := o.overrides[id]; ok && secret != "" {
+		return secret, nil
 	}
 	return o.inner.Get(ctx, id)
 }

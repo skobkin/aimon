@@ -2,6 +2,10 @@ package registry
 
 import (
 	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,8 +16,8 @@ import (
 
 func TestAllRegistersEveryKindOnce(t *testing.T) {
 	all := All()
-	if len(all) != 4 {
-		t.Fatalf("registered %d kinds, want 4", len(all))
+	if len(all) != 5 {
+		t.Fatalf("registered %d kinds, want 5", len(all))
 	}
 	seen := map[domain.SourceKind]bool{}
 	for _, d := range all {
@@ -22,7 +26,7 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 		}
 		seen[d.Kind] = true
 	}
-	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindMiniMax, domain.KindZAI} {
+	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter} {
 		if !seen[kind] {
 			t.Errorf("kind %q missing from the registry", kind)
 		}
@@ -30,7 +34,7 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 			t.Errorf("Get(%q) not found", kind)
 		}
 	}
-	if _, ok := Get("openrouter"); ok {
+	if _, ok := Get("not-a-kind"); ok {
 		t.Error("unknown kind must not resolve")
 	}
 }
@@ -40,12 +44,13 @@ func TestDefinitionMetadata(t *testing.T) {
 		kind     domain.SourceKind
 		category domain.Category
 		name     string
-		slots    int
+		slots    []credentials.Slot
 	}{
-		{domain.KindAMDGPUWeb, domain.CategoryLocal, "amdgputop-web", 0},
-		{domain.KindLlamaSwap, domain.CategoryLocal, "llama-swap", 1},
-		{domain.KindMiniMax, domain.CategoryRemote, "MiniMax", 1},
-		{domain.KindZAI, domain.CategoryRemote, "Z.AI / GLM", 1},
+		{domain.KindAMDGPUWeb, domain.CategoryLocal, "amdgputop-web", nil},
+		{domain.KindLlamaSwap, domain.CategoryLocal, "llama-swap", []credentials.Slot{credentials.SlotAPIKey}},
+		{domain.KindMiniMax, domain.CategoryRemote, "MiniMax", []credentials.Slot{credentials.SlotAPIKey}},
+		{domain.KindZAI, domain.CategoryRemote, "Z.AI / GLM", []credentials.Slot{credentials.SlotAPIKey}},
+		{domain.KindOpenRouter, domain.CategoryRemote, "OpenRouter", []credentials.Slot{credentials.SlotAPIKey, credentials.SlotManagementKey}},
 	}
 	for _, c := range cases {
 		def, ok := Get(c.kind)
@@ -61,12 +66,12 @@ func TestDefinitionMetadata(t *testing.T) {
 		if def.DefaultName != c.name {
 			t.Errorf("%s default name = %q, want %q", c.kind, def.DefaultName, c.name)
 		}
-		if len(def.CredentialSlots) != c.slots {
-			t.Errorf("%s credential slots = %v, want %d", c.kind, def.CredentialSlots, c.slots)
+		if len(def.CredentialSlots) != len(c.slots) {
+			t.Fatalf("%s credential slots = %v, want %v", c.kind, def.CredentialSlots, c.slots)
 		}
-		for _, slot := range def.CredentialSlots {
-			if slot != credentials.SlotAPIKey {
-				t.Errorf("%s has unexpected slot %q", c.kind, slot)
+		for i, slot := range def.CredentialSlots {
+			if slot != c.slots[i] {
+				t.Errorf("%s slot[%d] = %q, want %q (spelling is stable storage)", c.kind, i, slot, c.slots[i])
 			}
 		}
 		// Interval presets come from the kind's category.
@@ -76,6 +81,17 @@ func TestDefinitionMetadata(t *testing.T) {
 		if def.DefaultInterval == 0 {
 			t.Errorf("%s has no default interval", c.kind)
 		}
+	}
+
+	def, _ := Get(domain.KindOpenRouter)
+	api := def.SlotHint(credentials.SlotAPIKey)
+	mgmt := def.SlotHint(credentials.SlotManagementKey)
+	if api == "" || mgmt == "" || api == mgmt {
+		t.Errorf("slot hints must be distinct non-empty texts, got %q / %q", api, mgmt)
+	}
+	noHints, _ := Get(domain.KindMiniMax)
+	if noHints.SlotHint != nil && noHints.SlotHint(credentials.SlotAPIKey) != "" {
+		t.Error("single-slot kinds need no hint unless they define one")
 	}
 }
 
@@ -103,6 +119,8 @@ func inst(id, name string, kind domain.SourceKind, settings config.ProviderSetti
 		i.MiniMax = &s
 	case config.ZAISettings:
 		i.ZAI = &s
+	case config.OpenRouterSettings:
+		i.OpenRouter = &s
 	}
 	return i
 }
@@ -156,8 +174,8 @@ func TestBuildRejectsMissingSettings(t *testing.T) {
 	if _, err := def.Build(broken, fakeDeps()); err == nil {
 		t.Error("building without provider settings must fail")
 	}
-	if err := def.Test(context.Background(), broken, fakeDeps()); err == nil {
-		t.Error("testing without provider settings must fail")
+	if report := def.Test(context.Background(), broken, fakeDeps()); report.OK {
+		t.Error("testing without provider settings must not succeed")
 	}
 }
 
@@ -171,6 +189,7 @@ func TestWebURL(t *testing.T) {
 		{domain.KindLlamaSwap, "http://127.0.0.1:8081", "http://127.0.0.1:8081/ui"},
 		{domain.KindMiniMax, "", MiniMaxConsoleURL},
 		{domain.KindZAI, "https://api.z.ai", ZAIUsageURL},
+		{domain.KindOpenRouter, "", OpenRouterActivityURL},
 	}
 	for _, c := range cases {
 		def, _ := Get(c.kind)
@@ -231,3 +250,57 @@ func (fakeStore) Get(context.Context, credentials.AccountID) (string, error) {
 }
 func (fakeStore) Set(context.Context, credentials.AccountID, string) error { return nil }
 func (fakeStore) Delete(context.Context, credentials.AccountID) error      { return nil }
+
+// blockingTransport counts every attempted HTTP request and refuses it,
+// keeping a capability-gating test fully local while proving zero traffic.
+type blockingTransport struct {
+	mu       sync.Mutex
+	attempts int
+}
+
+func (t *blockingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	t.attempts++
+	t.mu.Unlock()
+	return nil, errors.New("unexpected HTTP request")
+}
+
+func (t *blockingTransport) count() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.attempts
+}
+
+// An OpenRouter instance with neither credential configured must produce a
+// per-slot report where everything is skipped, must not count as success,
+// and above all must not touch the network.
+func TestOpenRouterTestWithoutCredentialsSkipsEverythingLocally(t *testing.T) {
+	inst := inst("or-1", "OpenRouter", domain.KindOpenRouter, config.OpenRouterSettings{})
+	def, ok := Get(domain.KindOpenRouter)
+	if !ok {
+		t.Fatal("openrouter is not registered")
+	}
+
+	tr := &blockingTransport{}
+	report := def.Test(context.Background(), inst, Deps{
+		Creds:  fakeStore{},
+		Client: &http.Client{Transport: tr},
+	})
+
+	if len(report.Lines) != 2 {
+		t.Fatalf("report = %v, want one line per capability", report.Lines)
+	}
+	wantLabels := []string{"API key", "Management key"}
+	for i, line := range report.Lines {
+		if !strings.HasPrefix(line, wantLabels[i]+": ") ||
+			!strings.Contains(line, "not configured (skipped)") {
+			t.Errorf("line[%d] = %q, want %q: not configured (skipped)", i, line, wantLabels[i])
+		}
+	}
+	if report.OK {
+		t.Error("with no capability exercised the test must not be reported as success")
+	}
+	if n := tr.count(); n != 0 {
+		t.Errorf("%d HTTP request(s) were attempted without any credential", n)
+	}
+}

@@ -10,7 +10,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
+	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/registry"
 )
 
 // stubDeps builds a Settings whose background operations are never run by
@@ -20,9 +22,11 @@ func stubDeps() Deps {
 		LoadInstances:      func() []config.SourceInstance { return nil },
 		SaveInstances:      func([]config.SourceInstance) error { return nil },
 		CleanupCredentials: func(context.Context, config.SourceInstance) error { return nil },
-		TestConnection:     func(context.Context, config.SourceInstance, string) error { return nil },
-		DiscoverGPUs:       func(context.Context, string) ([]domain.GPUInfo, error) { return nil, nil },
-		Done:               make(chan struct{}),
+		TestConnection: func(context.Context, config.SourceInstance, map[credentials.Slot]string) registry.TestReport {
+			return registry.TestReport{}
+		},
+		DiscoverGPUs: func(context.Context, string) ([]domain.GPUInfo, error) { return nil, nil },
+		Done:         make(chan struct{}),
 	}
 }
 

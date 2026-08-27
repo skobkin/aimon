@@ -43,7 +43,7 @@ type editor struct {
 	url    *widget.Entry // amdgputop-web / llama-swap / zai
 	gpu    *widget.Select
 	gpus   []domain.GPUInfo
-	cred   *credRow // kinds with credential slots
+	creds  []*credRow // one per credential slot, definition order
 	hasURL bool
 
 	testLabel *widget.Label
@@ -52,23 +52,35 @@ type editor struct {
 }
 
 // credRow bundles the credential editing widgets for one instance's
-// api-key slot.
+// credential slot.
 type credRow struct {
+	slot    credentials.Slot
 	account credentials.AccountID
 	entry   *widget.Entry // password, always starts empty
 	state   *widget.Label // "Credential stored" / "No credential stored" / store state
 	remove  *widget.Button
 }
 
-func newCredRow(account credentials.AccountID) credRow {
+func newCredRow(slot credentials.Slot, account credentials.AccountID) credRow {
 	entry := widget.NewPasswordEntry()
-	entry.PlaceHolder = "API key (leave empty to keep the stored one)"
+	entry.PlaceHolder = fmt.Sprintf("%s (leave empty to keep the stored one)", slotDisplayName(slot))
 	return credRow{
+		slot:    slot,
 		account: account,
 		entry:   entry,
 		state:   widget.NewLabel(""),
 		remove:  widget.NewButtonWithIcon("Remove", theme.DeleteIcon(), nil),
 	}
+}
+
+// slotDisplayName names a credential slot in the editor form and test
+// output. Most kinds carry exactly one API-key slot; OpenRouter adds its
+// independent Management-key slot.
+func slotDisplayName(slot credentials.Slot) string {
+	if slot == credentials.SlotManagementKey {
+		return "Management key"
+	}
+	return "API key"
 }
 
 // openEditorFor builds and shows the editor dialog.
@@ -95,7 +107,15 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		widget.NewFormItem("Refresh every", e.interval),
 	}
 
-	e.hasURL = inst.Kind != domain.KindMiniMax
+	// A URL field exists only for kinds whose settings have a base URL —
+	// MiniMax and OpenRouter use fixed endpoints.
+	settings, _ := inst.Settings()
+	switch settings.(type) {
+	case config.MiniMaxSettings, config.OpenRouterSettings:
+		e.hasURL = false
+	default:
+		e.hasURL = true
+	}
 	if e.hasURL {
 		e.url = widget.NewEntry()
 		e.url.Validator = urlValidator
@@ -120,17 +140,17 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		e.setGPUOptions(nil, inst.AMDGPUWeb.SelectedGPUID, "")
 		items = append(items, widget.NewFormItem("GPU", e.gpu))
 	}
-	if len(def.CredentialSlots) > 0 {
-		account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+	for _, slot := range def.CredentialSlots {
+		account, err := credentials.AccountForInstance(inst.ID, slot)
 		if err != nil {
 			s.status.SetText(err.Error())
 			return
 		}
-		row := newCredRow(account)
-		e.cred = &row
-		e.wireRemove()
-		items = append(items, widget.NewFormItem("API key", e.credField()))
+		row := newCredRow(slot, account)
+		e.creds = append(e.creds, &row)
+		items = append(items, widget.NewFormItem(slotDisplayName(slot), e.credField(&row)))
 	}
+	e.wireRemove()
 
 	items = append(items,
 		widget.NewFormItem("", widget.NewButton("Test connection", e.onTest)),
@@ -160,74 +180,94 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 
 func (e *editor) close() { e.dlg.Hide() }
 
-// credField lays out the credential widgets for the editor form.
-func (e *editor) credField() fyne.CanvasObject {
-	return container.NewVBox(e.cred.entry, container.NewHBox(e.cred.state, e.cred.remove))
+// credField lays out the credential widgets for one slot: the password
+// entry, the stored-state/remove row, and the kind's optional usage hint.
+func (e *editor) credField(row *credRow) fyne.CanvasObject {
+	parts := []fyne.CanvasObject{row.entry, container.NewHBox(row.state, row.remove)}
+	if e.def.SlotHint != nil {
+		if hint := e.def.SlotHint(row.slot); hint != "" {
+			hintLabel := widget.NewLabel(hint)
+			hintLabel.TextStyle = fyne.TextStyle{Italic: true}
+			hintLabel.Wrapping = fyne.TextWrapWord
+			parts = append(parts, hintLabel)
+		}
+	}
+	return container.NewVBox(parts...)
 }
 
-// probeEditorKeychain sets the credential row's stored-state label from
-// the live keychain and enables or disables the credential widgets.
+// probeEditorKeychain sets every credential row's stored-state label from
+// the live keychain and enables or disables the credential widgets. One
+// status probe and one read per slot — slots are independent.
 func (s *Settings) probeEditorKeychain(e *editor) {
-	if e.cred == nil {
+	if len(e.creds) == 0 {
 		return
 	}
-	e.cred.state.SetText("Checking keychain…")
+	for _, row := range e.creds {
+		row.state.SetText("Checking keychain…")
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, testTimeout)
 		defer cancel()
 
 		status := s.deps.Creds.Status(ctx)
-		stored := false
+		stored := make(map[credentials.Slot]bool, len(e.creds))
 		if status.State == credentials.StateAvailable {
-			secret, err := s.deps.Creds.Get(ctx, e.cred.account)
-			stored = err == nil && secret != ""
+			for _, row := range e.creds {
+				secret, err := s.deps.Creds.Get(ctx, row.account)
+				stored[row.slot] = err == nil && secret != ""
+			}
 		}
 		if s.closing() {
 			return
 		}
 		fyne.Do(func() {
 			e.credOK = status.State == credentials.StateAvailable
-			if !e.credOK {
-				e.cred.entry.Disable()
-				e.cred.remove.Disable()
-				e.cred.state.SetText("")
-				return
-			}
-			e.cred.entry.Enable()
-			e.cred.remove.Enable()
-			if stored {
-				e.cred.state.SetText("Credential stored")
-			} else {
-				e.cred.state.SetText("No credential stored")
+			for _, row := range e.creds {
+				if !e.credOK {
+					row.entry.Disable()
+					row.remove.Disable()
+					row.state.SetText("")
+					continue
+				}
+				row.entry.Enable()
+				row.remove.Enable()
+				if stored[row.slot] {
+					row.state.SetText("Credential stored")
+				} else {
+					row.state.SetText("No credential stored")
+				}
 			}
 		})
 	}()
 }
 
-// wireRemove wires the credential Remove button: deletes the stored
-// secret immediately (async) and refreshes the label. A missing credential
-// already satisfies the request.
+// wireRemove wires each credential row's Remove button: it deletes that
+// slot's stored secret immediately (async) and refreshes its label. A
+// missing credential already satisfies the request. Removing one slot never
+// touches another.
 func (e *editor) wireRemove() {
-	row := e.cred
-	row.remove.OnTapped = func() {
-		row.remove.Disable()
-		go func() {
-			ctx, cancel := context.WithTimeout(e.s.ctx, testTimeout)
-			defer cancel()
-			err := e.s.deps.Creds.Delete(ctx, row.account)
-			if e.s.closing() {
-				return
-			}
-			fyne.Do(func() {
-				row.remove.Enable()
-				switch {
-				case err == nil, errors.Is(err, credentials.ErrNotFound):
-					row.state.SetText("No credential stored")
-				default:
-					row.state.SetText("Remove failed")
+	for _, row := range e.creds {
+		row := row
+		row.remove.OnTapped = func() {
+			row.remove.Disable()
+			go func() {
+				ctx, cancel := context.WithTimeout(e.s.ctx, testTimeout)
+				defer cancel()
+				err := e.s.deps.Creds.Delete(ctx, row.account)
+				if e.s.closing() {
+					return
 				}
-			})
-		}()
+				fyne.Do(func() {
+					row.remove.Enable()
+					switch {
+					case err == nil, errors.Is(err, credentials.ErrNotFound):
+						row.state.SetText("No credential stored")
+					default:
+						row.state.SetText("Remove failed")
+					}
+				})
+			}()
+		}
 	}
 }
 
@@ -256,6 +296,9 @@ func (e *editor) collect() (config.SourceInstance, error) {
 		s := *inst.ZAI
 		s.BaseURL = e.url.Text
 		inst.ZAI = &s
+	case domain.KindOpenRouter:
+		s := *inst.OpenRouter
+		inst.OpenRouter = &s
 	}
 
 	if errs := inst.Validate(); len(errs) > 0 {
@@ -272,9 +315,9 @@ func (e *editor) onTest() {
 		e.testLabel.SetText(err.Error() + " — fix the fields before testing")
 		return
 	}
-	typed := ""
-	if e.cred != nil {
-		typed = e.cred.entry.Text
+	typed := make(map[credentials.Slot]string, len(e.creds))
+	for _, row := range e.creds {
+		typed[row.slot] = row.entry.Text
 	}
 	e.testLabel.SetText("Testing…")
 	go func() {
@@ -298,16 +341,12 @@ func (e *editor) onTest() {
 			return
 		}
 
-		terr := e.s.deps.TestConnection(ctx, inst, typed)
+		report := e.s.deps.TestConnection(ctx, inst, typed)
 		if e.s.closing() {
 			return
 		}
 		fyne.Do(func() {
-			if terr != nil {
-				e.testLabel.SetText(testFailure(terr))
-				return
-			}
-			e.testLabel.SetText("OK")
+			e.testLabel.SetText(strings.Join(report.Lines, "\n"))
 		})
 	}()
 }
@@ -333,21 +372,27 @@ func (e *editor) onSave() {
 	e.testLabel.SetText("Saving…")
 
 	go func() {
-		wroteSecret := false
-		if e.cred != nil && e.cred.entry.Text != "" {
+		// Each typed secret is stored under its own slot's account, in
+		// definition order. The first failure aborts the save entirely; the
+		// config document has not been touched yet.
+		wroteAny := false
+		for _, row := range e.creds {
+			if row.entry.Text == "" {
+				continue
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-			err := e.s.deps.Creds.Set(ctx, e.cred.account, e.cred.entry.Text)
+			err := e.s.deps.Creds.Set(ctx, row.account, row.entry.Text)
 			cancel()
 			if err != nil {
 				e.finishSave("Keychain write failed: " + err.Error())
 				return
 			}
-			wroteSecret = true
+			wroteAny = true
 		}
 
 		saveErr := e.s.deps.SaveInstances(ReplaceInstance(e.s.deps.LoadInstances(), inst))
 		if saveErr != nil {
-			if e.isNew && wroteSecret {
+			if e.isNew && wroteAny {
 				ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 				_ = e.s.deps.CleanupCredentials(ctx, inst) // best effort; the add failed
 				cancel()

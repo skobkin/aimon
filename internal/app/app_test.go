@@ -89,9 +89,10 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 
 func TestOverrideStorePrefersTypedValue(t *testing.T) {
 	inner := &memStore{secret: "stored-value"}
-	o := &overrideStore{inner: inner, account: credentials.AccountID("source/test-a/api-key"), override: "typed-value"}
+	account := credentials.AccountID("source/test-a/api-key")
+	o := &overrideStore{inner: inner, overrides: map[credentials.AccountID]string{account: "typed-value"}}
 
-	got, err := o.Get(context.Background(), credentials.AccountID("source/test-a/api-key"))
+	got, err := o.Get(context.Background(), account)
 	if err != nil || got != "typed-value" {
 		t.Errorf("Get with override = %q, %v; want typed-value", got, err)
 	}
@@ -99,7 +100,7 @@ func TestOverrideStorePrefersTypedValue(t *testing.T) {
 
 func TestOverrideStoreDelegatesWithoutOverride(t *testing.T) {
 	inner := &memStore{secret: "stored-value"}
-	o := &overrideStore{inner: inner, account: credentials.AccountID("source/test-a/api-key"), override: ""}
+	o := &overrideStore{inner: inner, overrides: map[credentials.AccountID]string{}}
 
 	got, err := o.Get(context.Background(), credentials.AccountID("source/test-a/api-key"))
 	if err != nil || got != "stored-value" {
@@ -109,11 +110,30 @@ func TestOverrideStoreDelegatesWithoutOverride(t *testing.T) {
 
 func TestOverrideStoreDelegatesOtherAccounts(t *testing.T) {
 	inner := &memStore{secret: "stored-value"}
-	o := &overrideStore{inner: inner, account: credentials.AccountID("source/test-a/api-key"), override: "typed-value"}
+	o := &overrideStore{
+		inner:     inner,
+		overrides: map[credentials.AccountID]string{credentials.AccountID("source/test-a/api-key"): "typed-value"},
+	}
 
 	got, err := o.Get(context.Background(), credentials.AccountID("source/test-b/api-key"))
 	if err != nil || got != "stored-value" {
 		t.Errorf("Get for other account = %q, %v; want stored-value", got, err)
+	}
+}
+
+// A multi-slot kind layers each typed secret over its own slot's stored
+// credential; every other slot keeps using the keychain untouched.
+func TestOverrideStoreLayersTypedSecretsPerSlot(t *testing.T) {
+	inner := &memStore{secret: "stored-api"}
+	api := credentials.AccountID("source/or-a/api-key")
+	mgmt := credentials.AccountID("source/or-a/management-key")
+	o := &overrideStore{inner: inner, overrides: map[credentials.AccountID]string{mgmt: "typed-management"}}
+
+	if got, _ := o.Get(context.Background(), mgmt); got != "typed-management" {
+		t.Errorf("management slot = %q, want the typed secret", got)
+	}
+	if got, _ := o.Get(context.Background(), api); got != "stored-api" {
+		t.Errorf("api slot = %q, want the stored credential", got)
 	}
 }
 

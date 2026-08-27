@@ -46,10 +46,10 @@ type Deps struct {
 	// used to store a typed secret on editor Save.
 	Creds credentials.Store
 	// TestConnection runs the instance kind's connection test with the
-	// editor's unsaved values. typedSecret is the password entry's value
-	// ("" = use the stored credential); nothing is ever persisted by a
-	// test.
-	TestConnection func(ctx context.Context, inst config.SourceInstance, typedSecret string) error
+	// editor's unsaved values, one entry per credential slot ("" = use the
+	// stored credential for that slot); nothing is ever persisted by a
+	// test. Multi-credential kinds report each capability in the report.
+	TestConnection func(ctx context.Context, inst config.SourceInstance, typedSecrets map[credentials.Slot]string) registry.TestReport
 	// DiscoverGPUs lists the amdgputop-web GPUs at a base URL (the
 	// amdgputop-web connection test doubles as discovery).
 	DiscoverGPUs func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error)
