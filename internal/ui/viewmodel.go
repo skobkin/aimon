@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
@@ -25,6 +27,7 @@ const (
 	KindGPU   CardKind = "gpu"
 	KindSwap  CardKind = "swap"
 	KindQuota CardKind = "quota"
+	KindSpend CardKind = "spend"
 )
 
 // MetricLevel classifies a metric value by load for coloring. The zero
@@ -80,6 +83,47 @@ type QuotaVM struct {
 	Windows []QuotaWindowVM
 }
 
+// MoneyMetricVM is one labeled money row. Sensitive marks account-level
+// monetary values that the global privacy setting conceals; per-key usage
+// and limit rows are never sensitive — they are what the user monitors.
+type MoneyMetricVM struct {
+	Label     string
+	Text      string
+	Sensitive bool
+}
+
+// SpendLimitVM carries the single OpenRouter key-limit bar. Used drives
+// the fill and the "NN% used" label; Remaining still drives the threshold
+// color, mirroring QuotaWindowVM. RawText ("$12.47 / $25.00") is a detail
+// tab extra.
+type SpendLimitVM struct {
+	Label     string // "Daily limit" / "Weekly limit" / "Monthly limit" / "Key limit"
+	UsedText  string
+	Used      float64
+	Remaining float64
+	RawText   string
+}
+
+// SpendVM carries an OpenRouter card's rows. Usage holds Today/Week/Month
+// (plus Total in detail); Account holds the Management-key rows and is
+// empty without that capability; Limit is nil when no usable key limit
+// was reported (or there is no key data at all).
+type SpendVM struct {
+	Usage   []MoneyMetricVM
+	Account []MoneyMetricVM
+	Limit   *SpendLimitVM
+	HasData bool
+}
+
+// SpendOverviewVM is the compact overview variant: usage rows without the
+// Total line, plus a Balance row pointer when account data exists.
+type SpendOverviewVM struct {
+	Usage   []MoneyMetricVM
+	Limit   *SpendLimitVM
+	Balance *MoneyMetricVM
+	HasData bool
+}
+
 // OverviewKind discriminates Overview card presentation.
 type OverviewKind string
 
@@ -88,6 +132,7 @@ const (
 	OverviewMetrics OverviewKind = "metrics"
 	OverviewRuntime OverviewKind = "runtime"
 	OverviewQuota   OverviewKind = "quota"
+	OverviewSpend   OverviewKind = "spend"
 )
 
 // MetricBarVM is the pure data for one labeled usage bar.
@@ -140,6 +185,7 @@ type OverviewCardVM struct {
 	Metrics MetricsOverviewVM
 	Runtime RuntimeOverviewVM
 	Quota   QuotaOverviewVM
+	Spend   SpendOverviewVM
 }
 
 // CardVM is one source card. Status is the per-source freshness label
@@ -155,6 +201,7 @@ type CardVM struct {
 	GPU   GPUVM
 	Swap  SwapVM
 	Quota QuotaVM
+	Spend SpendVM
 }
 
 // OverviewVM is the full overview tab state.
@@ -231,6 +278,8 @@ func cardKind(kind domain.SourceKind) CardKind {
 		return KindSwap
 	case domain.KindMiniMax, domain.KindZAI:
 		return KindQuota
+	case domain.KindOpenRouter:
+		return KindSpend
 	default:
 		return KindNone
 	}
@@ -245,6 +294,8 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 		return OverviewRuntime
 	case domain.KindMiniMax, domain.KindZAI:
 		return OverviewQuota
+	case domain.KindOpenRouter:
+		return OverviewSpend
 	default:
 		return OverviewKind("")
 	}
@@ -269,6 +320,8 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, det
 		card.Swap = BuildSwapVM(snap, detail)
 	case domain.QuotaSnapshot:
 		card.Quota = BuildQuotaVM(snap, now, detail)
+	case domain.OpenRouterSnapshot:
+		card.Spend = BuildSpendVM(snap, detail)
 	}
 	return card
 }
@@ -291,6 +344,8 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.T
 		card.Runtime = BuildRuntimeOverview(snap)
 	case domain.QuotaSnapshot:
 		card.Quota = BuildQuotaOverview(snap, now)
+	case domain.OpenRouterSnapshot:
+		card.Spend = BuildSpendOverview(snap)
 	}
 	return card
 }
@@ -598,6 +653,92 @@ func formatCounts(w domain.QuotaWindow) string {
 	return s
 }
 
+// BuildSpendVM derives an OpenRouter card's usage, limit and account rows.
+// The Total line is a detail-tab extra; account values are always marked
+// sensitive (the global privacy setting conceals them).
+func BuildSpendVM(snap domain.OpenRouterSnapshot, detail bool) SpendVM {
+	var vm SpendVM
+
+	if snap.Key != nil {
+		k := snap.Key
+		vm.Usage = []MoneyMetricVM{
+			moneyRow("Today", k.UsageDaily),
+			moneyRow("Week", k.UsageWeekly),
+			moneyRow("Month", k.UsageMonthly),
+		}
+		if detail {
+			vm.Usage = append(vm.Usage, moneyRow("Total", k.UsageTotal))
+		}
+		vm.Limit = spendLimitVM(k.Limit, detail)
+	}
+	if snap.Account != nil {
+		a := snap.Account
+		vm.Account = []MoneyMetricVM{
+			sensitiveMoneyRow("Balance", a.Balance),
+			sensitiveMoneyRow("Purchased credits", a.TotalCredits),
+			sensitiveMoneyRow("Account usage", a.TotalUsage),
+		}
+	}
+	vm.HasData = snap.Key != nil || snap.Account != nil
+	return vm
+}
+
+// BuildSpendOverview derives the compact overview variant: no Total row,
+// the Balance surfaced as its own optional row.
+func BuildSpendOverview(snap domain.OpenRouterSnapshot) SpendOverviewVM {
+	detail := BuildSpendVM(snap, false)
+	ov := SpendOverviewVM{Usage: detail.Usage, Limit: detail.Limit}
+	if len(detail.Account) > 0 {
+		balance := detail.Account[0]
+		ov.Balance = &balance
+	}
+	ov.HasData = detail.HasData
+	return ov
+}
+
+// spendLimitVM maps one usable limit onto the shared quota-bar data; nil
+// when there is no limit to graph. Fractions derive from limit_remaining,
+// never from the period usage counters.
+func spendLimitVM(l *domain.OpenRouterLimit, detail bool) *SpendLimitVM {
+	if l == nil || l.Amount <= 0 {
+		return nil
+	}
+	used := l.Amount - l.Remaining
+	vm := &SpendLimitVM{
+		Label:     limitLabel(l.Cadence),
+		UsedText:  FormatUsed(domain.Clamp01(used / l.Amount)),
+		Used:      domain.Clamp01(used / l.Amount),
+		Remaining: domain.Clamp01(l.Remaining / l.Amount),
+	}
+	if detail {
+		vm.RawText = FormatMoney(max(0, used)) + " / " + FormatMoney(l.Amount)
+	}
+	return vm
+}
+
+// limitLabel names the bar after its enforced cadence; an unknown or null
+// cadence keeps the neutral "Key limit".
+func limitLabel(cadence string) string {
+	switch cadence {
+	case domain.CadenceDaily:
+		return "Daily limit"
+	case domain.CadenceWeekly:
+		return "Weekly limit"
+	case domain.CadenceMonthly:
+		return "Monthly limit"
+	default:
+		return "Key limit"
+	}
+}
+
+func moneyRow(label string, v float64) MoneyMetricVM {
+	return MoneyMetricVM{Label: label, Text: FormatMoney(v)}
+}
+
+func sensitiveMoneyRow(label string, v float64) MoneyMetricVM {
+	return MoneyMetricVM{Label: label, Text: FormatMoney(v), Sensitive: true}
+}
+
 func dashWhenNil(v *float64, format func(*float64) string) string {
 	if v == nil {
 		return "—"
@@ -674,6 +815,35 @@ func FormatCount(v float64) string {
 	default:
 		return fmt.Sprintf("%.0f", v)
 	}
+}
+
+// FormatMoney renders an account-level dollar amount. A cent or more uses
+// two decimals; a smaller positive value keeps up to four decimals (with
+// trailing zeros trimmed, never below two decimals) so sub-cent usage does
+// not read as zero. Negative amounts keep their sign ("-") unless they
+// round away entirely (no "-$0.00"); non-finite values render as an em dash.
+func FormatMoney(v float64) string {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return "—"
+	}
+	neg := ""
+	if v < 0 {
+		neg = "-"
+		v = -v
+	}
+	var s string
+	if v == 0 || v >= 0.01 {
+		s = fmt.Sprintf("%.2f", v)
+	} else {
+		s = strings.TrimRight(strconv.FormatFloat(v, 'f', 4, 64), "0")
+		if strings.HasSuffix(s, ".") { // rounding ate the whole fraction
+			s += "00"
+		}
+	}
+	if s == "0.00" {
+		return "$0.00"
+	}
+	return neg + "$" + s
 }
 
 // FormatResetCountdown renders a compact relative countdown from an

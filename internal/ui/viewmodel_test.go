@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -32,6 +33,8 @@ func inst(id, name string, kind domain.SourceKind, enabled bool) config.SourceIn
 		i.MiniMax = &config.MiniMaxSettings{}
 	case domain.KindZAI:
 		i.ZAI = &config.ZAISettings{BaseURL: "https://api.z.ai"}
+	case domain.KindOpenRouter:
+		i.OpenRouter = &config.OpenRouterSettings{}
 	}
 	return i
 }
@@ -759,5 +762,234 @@ func TestOverviewPctTextNoUsed(t *testing.T) {
 	}
 	if got := formatPctOnly(1.0); got != "100%" {
 		t.Errorf("formatPctOnly(1) = %q, want \"100%%\"", got)
+	}
+}
+
+// orKey builds a full OpenRouter key-usage block (no limit).
+func orKey() *domain.OpenRouterKeyUsage {
+	return &domain.OpenRouterKeyUsage{
+		UsageTotal:   41.08,
+		UsageDaily:   0.42,
+		UsageWeekly:  3.81,
+		UsageMonthly: 12.47,
+	}
+}
+
+func orLimit(cadence string, amount, remaining float64) *domain.OpenRouterLimit {
+	return &domain.OpenRouterLimit{Cadence: cadence, Amount: amount, Remaining: remaining}
+}
+
+func orSnap(key *domain.OpenRouterKeyUsage, acct *domain.OpenRouterAccountCredits) domain.OpenRouterSnapshot {
+	return domain.OpenRouterSnapshot{CollectedAt: now.Add(-5 * time.Second), Key: key, Account: acct}
+}
+
+func TestBuildSpendVMAPIOnlyDetail(t *testing.T) {
+	vm := BuildSpendVM(orSnap(orKey(), nil), true)
+
+	if !vm.HasData || len(vm.Account) != 0 {
+		t.Fatalf("api-only vm = %+v", vm)
+	}
+	want := []struct{ label, text string }{
+		{"Today", "$0.42"},
+		{"Week", "$3.81"},
+		{"Month", "$12.47"},
+		{"Total", "$41.08"},
+	}
+	if len(vm.Usage) != len(want) {
+		t.Fatalf("usage rows = %+v", vm.Usage)
+	}
+	for i, w := range want {
+		if vm.Usage[i].Label != w.label || vm.Usage[i].Text != w.text {
+			t.Errorf("usage[%d] = %q %q, want %q %q", i, vm.Usage[i].Label, vm.Usage[i].Text, w.label, w.text)
+		}
+		if vm.Usage[i].Sensitive {
+			t.Errorf("usage row %q must not be sensitive", vm.Usage[i].Label)
+		}
+	}
+	if vm.Limit != nil {
+		t.Errorf("limit = %+v, want nil without a limit", vm.Limit)
+	}
+}
+
+func TestBuildSpendVMOverviewOmitsTotal(t *testing.T) {
+	vm := BuildSpendOverview(orSnap(orKey(), nil))
+	if len(vm.Usage) != 3 || vm.Usage[0].Label != "Today" || vm.Usage[2].Label != "Month" {
+		t.Fatalf("overview usage rows = %+v", vm.Usage)
+	}
+	if vm.Balance != nil {
+		t.Errorf("balance = %+v, want nil with no account data", vm.Balance)
+	}
+}
+
+func TestBuildSpendVMAccountRowsAreSensitive(t *testing.T) {
+	acct := &domain.OpenRouterAccountCredits{TotalCredits: 105.89, TotalUsage: 32.47, Balance: 73.42}
+	vm := BuildSpendVM(orSnap(nil, acct), true)
+
+	if !vm.HasData || len(vm.Account) != 3 {
+		t.Fatalf("account vm = %+v", vm)
+	}
+	want := []struct{ label, text string }{
+		{"Balance", "$73.42"},
+		{"Purchased credits", "$105.89"},
+		{"Account usage", "$32.47"},
+	}
+	for i, w := range want {
+		row := vm.Account[i]
+		if row.Label != w.label || row.Text != w.text {
+			t.Errorf("account[%d] = %q %q, want %q %q", i, row.Label, row.Text, w.label, w.text)
+		}
+		if !row.Sensitive {
+			t.Errorf("account row %q must be marked sensitive", row.Label)
+		}
+	}
+
+	ov := BuildSpendOverview(orSnap(nil, acct))
+	if ov.Balance == nil || ov.Balance.Text != "$73.42" || !ov.Balance.Sensitive {
+		t.Errorf("overview balance = %+v", ov.Balance)
+	}
+	if len(ov.Usage) != 0 {
+		t.Errorf("management-only overview must not show usage rows: %+v", ov.Usage)
+	}
+}
+
+func TestBuildSpendVMLimitLabelsAndFractions(t *testing.T) {
+	cases := []struct {
+		cadence     string
+		label       string
+		used        float64 // of $25
+		remaining   float64
+		wantPct     string
+		wantRawText string
+	}{
+		{"monthly", "Monthly limit", 12.47, 12.53, "50% used", "$12.47 / $25.00"},
+		{"weekly", "Weekly limit", 1.25, 23.75, "5% used", "$1.25 / $25.00"},
+		{"daily", "Daily limit", 0, 25, "0% used", "$0.00 / $25.00"},
+		{"", "Key limit", 20, 5, "80% used", "$20.00 / $25.00"},
+		{"hourly", "Key limit", 24, 1, "96% used", "$24.00 / $25.00"},
+		// Cadences arrive lowercased from the adapter; anything else is
+		// unknown and stays neutral.
+		{"MONTHLY", "Key limit", 5, 20, "20% used", "$5.00 / $25.00"},
+	}
+	for _, c := range cases {
+		vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
+			UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1, UsageTotal: 1,
+			Limit: orLimit(c.cadence, 25, c.remaining),
+		}, nil), true)
+		l := vm.Limit
+		if l == nil {
+			t.Fatalf("%s: limit dropped", c.cadence)
+		}
+		if l.Label != c.label {
+			t.Errorf("cadence %q label = %q, want %q", c.cadence, l.Label, c.label)
+		}
+		if l.UsedText != c.wantPct {
+			t.Errorf("cadence %q used text = %q, want %q", c.cadence, l.UsedText, c.wantPct)
+		}
+		if l.RawText != c.wantRawText {
+			t.Errorf("cadence %q raw text = %q, want %q", c.cadence, l.RawText, c.wantRawText)
+		}
+	}
+
+	// Overview keeps the bar but no raw amount line.
+	ov := BuildSpendOverview(orSnap(&domain.OpenRouterKeyUsage{
+		UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1,
+		Limit: orLimit("monthly", 25, 12.53),
+	}, nil))
+	if ov.Limit == nil || ov.Limit.RawText != "" || ov.Limit.Label != "Monthly limit" {
+		t.Errorf("overview limit = %+v", ov.Limit)
+	}
+}
+
+func TestBuildSpendVMOmitsUnusableLimit(t *testing.T) {
+	vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
+		UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1,
+		Limit: orLimit("monthly", -3, 0),
+	}, nil), true)
+	if vm.Limit != nil || !vm.HasData || len(vm.Usage) != 4 {
+		t.Errorf("non-positive limit must be omitted but keep usage: %+v", vm)
+	}
+
+	vm = BuildSpendVM(orSnap(nil, nil), true)
+	if vm.HasData || vm.Limit != nil || len(vm.Usage) != 0 || len(vm.Account) != 0 {
+		t.Errorf("empty snapshot = %+v, want no data", vm)
+	}
+}
+
+func TestBuildSpendVMTinyLimitUsageReadsUnderOnePercent(t *testing.T) {
+	used := FormatUsed(domain.Clamp01(0.02 / 25))
+	if used != "<1% used" {
+		t.Fatalf("tiny usage text = %q, want \"<1%% used\"", used)
+	}
+	vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
+		UsageDaily: 0.02, UsageWeekly: 0.02, UsageMonthly: 0.02,
+		Limit: orLimit("daily", 25, 24.98),
+	}, nil), true)
+	if vm.Limit.UsedText != "<1% used" {
+		t.Errorf("limit used text = %q, want \"<1%% used\"", vm.Limit.UsedText)
+	}
+}
+
+func TestCardKindSpend(t *testing.T) {
+	instances := []config.SourceInstance{
+		inst("or1", "OpenRouter", domain.KindOpenRouter, true),
+		inst("mm1", "MiniMax Personal", domain.KindMiniMax, true),
+	}
+	states := map[domain.InstanceID]domain.Runtime{
+		"or1": {Enabled: true, LastSuccessAt: now, Snapshot: orSnap(orKey(), &domain.OpenRouterAccountCredits{Balance: 73.42})},
+		"mm1": {Enabled: true},
+	}
+
+	tab := BuildRemoteTab(instances, states, now)
+	if len(tab) != 2 {
+		t.Fatalf("remote tab = %d cards", len(tab))
+	}
+	card := tab[0]
+	if card.Kind != KindSpend || card.Title != "OpenRouter" {
+		t.Fatalf("card kind = %q title = %q", card.Kind, card.Title)
+	}
+	if len(card.Spend.Usage) != 4 || len(card.Spend.Account) != 3 {
+		t.Errorf("detail body rows = %+v / %+v", card.Spend.Usage, card.Spend.Account)
+	}
+
+	ov := BuildOverview(instances, states, now)
+	spendCard := ov.RemoteCards[0]
+	if spendCard.Kind != OverviewSpend || !spendCard.Spend.HasData {
+		t.Fatalf("overview card = %+v", spendCard)
+	}
+	if len(spendCard.Spend.Usage) != 3 || spendCard.Spend.Balance == nil {
+		t.Errorf("overview spend body = %+v", spendCard.Spend)
+	}
+
+	// Quota kinds stay quota.
+	mm := ov.RemoteCards[1]
+	if mm.Kind != OverviewQuota || mm.Spend.HasData {
+		t.Errorf("minimax card = %+v", mm)
+	}
+}
+
+func TestFormatMoney(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want string
+	}{
+		{0, "$0.00"},
+		{0.04, "$0.04"},
+		{12.47, "$12.47"},
+		{41.084, "$41.08"},
+		{1000, "$1000.00"},
+		{0.0042, "$0.0042"},
+		{0.03, "$0.03"},
+		{0.0099, "$0.0099"},
+		{0.009, "$0.009"},
+		{-12.47, "-$12.47"},
+		{-0.0042, "-$0.0042"},
+		{-0.000001, "$0.00"}, // rounds away below the smallest rendered scale; no "-$0.00"
+		{math.NaN(), "—"},
+		{math.Inf(1), "—"},
+	}
+	for _, c := range cases {
+		if got := FormatMoney(c.v); got != c.want {
+			t.Errorf("FormatMoney(%v) = %q, want %q", c.v, got, c.want)
+		}
 	}
 }
