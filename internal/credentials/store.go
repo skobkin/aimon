@@ -47,9 +47,15 @@ type AccountID string
 // secret needs no new key scheme.
 type Slot string
 
-// SlotAPIKey is the single API key/token slot used by the credentialed
-// kinds (llama-swap optional, MiniMax, Z.AI / GLM).
+// SlotAPIKey is the ordinary API key/token slot used by the credentialed
+// kinds (llama-swap optional, MiniMax, Z.AI / GLM, and the inference key of
+// OpenRouter).
 const SlotAPIKey Slot = "api-key"
+
+// SlotManagementKey is OpenRouter's second, independent credential slot:
+// a Management key granting account-level credit reads. It is never used as
+// an API-key substitute or vice versa.
+const SlotManagementKey Slot = "management-key"
 
 // AccountForInstance builds the keychain account for one instance's
 // credential slot: "source/<instance-id>/<slot>". The account is scoped by

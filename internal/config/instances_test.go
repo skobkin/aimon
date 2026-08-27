@@ -88,6 +88,7 @@ func TestInstanceValidate(t *testing.T) {
 		{ID: "id-2", Kind: domain.KindLlamaSwap, Name: "swap", Enabled: false, PollInterval: 10 * time.Second, LlamaSwap: &LlamaSwapSettings{BaseURL: "http://127.0.0.1:8081"}},
 		{ID: "id-3", Kind: domain.KindMiniMax, Name: "MiniMax Personal", Enabled: true, PollInterval: DefaultRemoteInterval, MiniMax: &MiniMaxSettings{}},
 		{ID: "id-4", Kind: domain.KindZAI, Name: "Z.AI / GLM", Enabled: true, PollInterval: 5 * time.Minute, ZAI: &ZAISettings{BaseURL: "https://api.z.ai"}},
+		{ID: "id-5", Kind: domain.KindOpenRouter, Name: "OpenRouter", Enabled: true, PollInterval: DefaultRemoteInterval, OpenRouter: &OpenRouterSettings{}},
 	}
 	for i, inst := range valid {
 		if errs := inst.Validate(); len(errs) > 0 {
@@ -102,7 +103,7 @@ func TestInstanceValidate(t *testing.T) {
 	}{
 		{"empty name", func(i *SourceInstance) { i.Name = "" }, "Name"},
 		{"whitespace name", func(i *SourceInstance) { i.Name = "   " }, "Name"},
-		{"unknown kind", func(i *SourceInstance) { i.Kind = "openrouter" }, "Kind"},
+		{"unknown kind", func(i *SourceInstance) { i.Kind = "not-a-kind" }, "Kind"},
 		{"no settings", func(i *SourceInstance) { i.Kind = domain.KindMiniMax; i.AMDGPUWeb = nil }, "Settings"},
 		{"two settings blocks", func(i *SourceInstance) { i.MiniMax = &MiniMaxSettings{} }, "Settings"},
 		{"mismatched settings", func(i *SourceInstance) { i.Kind = domain.KindMiniMax }, "Settings"},
@@ -158,6 +159,12 @@ func TestSameSettings(t *testing.T) {
 	if !SameSettings(MiniMaxSettings{}, MiniMaxSettings{}) {
 		t.Error("empty minimax settings must compare equal")
 	}
+	if !SameSettings(OpenRouterSettings{}, OpenRouterSettings{}) {
+		t.Error("empty openrouter settings must compare equal")
+	}
+	if SameSettings(OpenRouterSettings{}, MiniMaxSettings{}) {
+		t.Error("openrouter must not compare equal to another empty kind")
+	}
 	if SameSettings(nil, MiniMaxSettings{}) || !SameSettings(nil, nil) {
 		t.Error("nil handling is wrong")
 	}
@@ -187,6 +194,7 @@ func TestSaveLoadInstancesRoundTrip(t *testing.T) {
 		validAMDGPU("gpu-server", "AMD GPU server", "http://10.0.0.5:8080"),
 		{ID: "mm-1", Kind: domain.KindMiniMax, Name: "MiniMax Personal", Enabled: true, PollInterval: 2 * time.Minute, MiniMax: &MiniMaxSettings{}},
 		{ID: "zai-1", Kind: domain.KindZAI, Name: "Z.AI / GLM", Enabled: false, PollInterval: 5 * time.Minute, ZAI: &ZAISettings{BaseURL: "https://api.z.ai"}},
+		{ID: "or-1", Kind: domain.KindOpenRouter, Name: "OpenRouter", Enabled: true, PollInterval: DefaultRemoteInterval, OpenRouter: &OpenRouterSettings{}},
 	}
 	if err := repo.SaveInstances(stored); err != nil {
 		t.Fatalf("save: %v", err)
@@ -220,7 +228,7 @@ func TestSaveLoadInstancesRoundTrip(t *testing.T) {
 	for _, inst := range loaded {
 		order = append(order, string(inst.ID))
 	}
-	want := "gpu-localhost,gpu-server,mm-1,zai-1"
+	want := "gpu-localhost,gpu-server,mm-1,zai-1,or-1"
 	if got := strings.Join(order, ","); got != want {
 		t.Errorf("order = %q, want %q", got, want)
 	}
@@ -271,7 +279,7 @@ func TestLoadInstancesUnknownKindAndBadFields(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{"unknown kind", `{"schema_version":1,"sources":[{"id":"a","kind":"openrouter","name":"x","enabled":true,"poll_interval":"5s","minimax":{}}]}`, "unknown source kind"},
+		{"unknown kind", `{"schema_version":1,"sources":[{"id":"a","kind":"not-a-kind","name":"x","enabled":true,"poll_interval":"5s","minimax":{}}]}`, "unknown source kind"},
 		{"bad duration", `{"schema_version":1,"sources":[{"id":"a","kind":"minimax","name":"x","enabled":true,"poll_interval":"soon","minimax":{}}]}`, "poll interval"},
 		{"empty name", `{"schema_version":1,"sources":[{"id":"a","kind":"minimax","name":"","enabled":true,"poll_interval":"30s","minimax":{}}]}`, "Name"},
 		{"duplicate ids", `{"schema_version":1,"sources":[{"id":"a","kind":"minimax","name":"x","enabled":true,"poll_interval":"30s","minimax":{}},{"id":"a","kind":"zai","name":"y","enabled":true,"poll_interval":"30s","zai":{"base_url":"https://api.z.ai"}}]}`, "duplicate instance ID"},
@@ -297,10 +305,11 @@ func TestSourceDocumentHasNoSecretFields(t *testing.T) {
 		Sources: []sourceRecord{
 			{
 				ID: "a", Kind: "amdgputop-web", Name: "n", Enabled: true, PollInterval: "5s",
-				AMDGPUWeb: &amdGPUWebRecord{BaseURL: "http://127.0.0.1:8080", SelectedGPUID: "gpu"},
-				LlamaSwap: &llamaSwapRecord{BaseURL: "http://127.0.0.1:8081"},
-				MiniMax:   &miniMaxRecord{},
-				ZAI:       &zaiRecord{BaseURL: "https://api.z.ai"},
+				AMDGPUWeb:  &amdGPUWebRecord{BaseURL: "http://127.0.0.1:8080", SelectedGPUID: "gpu"},
+				LlamaSwap:  &llamaSwapRecord{BaseURL: "http://127.0.0.1:8081"},
+				MiniMax:    &miniMaxRecord{},
+				ZAI:        &zaiRecord{BaseURL: "https://api.z.ai"},
+				OpenRouter: &openRouterRecord{},
 			},
 		},
 	}

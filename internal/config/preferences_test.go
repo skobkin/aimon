@@ -45,14 +45,49 @@ func TestRepositoryWritesOnlyTheDocumentKey(t *testing.T) {
 	if err := repo.SaveInstances(nil); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if len(prefs.data) != 1 {
+	if _, documentWritten := prefs.data[keySourceDocument]; !documentWritten {
 		t.Fatalf("keys written = %v, want only the document key", keysOf(prefs))
+	}
+	if len(prefs.data) != 1 {
+		t.Fatalf("SaveInstances must not touch other keys, got %v", keysOf(prefs))
 	}
 	if _, err := repo.LoadInstances(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if len(prefs.data) != 1 {
 		t.Fatalf("load must not add keys, got %v", keysOf(prefs))
+	}
+}
+
+// HideSensitiveInfo defaults to hidden and persists both ways
+// (S4_IMPLEMENTATION_SPEC.md §9). Absent preference -> true; persisted
+// false -> false; toggling round-trips.
+func TestHideSensitiveInfoPreference(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	if !repo.HideSensitiveInfo() {
+		t.Error("absent privacy preference must default to hiding sensitive info")
+	}
+
+	repo.SetHideSensitiveInfo(false)
+	if repo.HideSensitiveInfo() {
+		t.Error("persisted false must read back false")
+	}
+	if v := prefs.Bool(keyPrivacyShowSensitive); !v {
+		t.Errorf("storing hide=false must write show-sensitive=true, got %v", v)
+	}
+
+	repo.SetHideSensitiveInfo(true)
+	if !repo.HideSensitiveInfo() {
+		t.Error("toggled hide=true must persist")
+	}
+
+	// An external show-sensitive=false (the legacy-looking spelling) still
+	// means "hide", because the default is inverted-storage.
+	prefs.SetBool(keyPrivacyShowSensitive, false)
+	if !repo.HideSensitiveInfo() {
+		t.Error("show-sensitive=false must read as hiding")
 	}
 }
 

@@ -40,10 +40,11 @@ type SourceInstance struct {
 	PollInterval time.Duration
 
 	// Exactly one provider settings pointer is non-nil, matching Kind.
-	AMDGPUWeb *AMDGPUWebSettings
-	LlamaSwap *LlamaSwapSettings
-	MiniMax   *MiniMaxSettings
-	ZAI       *ZAISettings
+	AMDGPUWeb  *AMDGPUWebSettings
+	LlamaSwap  *LlamaSwapSettings
+	MiniMax    *MiniMaxSettings
+	ZAI        *ZAISettings
+	OpenRouter *OpenRouterSettings
 }
 
 // AMDGPUWebSettings are the amdgputop-web settings.
@@ -68,10 +69,16 @@ type ZAISettings struct {
 	BaseURL string
 }
 
-func (AMDGPUWebSettings) providerSettings() {}
-func (LlamaSwapSettings) providerSettings() {}
-func (MiniMaxSettings) providerSettings()   {}
-func (ZAISettings) providerSettings()       {}
+// OpenRouterSettings are the OpenRouter settings. The API endpoints are
+// fixed and the two credentials live in keychain slots, so — like MiniMax —
+// there is nothing to configure beyond the common fields.
+type OpenRouterSettings struct{}
+
+func (AMDGPUWebSettings) providerSettings()  {}
+func (LlamaSwapSettings) providerSettings()  {}
+func (MiniMaxSettings) providerSettings()    {}
+func (ZAISettings) providerSettings()        {}
+func (OpenRouterSettings) providerSettings() {}
 
 // Settings returns the provider settings value matching Kind. ok is false
 // when the pointer matching Kind is nil (a mismatch the pointer fields may
@@ -93,6 +100,10 @@ func (i SourceInstance) Settings() (ProviderSettings, bool) {
 	case domain.KindZAI:
 		if i.ZAI != nil {
 			return *i.ZAI, true
+		}
+	case domain.KindOpenRouter:
+		if i.OpenRouter != nil {
+			return *i.OpenRouter, true
 		}
 	}
 	return nil, false
@@ -153,9 +164,12 @@ func (i SourceInstance) Validate() []ValidationError {
 	if i.ZAI != nil {
 		set++
 	}
+	if i.OpenRouter != nil {
+		set++
+	}
 
 	switch i.Kind {
-	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindMiniMax, domain.KindZAI:
+	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter:
 	default:
 		errs = append(errs, ValidationError{Source: label, Field: "Kind", Message: fmt.Sprintf("unknown source kind %q", string(i.Kind))})
 	}
@@ -188,6 +202,10 @@ func (i SourceInstance) Validate() []ValidationError {
 			errs = append(errs, mismatchSettings(label))
 		} else {
 			errs = append(errs, validateURL(label, i.ZAI.BaseURL)...)
+		}
+	case domain.KindOpenRouter:
+		if i.OpenRouter == nil {
+			errs = append(errs, mismatchSettings(label))
 		}
 	}
 
@@ -229,6 +247,9 @@ func SameSettings(a, b ProviderSettings) bool {
 	case ZAISettings:
 		bv, ok := b.(ZAISettings)
 		return ok && av == bv
+	case OpenRouterSettings:
+		_, ok := b.(OpenRouterSettings)
+		return ok
 	}
 	return false
 }

@@ -19,12 +19,13 @@ const (
 // source instances, and never serves as a unique configured identity.
 type SourceKind string
 
-// The four compiled source kinds.
+// The compiled source kinds.
 const (
-	KindAMDGPUWeb SourceKind = "amdgputop-web"
-	KindLlamaSwap SourceKind = "llama-swap"
-	KindMiniMax   SourceKind = "minimax"
-	KindZAI       SourceKind = "zai"
+	KindAMDGPUWeb  SourceKind = "amdgputop-web"
+	KindLlamaSwap  SourceKind = "llama-swap"
+	KindMiniMax    SourceKind = "minimax"
+	KindZAI        SourceKind = "zai"
+	KindOpenRouter SourceKind = "openrouter"
 )
 
 // Category reports where the source runs. Source kinds are compile-time

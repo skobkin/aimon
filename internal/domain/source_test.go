@@ -16,6 +16,7 @@ func TestSourceKindCategory(t *testing.T) {
 		{KindLlamaSwap, CategoryLocal},
 		{KindMiniMax, CategoryRemote},
 		{KindZAI, CategoryRemote},
+		{KindOpenRouter, CategoryRemote},
 	}
 	for _, tc := range cases {
 		if got := tc.id.Category(); got != tc.want {
@@ -62,11 +63,12 @@ func (f fakeSnapshot) Timestamp() time.Time     { return f.at }
 func TestSnapshotConformance(t *testing.T) {
 	at := time.Now()
 	snaps := map[string]Snapshot{
-		"gpu":       GPUSnapshot{CollectedAt: at},
-		"llamaswap": LlamaSwapSnapshot{CollectedAt: at},
-		"minimax":   QuotaSnapshot{Kind: KindMiniMax, CollectedAt: at},
-		"zai":       QuotaSnapshot{Kind: KindZAI, CollectedAt: at},
-		"fake":      fakeSnapshot{source: KindZAI, at: at},
+		"gpu":        GPUSnapshot{CollectedAt: at},
+		"llamaswap":  LlamaSwapSnapshot{CollectedAt: at},
+		"minimax":    QuotaSnapshot{Kind: KindMiniMax, CollectedAt: at},
+		"zai":        QuotaSnapshot{Kind: KindZAI, CollectedAt: at},
+		"openrouter": OpenRouterSnapshot{CollectedAt: at},
+		"fake":       fakeSnapshot{source: KindZAI, at: at},
 	}
 	for name, s := range snaps {
 		if s.Timestamp() != at {
@@ -81,6 +83,9 @@ func TestSnapshotConformance(t *testing.T) {
 	}
 	if (QuotaSnapshot{Kind: KindZAI}).SnapshotKind() != KindZAI {
 		t.Error("QuotaSnapshot source mismatch")
+	}
+	if (OpenRouterSnapshot{}).SnapshotKind() != KindOpenRouter {
+		t.Error("OpenRouterSnapshot source mismatch")
 	}
 }
 

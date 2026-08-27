@@ -28,6 +28,12 @@ const (
 	// installations and never rewritten (there is intentionally no
 	// v0.2 -> v0.3 migration — a missing document means zero sources).
 	keySourceDocument = "sources.document"
+	// keyPrivacyShowSensitive backs the global "Hide sensitive info" UI
+	// preference as an INVERTED bool: the plain Preferences.Bool cannot
+	// distinguish "absent" from "false", and the default must be hide, so
+	// false/absent means sensitive values are concealed and true means
+	// they are shown.
+	keyPrivacyShowSensitive = "privacy.show-sensitive"
 )
 
 // sourceSchemaVersion is the dynamic source document format this build
@@ -62,10 +68,11 @@ type sourceRecord struct {
 	PollInterval string `json:"poll_interval"`
 
 	// Exactly one provider block is set, matching Kind.
-	AMDGPUWeb *amdGPUWebRecord `json:"amdgputop_web,omitempty"`
-	LlamaSwap *llamaSwapRecord `json:"llama_swap,omitempty"`
-	MiniMax   *miniMaxRecord   `json:"minimax,omitempty"`
-	ZAI       *zaiRecord       `json:"zai,omitempty"`
+	AMDGPUWeb  *amdGPUWebRecord  `json:"amdgputop_web,omitempty"`
+	LlamaSwap  *llamaSwapRecord  `json:"llama_swap,omitempty"`
+	MiniMax    *miniMaxRecord    `json:"minimax,omitempty"`
+	ZAI        *zaiRecord        `json:"zai,omitempty"`
+	OpenRouter *openRouterRecord `json:"openrouter,omitempty"`
 }
 
 type amdGPUWebRecord struct {
@@ -82,6 +89,8 @@ type miniMaxRecord struct{}
 type zaiRecord struct {
 	BaseURL string `json:"base_url"`
 }
+
+type openRouterRecord struct{}
 
 // LoadInstances reads the dynamic source document. A missing document is
 // the valid zero-source state (nil, nil) — the expected first S3 startup,
@@ -142,6 +151,20 @@ func (r *Repository) HasDocument() bool {
 	return r.prefs.String(keySourceDocument) != ""
 }
 
+// HideSensitiveInfo reports the global "Hide sensitive info" preference
+// (S4 spec §9). It defaults to true: absent and false both mean account
+// monetary values stay concealed until revealed on hover. Only this UI
+// presentation flag is affected — never API requests, credentials, or
+// logging.
+func (r *Repository) HideSensitiveInfo() bool {
+	return !r.prefs.Bool(keyPrivacyShowSensitive)
+}
+
+// SetHideSensitiveInfo persists the "Hide sensitive info" preference.
+func (r *Repository) SetHideSensitiveInfo(hide bool) {
+	r.prefs.SetBool(keyPrivacyShowSensitive, !hide)
+}
+
 func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 	kind := domain.SourceKind(rec.Kind)
 	interval, err := time.ParseDuration(rec.PollInterval)
@@ -171,6 +194,10 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 	case domain.KindZAI:
 		if rec.ZAI != nil {
 			inst.ZAI = &ZAISettings{BaseURL: rec.ZAI.BaseURL}
+		}
+	case domain.KindOpenRouter:
+		if rec.OpenRouter != nil {
+			inst.OpenRouter = &OpenRouterSettings{}
 		}
 	default:
 		return SourceInstance{}, fmt.Errorf("unknown source kind %q", rec.Kind)
@@ -202,6 +229,10 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 	case domain.KindZAI:
 		if inst.ZAI != nil {
 			rec.ZAI = &zaiRecord{BaseURL: inst.ZAI.BaseURL}
+		}
+	case domain.KindOpenRouter:
+		if inst.OpenRouter != nil {
+			rec.OpenRouter = &openRouterRecord{}
 		}
 	}
 	return rec

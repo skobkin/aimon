@@ -50,6 +50,23 @@ func TestAccountForInstanceSlotSpellingStable(t *testing.T) {
 	if SlotAPIKey != "api-key" {
 		t.Errorf("SlotAPIKey = %q, changing it orphans stored credentials", SlotAPIKey)
 	}
+	if SlotManagementKey != "management-key" {
+		t.Errorf("SlotManagementKey = %q, changing it orphans stored credentials", SlotManagementKey)
+	}
+}
+
+func TestAccountForInstanceDistinguishesSlots(t *testing.T) {
+	api, err := AccountForInstance("inst", SlotAPIKey)
+	if err != nil {
+		t.Fatalf("api account: %v", err)
+	}
+	mgmt, err := AccountForInstance("inst", SlotManagementKey)
+	if err != nil {
+		t.Fatalf("management account: %v", err)
+	}
+	if api == mgmt {
+		t.Fatalf("two slots of one instance must not share an account: %q", api)
+	}
 }
 
 func TestAccountForInstanceRejectsEmpty(t *testing.T) {
