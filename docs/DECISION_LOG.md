@@ -279,3 +279,33 @@ and refresh failed with "cannot identify plan entry among 2 models".
 Updates: `docs/INTEGRATIONS.md` §4 entry-selection guidance (naming-based
 selection, now anchored to the verified literal name).
 Commit: `e54ec31`.
+
+## 2026-08-27 — S4: SensitiveValue joins the approved custom widgets; inverted privacy preference storage; per-capability Test Connection
+
+Three S4 decisions extend established app-wide patterns.
+
+1. `components.SensitiveValue` is a new custom widget and the first since
+the S2 list in AGENTS.md ("standard widgets only" with narrowly scoped
+exceptions). Like `QuotaBar`/`MetricBar` it is presentation-only, has no
+configuration surface, and exists because no standard widget can mask
+text and reveal it on hover. It holds only display state (the real text,
+the privacy predicate, hover); masking never mutates the value. Its
+renderer measures both the real and masked strings and reserves whichever
+is wider, so conceal/reveal cannot reflow rows or shift them under a
+stationary pointer (hover flicker).
+
+2. The global "Hide sensitive info" preference defaults to *hidden*, but
+Fyne's `Preferences.Bool(key)` cannot distinguish an absent key from
+false. Storing it as inverted `privacy.show-sensitive`
+(`HideSensitiveInfo() = !Bool(key)`, absent ⇒ false ⇒ hidden) keeps the
+repository's narrow preference abstraction intact instead of widening it
+with key-existence checks. A source-config migration would have been the
+alternative; none is warranted for one UI flag.
+
+3. Test Connection becomes per-capability: `registry.Definition.Test`
+returns `TestReport{Lines, OK}` where `OK = tested > 0 && failed == 0`.
+Kinds with several independent credentials (OpenRouter) report each slot
+separately — including "not configured (skipped)" — and make zero HTTP
+requests for absent credentials; with nothing configured the test is not
+presented as success because nothing was verified. Single-credential
+kinds wrap their historical single-line wording unchanged.
