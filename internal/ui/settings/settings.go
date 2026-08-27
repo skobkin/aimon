@@ -50,6 +50,12 @@ type Deps struct {
 	// stored credential for that slot); nothing is ever persisted by a
 	// test. Multi-credential kinds report each capability in the report.
 	TestConnection func(ctx context.Context, inst config.SourceInstance, typedSecrets map[credentials.Slot]string) registry.TestReport
+	// HideSensitiveInfo reports the global privacy preference ("account
+	// level monetary values are concealed").
+	HideSensitiveInfo func() bool
+	// SetHideSensitiveInfo persists the preference and re-renders visible
+	// sensitive values. It runs on the UI thread.
+	SetHideSensitiveInfo func(bool)
 	// DiscoverGPUs lists the amdgputop-web GPUs at a base URL (the
 	// amdgputop-web connection test doubles as discovery).
 	DiscoverGPUs func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error)
@@ -77,6 +83,7 @@ type Settings struct {
 	addBtn   *widget.Button
 	status   *widget.Label
 	keychain *widget.Label
+	privacy  *widget.Check
 
 	// mutBusy gates configuration mutations: at most one SaveInstances is
 	// in flight. While one runs, every mutating control is disabled, so a
@@ -105,10 +112,24 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 	s.addBtn = widget.NewButtonWithIcon("Add source", theme.ContentAddIcon(), s.chooseKind)
 	s.listBox = container.NewVBox()
 
+	// The global privacy toggle sits above the source list: it is an
+	// application-wide setting, not per-source configuration. Toggling
+	// persists immediately and re-renders visible sensitive values.
+	s.privacy = widget.NewCheck("Hide sensitive info", func(on bool) {
+		if s.deps.SetHideSensitiveInfo != nil {
+			s.deps.SetHideSensitiveInfo(on)
+		}
+	})
+
 	bottom := container.NewHBox(s.addBtn, s.status)
 
 	content := container.NewBorder(
-		container.NewVBox(s.keychain, widget.NewSeparator()),
+		container.NewVBox(
+			widget.NewLabelWithStyle("Privacy", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			s.privacy,
+			s.keychain,
+			widget.NewSeparator(),
+		),
 		container.NewVBox(widget.NewSeparator(), bottom),
 		nil, nil,
 		container.NewVScroll(s.listBox),
@@ -128,9 +149,12 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 // Window returns the underlying window.
 func (s *Settings) Window() fyne.Window { return s.win }
 
-// Show rebuilds the list from the authoritative configuration and reveals
-// the window.
+// Show rebuilds the list from the authoritative configuration, reloads the
+// privacy preference, and reveals the window.
 func (s *Settings) Show() {
+	if s.deps.HideSensitiveInfo != nil {
+		s.privacy.SetChecked(s.deps.HideSensitiveInfo())
+	}
 	s.refresh()
 	s.probeKeychain()
 	s.win.Show()

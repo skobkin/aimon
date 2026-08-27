@@ -125,11 +125,13 @@ func New() (*App, error) {
 
 	a.monitor = monitor.NewMonitor(fa, a, a.done)
 	a.settings = settings.NewSettings(fa, settings.Deps{
-		LoadInstances:      a.Instances,
-		SaveInstances:      a.SaveInstances,
-		CleanupCredentials: a.cleanupCredentials,
-		Creds:              creds,
-		TestConnection:     a.testConnection,
+		LoadInstances:        a.Instances,
+		SaveInstances:        a.SaveInstances,
+		CleanupCredentials:   a.cleanupCredentials,
+		Creds:                creds,
+		TestConnection:       a.testConnection,
+		HideSensitiveInfo:    a.HideSensitiveInfo,
+		SetHideSensitiveInfo: a.SetHideSensitiveInfo,
 		DiscoverGPUs: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
@@ -301,6 +303,19 @@ func (a *App) Instances() []config.SourceInstance {
 
 // States implements monitor.MonitorController.
 func (a *App) States() map[domain.InstanceID]domain.Runtime { return a.mgr.States() }
+
+// HideSensitiveInfo implements monitor.MonitorController: the global
+// privacy preference, read straight from the repository.
+func (a *App) HideSensitiveInfo() bool { return a.repo.HideSensitiveInfo() }
+
+// SetHideSensitiveInfo persists the privacy preference and re-renders the
+// monitor so visible sensitive values follow it immediately. It is called
+// only from the Settings window's check callback on the UI thread, so the
+// re-render needs no fyne.Do hop.
+func (a *App) SetHideSensitiveInfo(hide bool) {
+	a.repo.SetHideSensitiveInfo(hide)
+	a.monitor.OnStatesChanged()
+}
 
 // RefreshAll implements monitor.MonitorController.
 func (a *App) RefreshAll() { a.mgr.RefreshAll() }

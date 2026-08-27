@@ -27,6 +27,9 @@ type MonitorController interface {
 	States() map[domain.InstanceID]domain.Runtime
 	RefreshAll()
 	OpenSettings()
+	// HideSensitiveInfo reports the global privacy preference: account-level
+	// monetary values render masked until hovered while it is set.
+	HideSensitiveInfo() bool
 }
 
 // monitorSize is the splash window size (UI_UX ~500–560 wide; content
@@ -211,28 +214,28 @@ func (m *Monitor) rebuildOverview(vm ui.OverviewVM) {
 
 	if len(vm.LocalCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Local"))
-		objs = append(objs, overviewRow(vm.LocalCards)...)
+		objs = append(objs, m.overviewRow(vm.LocalCards)...)
 	}
 	if len(vm.RemoteCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Remote"))
-		objs = append(objs, overviewRow(vm.RemoteCards)...)
+		objs = append(objs, m.overviewRow(vm.RemoteCards)...)
 	}
 	replaceObjects(m.overviewBox, objs...)
 }
 
 // overviewRow lays out overview cards in pairs of equal columns
 // (GridWithColumns); with an odd count the final card takes the full width.
-func overviewRow(cards []ui.OverviewCardVM) []fyne.CanvasObject {
+func (m *Monitor) overviewRow(cards []ui.OverviewCardVM) []fyne.CanvasObject {
 	objs := make([]fyne.CanvasObject, 0, (len(cards)+1)/2)
 	for i := 0; i < len(cards); i += 2 {
 		if i+1 < len(cards) {
 			objs = append(objs, container.NewGridWithColumns(2,
-				overviewSourceCard(cards[i], overviewCardBody(cards[i])),
-				overviewSourceCard(cards[i+1], overviewCardBody(cards[i+1])),
+				overviewSourceCard(cards[i], m.overviewCardBody(cards[i])),
+				overviewSourceCard(cards[i+1], m.overviewCardBody(cards[i+1])),
 			))
 			continue
 		}
-		objs = append(objs, overviewSourceCard(cards[i], overviewCardBody(cards[i])))
+		objs = append(objs, overviewSourceCard(cards[i], m.overviewCardBody(cards[i])))
 	}
 	return objs
 }
@@ -248,8 +251,9 @@ func overviewSourceCard(vm ui.OverviewCardVM, body fyne.CanvasObject) fyne.Canva
 	return widget.NewCard("", "", container.NewVBox(header, body))
 }
 
-// overviewCardBody dispatches to the compact overview body builder.
-func overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
+// overviewCardBody dispatches to the compact overview body builder. Spend
+// bodies receive the privacy predicate; all builders run on the UI thread.
+func (m *Monitor) overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
 	switch c.Kind {
 	case ui.OverviewMetrics:
 		return components.NewMetricsOverviewBody(c.Metrics)
@@ -257,6 +261,8 @@ func overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
 		return components.NewRuntimeOverviewBody(c.Runtime)
 	case ui.OverviewQuota:
 		return components.NewQuotaOverviewBody(c.Quota)
+	case ui.OverviewSpend:
+		return components.NewSpendOverviewBody(c.Spend, m.ctrl.HideSensitiveInfo)
 	default:
 		return noDataYet()
 	}
@@ -270,7 +276,7 @@ func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstanc
 	}
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
-		body := cardBody(c)
+		body := m.cardBody(c)
 		if label, target, ok := webLink(c, instances); ok {
 			body = withWebUILink(body, "Open "+label, target)
 		}
@@ -298,7 +304,7 @@ func webLink(c ui.CardVM, instances []config.SourceInstance) (label, target stri
 
 // cardBody renders the card's data body from its view model. Which rows
 // appear depends on the VM the builder produced (overview vs detail).
-func cardBody(c ui.CardVM) fyne.CanvasObject {
+func (m *Monitor) cardBody(c ui.CardVM) fyne.CanvasObject {
 	switch c.Kind {
 	case ui.KindGPU:
 		rows := c.GPU.Overview
@@ -336,6 +342,8 @@ func cardBody(c ui.CardVM) fyne.CanvasObject {
 			return noDataYet()
 		}
 		return box
+	case ui.KindSpend:
+		return components.NewSpendDetailBody(c.Spend, m.ctrl.HideSensitiveInfo)
 	default:
 		return noDataYet()
 	}
