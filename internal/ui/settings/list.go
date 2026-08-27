@@ -40,6 +40,8 @@ func newDraft(kind domain.SourceKind) (config.SourceInstance, bool) {
 		inst.MiniMax = &s
 	case config.ZAISettings:
 		inst.ZAI = &s
+	case config.OpenRouterSettings:
+		inst.OpenRouter = &s
 	}
 	return inst, true
 }
