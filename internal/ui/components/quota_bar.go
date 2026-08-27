@@ -1,6 +1,8 @@
 // Package components holds the reusable Fyne building blocks. Everything
-// here is standard Fyne widgets and containers except QuotaBar, which is
-// the single approved custom widget (AGENTS.md: standard widgets only).
+// here is standard Fyne widgets and containers except QuotaBar,
+// MetricBar and SensitiveValue — narrowly scoped, presentation-only
+// custom widgets (AGENTS.md: standard widgets only; SensitiveValue
+// recorded in docs/DECISION_LOG.md).
 package components
 
 import (
