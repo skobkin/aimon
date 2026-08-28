@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
@@ -37,6 +38,11 @@ import (
 // appID is the single application identity, identical to FyneApp.toml
 // (preferences path, tray, packaging all key off it).
 const appID = "com.skobkin.aimonitor"
+
+// keyringProbeTimeout bounds the startup keychain availability probe: the
+// keychain gates credential features only, so a wedged backend delays the
+// log line, never the event loop.
+const keyringProbeTimeout = 5 * time.Second
 
 // appMetadata mirrors FyneApp.toml for runs without packaged metadata
 // (see New). Keep the values in sync with the toml; a test guards the
@@ -72,9 +78,33 @@ type App struct {
 	unsub   func()
 	trayEnd func()
 
+	// uiUpdate collapses bursts of state-change notifications into at most
+	// one pending monitor re-render: N sources finishing a poll within the
+	// same dispatch window must cost one rebuild, not N.
+	uiUpdate uiCoalescer
+
 	mu        sync.RWMutex // guards instances and the adapter cache
 	instances []config.SourceInstance
 	adapters  map[domain.InstanceID]adapterEntry
+}
+
+// uiCoalescer lets one UI update wait while others arrive. schedule
+// dispatches update exactly once per generation: calls while an update is
+// pending are absorbed by it, and the flag clears when the dispatched
+// update runs, so a notification arriving during that update schedules a
+// fresh one. dispatch must run update on the UI thread (fyne.Do).
+type uiCoalescer struct {
+	pending atomic.Bool
+}
+
+func (c *uiCoalescer) schedule(dispatch func(func()), update func()) {
+	if c.pending.Swap(true) {
+		return
+	}
+	dispatch(func() {
+		c.pending.Store(false)
+		update()
+	})
 }
 
 // adapterEntry caches one instance's built adapter together with the
@@ -143,7 +173,7 @@ func New() (*App, error) {
 		if !a.running.Load() {
 			return
 		}
-		fyne.Do(a.monitor.OnStatesChanged)
+		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
 	})
 	a.monitor.StartTicker()
 	return a, nil
@@ -167,8 +197,13 @@ func (a *App) Run() {
 	}()
 
 	// Keychain state changes are Info-worthy (they gate credential
-	// features); the probe never touches a real account.
-	if st := a.creds.Status(context.Background()); st.State != credentials.StateAvailable {
+	// features); the probe never touches a real account. It is bounded:
+	// go-keyring's Secret Service binding can block indefinitely on a
+	// wedged dbus daemon, and startup must not hang on it.
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), keyringProbeTimeout)
+	st := a.creds.Status(probeCtx)
+	cancelProbe()
+	if st.State != credentials.StateAvailable {
 		a.log.Warn("keychain not available", "state", string(st.State), "backend", st.Backend, "message", st.Message)
 	}
 

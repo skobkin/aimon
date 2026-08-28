@@ -231,3 +231,78 @@ func TestApplyInstancesAdapterReuseAndRebuild(t *testing.T) {
 		t.Errorf("Instances() = %+v, want only gpu-a", got)
 	}
 }
+
+// dispatchQueue stands in for fyne.Do in tests: calls enqueue, and the
+// event loop drains them later — the pending flag stays set in between.
+type dispatchQueue struct{ queued []func() }
+
+func (d *dispatchQueue) dispatch(f func()) { d.queued = append(d.queued, f) }
+
+func (d *dispatchQueue) drain() {
+	// Update enqueued during a pass run in the next pass, like an event
+	// loop draining a queue that callbacks keep refilling.
+	for len(d.queued) > 0 {
+		batch := d.queued
+		d.queued = nil
+		for _, f := range batch {
+			f()
+		}
+	}
+}
+
+// N notifications landing inside one dispatch window must collapse into a
+// single UI update: every poller finishing at once costs one rebuild, not
+// one per source.
+func TestUICoalescerCollapsesBursts(t *testing.T) {
+	var c uiCoalescer
+	q := &dispatchQueue{}
+	runs := 0
+	update := func() { runs++ }
+
+	for i := 0; i < 10; i++ {
+		c.schedule(q.dispatch, update)
+	}
+	if got := len(q.queued); got != 1 {
+		t.Fatalf("burst of 10 notifications queued %d updates, want 1", got)
+	}
+	q.drain()
+	if runs != 1 {
+		t.Errorf("drain ran the update %d times, want 1", runs)
+	}
+
+	// Once the dispatched update ran, the next notification schedules a
+	// fresh one — nothing is dropped across generations.
+	c.schedule(q.dispatch, update)
+	if got := len(q.queued); got != 1 {
+		t.Errorf("notification after dispatch queued %d updates, want 1", got)
+	}
+	q.drain()
+	if runs != 2 {
+		t.Errorf("second drain ran the update %d times total, want 2", runs)
+	}
+}
+
+// A notification arriving during the dispatched update itself (the flag is
+// already cleared when it runs) must schedule a follow-up, not be absorbed.
+func TestUICoalescerRearmsDuringDispatch(t *testing.T) {
+	var c uiCoalescer
+	q := &dispatchQueue{}
+	runs := 0
+	var update func()
+	update = func() {
+		runs++
+		if runs == 1 {
+			// Re-entrant notification while the UI update is in flight.
+			c.schedule(q.dispatch, update)
+		}
+	}
+
+	c.schedule(q.dispatch, update)
+	if got := len(q.queued); got != 1 {
+		t.Fatalf("re-entrant notification left %d queued updates, want 1 (absorbed scheduling would leave 0)", got)
+	}
+	q.drain()
+	if runs != 2 {
+		t.Errorf("re-entrant notification produced %d updates, want 2", runs)
+	}
+}
