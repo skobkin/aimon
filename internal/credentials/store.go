@@ -77,8 +77,9 @@ func AccountForInstance(id domain.InstanceID, slot Slot) (AccountID, error) {
 var ErrNotFound = errors.New("credential not found")
 
 // Store reads and writes credentials. Implementations must be safe for
-// concurrent use. Contexts are accepted for interface stability; the
-// keychain calls themselves are synchronous.
+// concurrent use and must honor ctx: the keychain calls themselves may be
+// synchronous, but a cancelled ctx must unblock the caller (a wedged
+// Secret Service must never hang the UI or startup).
 type Store interface {
 	// Status probes the backend without touching any real account.
 	Status(ctx context.Context) Status

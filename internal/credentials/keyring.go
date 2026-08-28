@@ -3,6 +3,7 @@ package credentials
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 
@@ -43,11 +44,54 @@ func newKeyringStore(ops keyringOps) *KeyringStore {
 	return &KeyringStore{ops: ops}
 }
 
+// await runs the blocking keychain operation on its own goroutine and
+// unblocks the caller when ctx is done, abandoning the operation.
+//
+// The go-keyring API has no context parameter, and its Secret Service
+// binding can block indefinitely (a dbus daemon that never answers, an
+// unlock prompt nobody sees). Every caller therefore passes a bounded
+// context and reads "abandoned" as an unavailable backend instead of
+// hanging the UI or startup. The abandoned goroutine keeps running until
+// the call returns; bounding caller latency is the goal, not reaping it.
+func await(ctx context.Context, run func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run()
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// abandonedErr classifies a context cancellation as an unavailable
+// backend, the same bucket as a dbus daemon that went away.
+func abandonedErr(err error) error {
+	return &StateError{
+		State:   StateUnavailable,
+		Message: fmt.Sprintf("keychain did not answer before the operation was abandoned (%v)", err),
+		Err:     err,
+	}
+}
+
 // Status probes the backend with a read of a reserved account. A "not
 // found" answer means the keychain answered us — it is available.
 func (s *KeyringStore) Status(ctx context.Context) Status {
 	backend := backendName()
-	_, err := s.ops.get(ServiceName, statusProbeAccount)
+	var err error
+	if waitErr := await(ctx, func() { _, err = s.ops.get(ServiceName, statusProbeAccount) }); waitErr != nil {
+		return Status{
+			Backend: backend,
+			State:   StateUnavailable,
+			Message: fmt.Sprintf("probe abandoned: %v", waitErr),
+		}
+	}
 	if err == nil || errors.Is(err, keyring.ErrNotFound) {
 		return Status{Backend: backend, State: StateAvailable}
 	}
@@ -60,7 +104,11 @@ func (s *KeyringStore) Status(ctx context.Context) Status {
 
 // Get implements Store.
 func (s *KeyringStore) Get(ctx context.Context, id AccountID) (string, error) {
-	v, err := s.ops.get(ServiceName, string(id))
+	var v string
+	var err error
+	if waitErr := await(ctx, func() { v, err = s.ops.get(ServiceName, string(id)) }); waitErr != nil {
+		return "", abandonedErr(waitErr)
+	}
 	if err != nil {
 		return "", mapKeyringError(err)
 	}
@@ -69,7 +117,11 @@ func (s *KeyringStore) Get(ctx context.Context, id AccountID) (string, error) {
 
 // Set implements Store.
 func (s *KeyringStore) Set(ctx context.Context, id AccountID, secret string) error {
-	if err := s.ops.set(ServiceName, string(id), secret); err != nil {
+	var err error
+	if waitErr := await(ctx, func() { err = s.ops.set(ServiceName, string(id), secret) }); waitErr != nil {
+		return abandonedErr(waitErr)
+	}
+	if err != nil {
 		return mapKeyringError(err)
 	}
 	return nil
@@ -77,7 +129,11 @@ func (s *KeyringStore) Set(ctx context.Context, id AccountID, secret string) err
 
 // Delete implements Store. Deleting an unset account is a success.
 func (s *KeyringStore) Delete(ctx context.Context, id AccountID) error {
-	if err := s.ops.delete(ServiceName, string(id)); err != nil {
+	var err error
+	if waitErr := await(ctx, func() { err = s.ops.delete(ServiceName, string(id)) }); waitErr != nil {
+		return abandonedErr(waitErr)
+	}
+	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return nil
 		}

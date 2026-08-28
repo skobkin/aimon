@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -167,6 +168,41 @@ func TestStatusProbe(t *testing.T) {
 	st3 := s3.Status(ctx)
 	if st3.State != StateLocked || st3.Message == "" {
 		t.Errorf("locked probe = %+v", st3)
+	}
+}
+
+// blockingGet models a wedged Secret Service: the call never returns.
+func blockingGet(service, user string) (string, error) {
+	<-make(chan struct{}) // blocks forever
+	return "", nil
+}
+
+// A wedged backend must not hang the caller: once ctx expires, Status and
+// Get report an unavailable backend instead of blocking forever. The
+// abandoned goroutine itself keeps waiting — that is go-keyring's
+// ctx-less API, bounding caller latency is all a caller can do.
+func TestKeyringOpsHonorContextDeadline(t *testing.T) {
+	s := newKeyringStore(keyringOps{get: blockingGet, set: func(string, string, string) error { return nil }, delete: func(string, string) error { return nil }})
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	st := s.Status(ctx)
+	if st.State != StateUnavailable || !strings.Contains(st.Message, "abandoned") {
+		t.Errorf("wedged probe = %+v, want unavailable with an abandonment message", st)
+	}
+	if _, err := s.Get(ctx, testAccount()); !errors.As(err, new(*StateError)) {
+		t.Errorf("wedged Get error = %v, want *StateError", err)
+	}
+	if err := s.Set(ctx, testAccount(), "x"); !errors.As(err, new(*StateError)) {
+		t.Errorf("wedged Set error = %v, want *StateError", err)
+	}
+	if err := s.Delete(ctx, testAccount()); !errors.As(err, new(*StateError)) {
+		t.Errorf("wedged Delete error = %v, want *StateError", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("calls blocked for %v; an expired ctx must unblock the caller", elapsed)
 	}
 }
 
