@@ -18,6 +18,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
+	"git.skobk.in/skobkin/aimonitor/internal/source/hindsight"
 	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
 	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
 	"git.skobk.in/skobkin/aimonitor/internal/source/openrouter"
@@ -167,6 +168,42 @@ var definitions = []Definition{
 				return "", false
 			}
 			return inst.LlamaSwap.BaseURL + "/ui", true
+		},
+	},
+	{
+		Kind:            domain.KindHindsight,
+		Category:        domain.CategoryLocal,
+		DefaultName:     "Hindsight",
+		DefaultInterval: config.DefaultLocalInterval,
+		Intervals:       config.LocalIntervals,
+		CredentialSlots: apiKeySlots, // optional: no stored key means unauthenticated
+		SlotHint: func(slot credentials.Slot) string {
+			return "Optional Bearer token for protected/cloud Hindsight APIs"
+		},
+		WebLabel: "Hindsight",
+		DefaultSettings: func() config.ProviderSettings {
+			return config.HindsightSettings{BaseURL: config.DefaultHindsightURL}
+		},
+		Build: func(inst config.SourceInstance, deps Deps) (source.Source, error) {
+			s := inst.Hindsight
+			if s == nil {
+				return nil, missingSettings(inst)
+			}
+			account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+			if err != nil {
+				return nil, err
+			}
+			// deps.Creds may be nil: a known-unauthenticated instance.
+			return hindsight.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log), nil
+		},
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
+			return hindsightTestReport(ctx, inst, deps)
+		},
+		WebURL: func(inst config.SourceInstance) (string, bool) {
+			if inst.Hindsight == nil || inst.Hindsight.WebUIURL == "" {
+				return "", false
+			}
+			return inst.Hindsight.WebUIURL, true
 		},
 	},
 	{
@@ -441,6 +478,46 @@ func capabilityTestReport(ctx context.Context, checks []namedCapability) TestRep
 	}
 	report.OK = tested > 0 && failed == 0
 	return report
+}
+
+// hindsightTestReport renders the Hindsight connection test as three
+// lines: Health (folding the /health/live liveness probe in), Metrics, and
+// Banks with the visible bank count. All four surfaces are probed even
+// when one fails, so a partial misconfiguration shows every broken surface
+// at once.
+func hindsightTestReport(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
+	s := inst.Hindsight
+	if s == nil {
+		return failedTestReport(missingSettings(inst))
+	}
+	account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+	if err != nil {
+		return failedTestReport(err)
+	}
+	out := hindsight.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log).Test(ctx)
+	if out.Err != nil {
+		return failedTestReport(out.Err)
+	}
+	healthErr := out.HealthErr
+	if healthErr == nil {
+		healthErr = out.LiveErr
+	}
+	health := "Health: OK"
+	if healthErr != nil {
+		health = "Health: " + sanitizedReason(healthErr)
+	}
+	metrics := "Metrics: OK"
+	if out.MetricsErr != nil {
+		metrics = "Metrics: " + sanitizedReason(out.MetricsErr)
+	}
+	banks := fmt.Sprintf("Banks: OK (%d visible)", out.BanksTotal)
+	if out.BanksErr != nil {
+		banks = "Banks: " + sanitizedReason(out.BanksErr)
+	}
+	return TestReport{
+		Lines: []string{health, metrics, banks},
+		OK:    out.OK(),
+	}
 }
 
 // singleTestReport wraps a kind whose whole test is one operation,

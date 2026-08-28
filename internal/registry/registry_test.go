@@ -3,7 +3,9 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -16,8 +18,8 @@ import (
 
 func TestAllRegistersEveryKindOnce(t *testing.T) {
 	all := All()
-	if len(all) != 5 {
-		t.Fatalf("registered %d kinds, want 5", len(all))
+	if len(all) != 6 {
+		t.Fatalf("registered %d kinds, want 6", len(all))
 	}
 	seen := map[domain.SourceKind]bool{}
 	for _, d := range all {
@@ -26,7 +28,7 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 		}
 		seen[d.Kind] = true
 	}
-	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter} {
+	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter} {
 		if !seen[kind] {
 			t.Errorf("kind %q missing from the registry", kind)
 		}
@@ -48,6 +50,7 @@ func TestDefinitionMetadata(t *testing.T) {
 	}{
 		{domain.KindAMDGPUWeb, domain.CategoryLocal, "amdgputop-web", nil},
 		{domain.KindLlamaSwap, domain.CategoryLocal, "llama-swap", []credentials.Slot{credentials.SlotAPIKey}},
+		{domain.KindHindsight, domain.CategoryLocal, "Hindsight", []credentials.Slot{credentials.SlotAPIKey}},
 		{domain.KindMiniMax, domain.CategoryRemote, "MiniMax", []credentials.Slot{credentials.SlotAPIKey}},
 		{domain.KindZAI, domain.CategoryRemote, "Z.AI / GLM", []credentials.Slot{credentials.SlotAPIKey}},
 		{domain.KindOpenRouter, domain.CategoryRemote, "OpenRouter", []credentials.Slot{credentials.SlotAPIKey, credentials.SlotManagementKey}},
@@ -106,6 +109,11 @@ func TestDefaultSettings(t *testing.T) {
 	if !ok || zs.BaseURL != config.DefaultZAIURL {
 		t.Errorf("zai default settings = %#v", def.DefaultSettings())
 	}
+	def, _ = Get(domain.KindHindsight)
+	hs, ok := def.DefaultSettings().(config.HindsightSettings)
+	if !ok || hs.BaseURL != config.DefaultHindsightURL || hs.WebUIURL != "" {
+		t.Errorf("hindsight default settings = %#v", def.DefaultSettings())
+	}
 }
 
 func inst(id, name string, kind domain.SourceKind, settings config.ProviderSettings) config.SourceInstance {
@@ -115,6 +123,8 @@ func inst(id, name string, kind domain.SourceKind, settings config.ProviderSetti
 		i.AMDGPUWeb = &s
 	case config.LlamaSwapSettings:
 		i.LlamaSwap = &s
+	case config.HindsightSettings:
+		i.Hindsight = &s
 	case config.MiniMaxSettings:
 		i.MiniMax = &s
 	case config.ZAISettings:
@@ -181,30 +191,37 @@ func TestBuildRejectsMissingSettings(t *testing.T) {
 
 func TestWebURL(t *testing.T) {
 	cases := []struct {
-		kind domain.SourceKind
-		url  string
-		want string
+		kind   domain.SourceKind
+		url    string
+		want   string
+		wantOK bool
 	}{
-		{domain.KindAMDGPUWeb, "http://10.0.0.5:8080", "http://10.0.0.5:8080"},
-		{domain.KindLlamaSwap, "http://127.0.0.1:8081", "http://127.0.0.1:8081/ui"},
-		{domain.KindMiniMax, "", MiniMaxConsoleURL},
-		{domain.KindZAI, "https://api.z.ai", ZAIUsageURL},
-		{domain.KindOpenRouter, "", OpenRouterActivityURL},
+		{domain.KindAMDGPUWeb, "http://10.0.0.5:8080", "http://10.0.0.5:8080", true},
+		{domain.KindLlamaSwap, "http://127.0.0.1:8081", "http://127.0.0.1:8081/ui", true},
+		{domain.KindMiniMax, "", MiniMaxConsoleURL, true},
+		{domain.KindZAI, "https://api.z.ai", ZAIUsageURL, true},
+		{domain.KindOpenRouter, "", OpenRouterActivityURL, true},
+		// Hindsight exposes its web UI only when a Web UI URL is configured;
+		// the API base URL is never reused for it (no port derivation).
+		{domain.KindHindsight, "http://127.0.0.1:9999", "http://127.0.0.1:9999", true},
+		{domain.KindHindsight, "", "", false},
 	}
 	for _, c := range cases {
 		def, _ := Get(c.kind)
-		inst := inst("id", "n", c.kind, def.DefaultSettings())
+		instance := inst("id", "n", c.kind, def.DefaultSettings())
 		switch c.kind {
 		case domain.KindAMDGPUWeb:
-			inst.AMDGPUWeb = &config.AMDGPUWebSettings{BaseURL: c.url}
+			instance.AMDGPUWeb = &config.AMDGPUWebSettings{BaseURL: c.url}
 		case domain.KindLlamaSwap:
-			inst.LlamaSwap = &config.LlamaSwapSettings{BaseURL: c.url}
+			instance.LlamaSwap = &config.LlamaSwapSettings{BaseURL: c.url}
 		case domain.KindZAI:
-			inst.ZAI = &config.ZAISettings{BaseURL: c.url}
+			instance.ZAI = &config.ZAISettings{BaseURL: c.url}
+		case domain.KindHindsight:
+			instance.Hindsight = &config.HindsightSettings{BaseURL: "http://127.0.0.1:8888", WebUIURL: c.url}
 		}
-		got, ok := def.WebURL(inst)
-		if !ok || got != c.want {
-			t.Errorf("%s WebURL = (%q, %v), want (%q, true)", c.kind, got, ok, c.want)
+		got, ok := def.WebURL(instance)
+		if ok != c.wantOK || got != c.want {
+			t.Errorf("%s WebURL = (%q, %v), want (%q, %v)", c.kind, got, ok, c.want, c.wantOK)
 		}
 	}
 }
@@ -215,11 +232,13 @@ func TestWebLinksUsesNamesOrderAndDisabled(t *testing.T) {
 		{ID: "2", Kind: domain.KindMiniMax, Name: "MiniMax Secondary", Enabled: false, PollInterval: time.Minute, MiniMax: &config.MiniMaxSettings{}},
 		inst("3", "MiniMax Personal", domain.KindMiniMax, config.MiniMaxSettings{}),
 		inst("4", "llama local", domain.KindLlamaSwap, config.LlamaSwapSettings{BaseURL: "http://127.0.0.1:8081"}),
+		// No Web UI URL configured: no tray entry.
+		inst("5", "Hindsight local", domain.KindHindsight, config.HindsightSettings{BaseURL: "http://127.0.0.1:8888"}),
 	}
 
 	links := WebLinks(instances)
 	if len(links) != 4 {
-		t.Fatalf("links = %v, want all four", links)
+		t.Fatalf("links = %v, want four (Hindsight without a Web UI URL omitted)", links)
 	}
 	wantNames := []string{"AMD GPU server", "MiniMax Secondary", "MiniMax Personal", "llama local"}
 	for i, l := range links {
@@ -231,10 +250,123 @@ func TestWebLinksUsesNamesOrderAndDisabled(t *testing.T) {
 		}
 	}
 
+	// A Web UI URL yields its own tray entry, independent of polling.
+	instances = append(instances, inst("6", "Hindsight cloud", domain.KindHindsight,
+		config.HindsightSettings{BaseURL: "http://127.0.0.1:8890", WebUIURL: "http://hs-ui.example.invalid"}))
+	links = WebLinks(instances)
+	if len(links) != 5 {
+		t.Fatalf("links = %d, want 5", len(links))
+	}
+	if last := links[4]; last.Name != "Hindsight cloud" || last.URL != "http://hs-ui.example.invalid" {
+		t.Errorf("last link = %+v, want the Hindsight web UI URL", last)
+	}
+
 	// An invalid instance (missing settings) yields no link, not a panic.
-	instances = append(instances, config.SourceInstance{ID: "5", Kind: domain.KindZAI, Name: "broken", Enabled: true, PollInterval: time.Minute})
-	if links := WebLinks(instances); len(links) != 4 {
-		t.Errorf("links = %d, want 4 (broken instance omitted)", len(links))
+	instances = append(instances, config.SourceInstance{ID: "7", Kind: domain.KindZAI, Name: "broken", Enabled: true, PollInterval: time.Minute})
+	if links := WebLinks(instances); len(links) != 5 {
+		t.Errorf("links = %d, want 5 (broken instance omitted)", len(links))
+	}
+}
+
+// hindsightTestServer serves the four Hindsight endpoints and records the
+// bank-list request URIs, so the connection test proves its one-row probe.
+type hindsightTestServer struct {
+	mu         sync.Mutex
+	banksTotal int64
+	bankURIs   []string
+}
+
+func (s *hindsightTestServer) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.Write([]byte(`{"status":"healthy","database":"connected"}`))
+		case "/health/live":
+			w.Write([]byte(`{"status":"ok","version":"0.9.2","uptime_seconds":60}`))
+		case "/metrics":
+			w.Write([]byte("hindsight_db_pool_size 10\n"))
+		case "/v1/default/banks":
+			s.mu.Lock()
+			s.bankURIs = append(s.bankURIs, r.URL.RequestURI())
+			s.mu.Unlock()
+			s.mu.Lock()
+			total := s.banksTotal
+			s.mu.Unlock()
+			fmt.Fprintf(w, `{"banks":[{"bank_id":"x","fact_count":1}],"total":%d,"limit":1,"offset":0}`, total)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func (s *hindsightTestServer) uris() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.bankURIs...)
+}
+
+func TestHindsightTestConnection(t *testing.T) {
+	srv := &hindsightTestServer{banksTotal: 27}
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	instance := inst("hs-1", "Hindsight", domain.KindHindsight,
+		config.HindsightSettings{BaseURL: server.URL, WebUIURL: server.URL + "/ui"})
+	def, _ := Get(domain.KindHindsight)
+
+	report := def.Test(context.Background(), instance, Deps{Creds: fakeStore{}, Client: server.Client()})
+	want := []string{"Health: OK", "Metrics: OK", "Banks: OK (27 visible)"}
+	if len(report.Lines) != len(want) {
+		t.Fatalf("report = %v, want %v", report.Lines, want)
+	}
+	for i := range want {
+		if report.Lines[i] != want[i] {
+			t.Errorf("line[%d] = %q, want %q", i, report.Lines[i], want[i])
+		}
+	}
+	if !report.OK {
+		t.Error("all-OK report must count as success")
+	}
+
+	// The bank probe asks for exactly one row.
+	uris := srv.uris()
+	if len(uris) != 1 || uris[0] != "/v1/default/banks?limit=1&offset=0" {
+		t.Errorf("bank probe requests = %v, want a single limit=1 request", uris)
+	}
+
+	// A rejected surface reports a sanitized per-line reason, not raw
+	// payloads, and the test is not a success.
+	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer denied.Close()
+
+	instance.Hindsight = &config.HindsightSettings{BaseURL: denied.URL}
+	report = def.Test(context.Background(), instance, Deps{Creds: fakeStore{}, Client: denied.Client()})
+	if report.OK {
+		t.Error("all-probes-failed report must not be a success")
+	}
+	for i, line := range report.Lines {
+		if strings.Contains(line, "401") || strings.Contains(line, "Unauthorized") {
+			t.Errorf("line[%d] leaks raw status details: %q", i, line)
+		}
+	}
+	if report.Lines[0] != "Health: Authentication failed" {
+		t.Errorf("health line = %q, want the sanitized auth message", report.Lines[0])
+	}
+
+	// Missing settings is an infrastructure failure, not a probe report.
+	broken := config.SourceInstance{ID: "hs-x", Kind: domain.KindHindsight, Name: "broken", Enabled: true}
+	if report := def.Test(context.Background(), broken, Deps{Creds: fakeStore{}}); report.OK || len(report.Lines) != 1 {
+		t.Errorf("missing-settings report = %+v, want a single failure line", report)
+	}
+
+	// Build works without a credential store (unauthenticated instance).
+	src, err := def.Build(instance, Deps{Creds: nil, Client: server.Client()})
+	if err != nil {
+		t.Errorf("build without a credential store: %v", err)
+	} else if src.Kind() != domain.KindHindsight {
+		t.Errorf("built adapter kind = %s", src.Kind())
 	}
 }
 
