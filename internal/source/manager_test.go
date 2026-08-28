@@ -484,12 +484,25 @@ func TestManagerSubscribe(t *testing.T) {
 	})
 	defer cancel()
 
-	m.Apply(reg(inst, src, true, 20*time.Millisecond))
+	// Long interval so no scheduled tick can add refreshes in this window:
+	// a second event would mean the in-flight start was notified too.
+	m.Apply(reg(inst, src, true, 10*time.Second))
 	waitFor(t, 1*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return events[inst] >= 2 // start + completion
+		return events[inst] >= 1 // completion only; the in-flight start is not notified
 	})
+
+	// Long interval: no scheduled tick can add refreshes in this window, so
+	// a second event now would mean the in-flight start was notified too.
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	got := events[inst]
+	mu.Unlock()
+	refreshes := src.refreshes.Load()
+	if got != 1 || refreshes != 1 {
+		t.Errorf("events = %d for %d refreshes, want exactly one completion notification per refresh", got, refreshes)
+	}
 
 	cancel()
 	time.Sleep(100 * time.Millisecond)

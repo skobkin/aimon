@@ -151,7 +151,20 @@ func (m *Monitor) isVisible() bool {
 
 // OnStatesChanged re-renders every tab. It must run on the UI thread;
 // the app subscriber wraps the call in fyne.Do.
-func (m *Monitor) OnStatesChanged() { m.rebuild() }
+//
+// Rebuilds are skipped while the window is hidden. Fyne creates widget
+// renderers during layout even when nothing is painted, and a hidden
+// window never repaints, so Fyne's render expiry (destroyExpiredRenderers)
+// never runs — every hidden rebuild would retain its entire widget tree in
+// Fyne's global renderer cache until quit, which is precisely the leak that
+// grew an idle tray instance to gigabytes. Show() rebuilds from the current
+// states before revealing the window, so nothing is lost while hidden.
+func (m *Monitor) OnStatesChanged() {
+	if !m.isVisible() {
+		return
+	}
+	m.rebuild()
+}
 
 // StartTicker re-renders relative ages ("5s ago") once a second while the
 // window is visible. It exits when the app begins quitting.

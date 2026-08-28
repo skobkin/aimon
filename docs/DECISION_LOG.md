@@ -10,6 +10,39 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-28 — Monitor rebuilds are visibility-gated (memory-leak fix)
+
+Running the tray instance for ~24h grew RSS by gigabytes with no window
+ever opened. The leak chain: every poll notification re-rendered the whole
+monitor (`OnStatesChanged` → full tree rebuild of all three tabs), Fyne
+creates widget renderers during layout even when nothing is painted, and a
+hidden window never paints, so Fyne's renderer expiry
+(`destroyExpiredRenderers`, which only runs on canvas refresh) never
+purged them — every hidden rebuild permanently retained its entire widget
+tree in Fyne's global renderer cache until quit. Verified with an
+instrumented lab run (stub llama-swap sources polling at 5s): ~140 KB/s
+anonymous-memory growth while hidden, with the live heap dominated by
+`widget.RichText` and `components.NewSourceCard` allocations from the
+discarded trees.
+
+Two changes, both in the same direction — rebuild only when somebody can
+see it:
+
+- `monitor.OnStatesChanged` skips the rebuild while the window is hidden.
+  `Show` still rebuilds from the current states before revealing the
+  window, so no freshness is lost while hidden.
+- The manager notifies subscribers once per refresh, on completion, not
+  also on the in-flight start. No view model renders
+  `Runtime.Refreshing` (it remains internal trigger-coalescing state),
+  and the doubled notification rate doubled the per-poll UI rebuild work.
+
+Live countdown and quota-reset freshness keep their 1-second ticker while
+the window is visible; this only removes work that happened while nobody
+was looking. Regression coverage: a hidden monitor must not rebuild
+(`TestHiddenMonitorSkipsRebuilds`), and a refresh must notify exactly one
+completion event (`TestManagerSubscribe`).
+
+
 ## 2026-08-25 — S2 Overview becomes a compact 2×2 presentation surface
 
 Overview is no longer a vertical reuse of the Local/Remote detail card bodies.

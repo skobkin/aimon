@@ -303,6 +303,11 @@ func (m *Manager) runLoop(l *loop) {
 // updating the runtime and notifying subscribers. A failed refresh never
 // clears the stored snapshot. Refreshes cancelled by loop teardown leave
 // the runtime untouched.
+//
+// Subscribers are notified once per refresh, on completion. The in-flight
+// start is not notified: the UI never renders Runtime.Refreshing, and the
+// doubled notification rate merely doubled the UI rebuild work on every
+// poll.
 func (m *Manager) refreshOnce(l *loop) {
 	now := time.Now()
 	m.mu.Lock()
@@ -310,7 +315,6 @@ func (m *Manager) refreshOnce(l *loop) {
 	rt.Refreshing = true
 	rt.LastAttemptAt = now
 	m.mu.Unlock()
-	m.notify(l.id)
 
 	rctx, cancel := context.WithTimeout(l.ctx, l.source.RequestTimeout())
 	snap, err := l.source.Refresh(rctx)

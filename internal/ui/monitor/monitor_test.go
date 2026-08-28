@@ -111,6 +111,54 @@ func TestRemoteTabRendersSpendBody(t *testing.T) {
 
 const balanceMask = "$•••••"
 
+// countingCtrl counts controller reads, which rebuild() makes exactly once
+// per rebuild; it turns "how often did the tree rebuild" into a plain
+// integer without instrumenting the monitor itself.
+type countingCtrl struct {
+	stubCtrl
+	statesReads int
+}
+
+func (c *countingCtrl) States() map[domain.InstanceID]domain.Runtime {
+	c.statesReads++
+	return nil
+}
+
+// A hidden window must not rebuild on state changes: Fyne caches widget
+// renderers at layout time even when nothing paints, and a hidden window
+// never paints, so the render expiry that would free them never runs and
+// every hidden rebuild leaks its whole widget tree (see OnStatesChanged).
+// Show() rebuilds, so freshness is unaffected.
+func TestHiddenMonitorSkipsRebuilds(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &countingCtrl{}
+	m := NewMonitor(app, ctrl, done)
+
+	m.OnStatesChanged() // hidden: must be a no-op
+	if ctrl.statesReads != 0 {
+		t.Fatalf("hidden rebuild ran %d times, want 0", ctrl.statesReads)
+	}
+
+	m.Show() // revealing must render the current states
+	if ctrl.statesReads != 1 {
+		t.Fatalf("Show() rebuilt %d times, want 1", ctrl.statesReads)
+	}
+
+	m.OnStatesChanged() // visible: rebuilds for fresh data
+	if ctrl.statesReads != 2 {
+		t.Fatalf("visible rebuild ran %d times, want 1 more (got %d)", ctrl.statesReads-1, ctrl.statesReads)
+	}
+
+	m.hide()
+	m.OnStatesChanged() // hidden again: skipped
+	if ctrl.statesReads != 2 {
+		t.Fatalf("rebuild after hide ran, total reads = %d, want %d", ctrl.statesReads, 2)
+	}
+}
+
 // The Overview tab renders the compact spend body: no Total line.
 func TestOverviewTabRendersCompactSpendBody(t *testing.T) {
 	app := test.NewApp()
