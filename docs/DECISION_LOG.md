@@ -10,6 +10,45 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — Per-second ticker mutates labels in place; notifications coalesce; keychain calls honor ctx
+
+Follow-ups to the 2026-08-28 memory-leak fix. The visibility gate stopped
+rebuilding while hidden; the remaining rebuild work (visible rebuilds once
+per poll burst, plus a rebuild every second while visible) is now bounded
+in three targeted ways. The full persistent-widget refactor remains a
+proposal (`docs/PROPOSAL_PERSISTENT_WIDGET_UI.md`, intentionally
+uncommitted) — these fixes deliberately avoid restructuring the widget
+tree.
+
+- **Time-only updates no longer rebuild.** `rebuild` collects per-label
+  refresher closures (`monitor.tickFns`); the 1-second ticker calls them
+  instead of rebuilding the tree. The view models carry the absolute
+  `ResetAt` next to the rendered `ResetText` (`QuotaWindowVM`,
+  `OverviewDonutVM`), components return a `func(now time.Time)` alongside
+  the object (`NewQuotaRow`, `NewQuotaOverviewBody`, `NewSourceCard`), and
+  `FreshnessText`/`FormatResetCountdown` re-derive the text from the
+  captured instant. A write that would not change the text is skipped, so
+  seconds without a visible change do not repaint. Regression coverage:
+  `TestUpdateTimeTextsAgesLabelsInPlace` asserts the texts age while every
+  canvas object keeps its identity.
+- **Poll bursts collapse into one UI dispatch.** Every poller finishing
+  within one dispatch window used to schedule its own `fyne.Do` rebuild;
+  the app's subscriber now routes notifications through a pending-flag
+  coalescer (`uiCoalescer`), so N simultaneous completions cost one
+  rebuild, and a notification arriving during the dispatched rebuild
+  schedules a fresh one instead of being lost.
+- **Keychain operations honor their context.** go-keyring's Secret Service
+  binding is synchronous and can block indefinitely (wedged dbus daemon,
+  unseen unlock prompt); the library has no context support and its
+  prompt-signal channel leaks per `Set` (upstream; v0.2.8 and master). In
+  this repo, `KeyringStore` now runs every operation under the caller's
+  ctx and abandons it on deadline, reporting an unavailable backend
+  (`await` in `internal/credentials/keyring.go`), and the startup probe is
+  bounded by `keyringProbeTimeout` (5s) instead of `context.Background()`.
+  Abandonment bounds caller latency, not the abandoned goroutine — the
+  upstream fix is proposed, not applied.
+
+
 ## 2026-08-28 — Monitor rebuilds are visibility-gated (memory-leak fix)
 
 Running the tray instance for ~24h grew RSS by gigabytes with no window
