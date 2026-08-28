@@ -94,7 +94,10 @@ func spendLimitBlock(l *ui.SpendLimitVM, detail bool) fyne.CanvasObject {
 	if detail {
 		row.Secondary = l.RawText
 	}
-	return NewQuotaRow(row)
+	// Limit rows never carry a reset countdown, so the tick refresher is
+	// always nil here.
+	rowObj, _ := NewQuotaRow(row)
+	return rowObj
 }
 
 func noDataLabel() fyne.CanvasObject {

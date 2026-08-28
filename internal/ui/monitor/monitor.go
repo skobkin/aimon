@@ -52,6 +52,12 @@ type Monitor struct {
 
 	refreshBtn *widget.Button
 
+	// tickFns refresh only the time-dependent labels (freshness ages,
+	// reset countdowns) of the tree built by the last rebuild. Written by
+	// rebuild and read by the ticker — both on the UI thread (the ticker
+	// hops through fyne.Do), so no locking is needed.
+	tickFns []func(now time.Time)
+
 	mu      sync.Mutex
 	visible bool
 }
@@ -166,8 +172,10 @@ func (m *Monitor) OnStatesChanged() {
 	m.rebuild()
 }
 
-// StartTicker re-renders relative ages ("5s ago") once a second while the
-// window is visible. It exits when the app begins quitting.
+// StartTicker re-renders the relative time labels ("5s ago", countdowns)
+// once a second while the window is visible. It exits when the app begins
+// quitting. Labels are updated in place: rebuilding the whole tree every
+// second would churn Fyne's caches for no visible difference.
 func (m *Monitor) StartTicker() {
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -180,7 +188,7 @@ func (m *Monitor) StartTicker() {
 				if !m.isVisible() {
 					continue
 				}
-				fyne.Do(m.rebuild)
+				fyne.Do(func() { m.updateTimeTexts(time.Now()) })
 			}
 		}
 	}()
@@ -206,18 +214,33 @@ func (m *Monitor) onRefresh() {
 }
 
 // rebuild regenerates all three tab bodies from the configured instances
-// and their runtimes.
+// and their runtimes, collecting the per-second label refreshers of the
+// fresh tree for the ticker.
 func (m *Monitor) rebuild() {
 	instances := m.ctrl.Instances()
 	states := m.ctrl.States()
 	now := time.Now()
 
-	m.rebuildOverview(ui.BuildOverview(instances, states, now))
-	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, now), instances, "No local sources enabled.")...)
-	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, now), instances, "No remote sources enabled.")...)
+	var tick []func(now time.Time)
+
+	m.rebuildOverview(ui.BuildOverview(instances, states, now), states, &tick)
+	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, now), instances, states, "No local sources enabled.", &tick)...)
+	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, now), instances, states, "No remote sources enabled.", &tick)...)
+
+	m.tickFns = tick
 }
 
-func (m *Monitor) rebuildOverview(vm ui.OverviewVM) {
+// updateTimeTexts re-renders the time-dependent labels of the current tree
+// (freshness ages, quota reset countdowns) for the given instant. It must
+// run on the UI thread. Data-dependent content is intentionally untouched:
+// it changes only with a new snapshot, which triggers a rebuild instead.
+func (m *Monitor) updateTimeTexts(now time.Time) {
+	for _, tick := range m.tickFns {
+		tick(now)
+	}
+}
+
+func (m *Monitor) rebuildOverview(vm ui.OverviewVM, states map[domain.InstanceID]domain.Runtime, tick *[]func(now time.Time)) {
 	var objs []fyne.CanvasObject
 	if vm.NothingEnabled {
 		objs = append(objs, components.NewEmptyState("No sources enabled.\nConfigure sources in Settings.", m.ctrl.OpenSettings))
@@ -227,53 +250,70 @@ func (m *Monitor) rebuildOverview(vm ui.OverviewVM) {
 
 	if len(vm.LocalCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Local"))
-		objs = append(objs, m.overviewRow(vm.LocalCards)...)
+		objs = append(objs, m.overviewRow(vm.LocalCards, states, tick)...)
 	}
 	if len(vm.RemoteCards) > 0 {
 		objs = append(objs, components.NewSectionLabel("Remote"))
-		objs = append(objs, m.overviewRow(vm.RemoteCards)...)
+		objs = append(objs, m.overviewRow(vm.RemoteCards, states, tick)...)
 	}
 	replaceObjects(m.overviewBox, objs...)
 }
 
 // overviewRow lays out overview cards in pairs of equal columns
 // (GridWithColumns); with an odd count the final card takes the full width.
-func (m *Monitor) overviewRow(cards []ui.OverviewCardVM) []fyne.CanvasObject {
+func (m *Monitor) overviewRow(cards []ui.OverviewCardVM, states map[domain.InstanceID]domain.Runtime, tick *[]func(now time.Time)) []fyne.CanvasObject {
 	objs := make([]fyne.CanvasObject, 0, (len(cards)+1)/2)
 	for i := 0; i < len(cards); i += 2 {
 		if i+1 < len(cards) {
 			objs = append(objs, container.NewGridWithColumns(2,
-				overviewSourceCard(cards[i], m.overviewCardBody(cards[i])),
-				overviewSourceCard(cards[i+1], m.overviewCardBody(cards[i+1])),
+				overviewSourceCard(cards[i], states[cards[i].Instance], m.overviewCardBody(cards[i], tick), tick),
+				overviewSourceCard(cards[i+1], states[cards[i+1].Instance], m.overviewCardBody(cards[i+1], tick), tick),
 			))
 			continue
 		}
-		objs = append(objs, overviewSourceCard(cards[i], m.overviewCardBody(cards[i])))
+		objs = append(objs, overviewSourceCard(cards[i], states[cards[i].Instance], m.overviewCardBody(cards[i], tick), tick))
 	}
 	return objs
 }
 
 // overviewSourceCard wraps an overview card body in a title/status header.
-// No footer: Overview omits failure detail per S2_UI_UX.
-func overviewSourceCard(vm ui.OverviewCardVM, body fyne.CanvasObject) fyne.CanvasObject {
+// No footer: Overview omits failure detail per S2_UI_UX. The status label
+// ages with time, so its per-second refresher is collected for the ticker.
+func overviewSourceCard(vm ui.OverviewCardVM, rt domain.Runtime, body fyne.CanvasObject, tick *[]func(now time.Time)) fyne.CanvasObject {
+	status := widget.NewLabel(vm.Status)
 	header := container.NewHBox(
 		widget.NewLabelWithStyle(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		layout.NewSpacer(),
-		widget.NewLabel(vm.Status),
+		status,
 	)
+	*tick = append(*tick, func(now time.Time) {
+		setLabelStatus(status, ui.FreshnessText(rt, now))
+	})
 	return widget.NewCard("", "", container.NewVBox(header, body))
+}
+
+// setLabelStatus writes a freshness label, skipping the refresh when the
+// rendered text is unchanged.
+func setLabelStatus(l *widget.Label, s string) {
+	if l.Text != s {
+		l.SetText(s)
+	}
 }
 
 // overviewCardBody dispatches to the compact overview body builder. Spend
 // bodies receive the privacy predicate; all builders run on the UI thread.
-func (m *Monitor) overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
+func (m *Monitor) overviewCardBody(c ui.OverviewCardVM, tick *[]func(now time.Time)) fyne.CanvasObject {
 	switch c.Kind {
 	case ui.OverviewMetrics:
 		return components.NewMetricsOverviewBody(c.Metrics)
 	case ui.OverviewRuntime:
 		return components.NewRuntimeOverviewBody(c.Runtime)
 	case ui.OverviewQuota:
-		return components.NewQuotaOverviewBody(c.Quota)
+		body, countdown := components.NewQuotaOverviewBody(c.Quota)
+		if countdown != nil {
+			*tick = append(*tick, countdown)
+		}
+		return body
 	case ui.OverviewSpend:
 		return components.NewSpendOverviewBody(c.Spend, m.ctrl.HideSensitiveInfo)
 	default:
@@ -283,17 +323,23 @@ func (m *Monitor) overviewCardBody(c ui.OverviewCardVM) fyne.CanvasObject {
 
 // tabObjects renders one detail tab: the cards with per-instance web UI
 // buttons, or the empty state when the category has no enabled instances.
-func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstance, emptyText string) []fyne.CanvasObject {
+func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, emptyText string, tick *[]func(now time.Time)) []fyne.CanvasObject {
 	if len(cards) == 0 {
 		return []fyne.CanvasObject{components.NewEmptyState(emptyText, m.ctrl.OpenSettings)}
 	}
 	objs := make([]fyne.CanvasObject, 0, len(cards))
 	for _, c := range cards {
-		body := m.cardBody(c)
+		body := m.cardBody(c, tick)
 		if label, target, ok := webLink(c, instances); ok {
 			body = withWebUILink(body, "Open "+label, target)
 		}
-		objs = append(objs, components.NewSourceCard(c, body))
+		card, setStatus := components.NewSourceCard(c, body)
+		if rt, ok := states[c.Instance]; ok {
+			*tick = append(*tick, func(now time.Time) {
+				setStatus(ui.FreshnessText(rt, now))
+			})
+		}
+		objs = append(objs, card)
 	}
 	return objs
 }
@@ -316,8 +362,9 @@ func webLink(c ui.CardVM, instances []config.SourceInstance) (label, target stri
 }
 
 // cardBody renders the card's data body from its view model. Which rows
-// appear depends on the VM the builder produced (overview vs detail).
-func (m *Monitor) cardBody(c ui.CardVM) fyne.CanvasObject {
+// appear depends on the VM the builder produced (overview vs detail). Any
+// per-second refresher the rows carry is collected for the ticker.
+func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.CanvasObject {
 	switch c.Kind {
 	case ui.KindGPU:
 		rows := c.GPU.Overview
@@ -349,7 +396,11 @@ func (m *Monitor) cardBody(c ui.CardVM) fyne.CanvasObject {
 	case ui.KindQuota:
 		box := container.NewVBox()
 		for _, w := range c.Quota.Windows {
-			box.Add(components.NewQuotaRow(w))
+			row, countdown := components.NewQuotaRow(w)
+			if countdown != nil {
+				*tick = append(*tick, countdown)
+			}
+			box.Add(row)
 		}
 		if len(c.Quota.Windows) == 0 {
 			return noDataYet()

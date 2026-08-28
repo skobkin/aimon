@@ -3,9 +3,35 @@ package components
 import (
 	"image/color"
 	"testing"
+	"time"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
+
+// rowLabels walks the tree of a quota row and returns its labels in order.
+// Concrete cases must precede fyne.Widget: *widget.Label implements the
+// Widget interface and would otherwise match first.
+func rowLabels(t *testing.T, obj fyne.CanvasObject) []*widget.Label {
+	t.Helper()
+	var out []*widget.Label
+	switch o := obj.(type) {
+	case *widget.Label:
+		out = append(out, o)
+	case fyne.Widget:
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			out = append(out, rowLabels(t, child)...)
+		}
+	case *fyne.Container:
+		for _, child := range o.Objects {
+			out = append(out, rowLabels(t, child)...)
+		}
+	}
+	return out
+}
 
 func TestThresholdColorBoundaries(t *testing.T) {
 	cases := []struct {
@@ -94,5 +120,55 @@ func TestSetFractionsClamps(t *testing.T) {
 	}
 	if got := b.Remaining(); got != 0 {
 		t.Errorf("set remaining under = %v, want 0", got)
+	}
+}
+
+// A row with a reset instant must re-derive its title (name · countdown)
+// from the new time, so the monitor's ticker can age it in place without
+// rebuilding the row.
+func TestNewQuotaRowTickAdvancesCountdown(t *testing.T) {
+	reset := time.Unix(1770000000, 0).Add(2 * time.Hour)
+	row, tick := NewQuotaRow(ui.QuotaWindowVM{
+		Name:      "Credits-5h",
+		UsedText:  "17% used",
+		Used:      0.17,
+		Remaining: 0.83,
+		ResetText: "2h0m",
+		ResetAt:   &reset,
+	})
+	if tick == nil {
+		t.Fatal("row with ResetAt returned a nil tick refresher")
+	}
+
+	tick(time.Unix(1770000000, 0))
+	before := rowLabels(t, row)[0].Text
+
+	tick(time.Unix(1770000000, 0).Add(1*time.Hour + 5*time.Minute))
+	after := rowLabels(t, row)[0].Text
+
+	if before != "Credits-5h · 2h0m" {
+		t.Errorf("title at t0 = %q", before)
+	}
+	if after != "Credits-5h · 55m" {
+		t.Errorf("title one hour later = %q, want the aged countdown", after)
+	}
+
+	// Re-deriving an unchanged second must be a no-op text write.
+	tick(time.Unix(1770000000, 0).Add(1*time.Hour + 5*time.Minute))
+	if again := rowLabels(t, row)[0].Text; again != after {
+		t.Errorf("second tick at the same instant changed the title to %q", again)
+	}
+}
+
+// A row without a reset instant shows no countdown and must hand the
+// monitor a nil refresher.
+func TestNewQuotaRowWithoutResetHasNoTick(t *testing.T) {
+	row, tick := NewQuotaRow(ui.QuotaWindowVM{Name: "Credits-5h", UsedText: "17% used"})
+	if tick != nil {
+		t.Error("row without ResetAt returned a non-nil tick refresher")
+	}
+	labels := rowLabels(t, row)
+	if len(labels) == 0 || labels[0].Text != "Credits-5h" {
+		t.Errorf("title = %q, want the bare window name", labels[0].Text)
 	}
 }

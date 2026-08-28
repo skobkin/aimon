@@ -14,11 +14,15 @@ import (
 // is a VBox of header row, body, and optional footer. The header row is
 // composed from standard Fyne objects — bold title, spacer, right-aligned
 // freshness — reproducing the wireframe's "Source name    5s ago".
-func NewSourceCard(vm ui.CardVM, body fyne.CanvasObject) fyne.CanvasObject {
+//
+// The second return sets the freshness label; the monitor's ticker calls
+// it once a second while visible instead of rebuilding the card.
+func NewSourceCard(vm ui.CardVM, body fyne.CanvasObject) (fyne.CanvasObject, func(status string)) {
+	status := widget.NewLabel(vm.Status)
 	header := container.NewHBox(
 		widget.NewLabelWithStyle(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		layout.NewSpacer(),
-		widget.NewLabel(vm.Status),
+		status,
 	)
 
 	content := container.NewVBox(header, body)
@@ -28,7 +32,7 @@ func NewSourceCard(vm ui.CardVM, body fyne.CanvasObject) fyne.CanvasObject {
 		content.Add(widget.NewLabelWithStyle(vm.Footer, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
 	}
 
-	return widget.NewCard("", "", content)
+	return widget.NewCard("", "", content), func(s string) { setText(status, s) }
 }
 
 // NewEmptyState builds the placeholder shown in a tab whose sources are

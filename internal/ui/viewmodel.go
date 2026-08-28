@@ -73,6 +73,10 @@ type QuotaWindowVM struct {
 	Name      string
 	UsedText  string
 	ResetText string // compact countdown, e.g. "2h14m"; empty when unknown
+	// ResetAt is the absolute reset instant ResetText was derived from.
+	// Carried so a rendered row can refresh its countdown as time passes
+	// without a tree rebuild; nil means no countdown.
+	ResetAt   *time.Time
 	Secondary string
 	Used      float64
 	Remaining float64
@@ -167,6 +171,9 @@ type OverviewDonutVM struct {
 	Used      float64 // arc fraction
 	Remaining float64 // drives threshold color
 	ResetText string  // countdown below donut
+	// ResetAt is the absolute instant ResetText was derived from, so the
+	// rendered countdown line can age in place; nil means no countdown.
+	ResetAt *time.Time
 }
 
 // QuotaOverviewVM carries up to two headline quota donuts.
@@ -417,6 +424,7 @@ func BuildQuotaOverview(snap domain.QuotaSnapshot, now time.Time) QuotaOverviewV
 			Used:      w.UsedFraction,
 			Remaining: w.RemainingFraction,
 			ResetText: FormatResetCountdown(w.ResetAt, now),
+			ResetAt:   w.ResetAt,
 		})
 	}
 	vm.HasData = len(vm.Windows) > 0
@@ -625,6 +633,7 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM
 			Name:      w.Name,
 			UsedText:  FormatUsed(w.UsedFraction),
 			ResetText: FormatResetCountdown(w.ResetAt, now),
+			ResetAt:   w.ResetAt,
 			Used:      w.UsedFraction,
 			Remaining: w.RemainingFraction,
 		}

@@ -178,6 +178,138 @@ func TestOverviewTabRendersCompactSpendBody(t *testing.T) {
 	}
 }
 
+// quotaCtrl serves one MiniMax instance whose snapshot has landed and
+// whose quota window resets in the future: both the freshness status and a
+// reset countdown are live time-dependent texts on the tree. Times are
+// taken at States() so the test can tick relative to them.
+type quotaCtrl struct {
+	stubCtrl
+	now time.Time
+}
+
+func (c *quotaCtrl) Instances() []config.SourceInstance {
+	return []config.SourceInstance{{
+		ID: "mm-1", Kind: domain.KindMiniMax, Name: "MiniMax",
+		Enabled: true, PollInterval: time.Minute, MiniMax: &config.MiniMaxSettings{},
+	}}
+}
+
+func (c *quotaCtrl) States() map[domain.InstanceID]domain.Runtime {
+	c.now = time.Now()
+	reset := c.now.Add(2 * time.Hour)
+	return map[domain.InstanceID]domain.Runtime{
+		"mm-1": {
+			Enabled:       true,
+			LastSuccessAt: c.now,
+			Snapshot: domain.QuotaSnapshot{
+				Kind: domain.KindMiniMax,
+				Windows: []domain.QuotaWindow{
+					{ID: "interval", Name: "5-hour", UsedFraction: 0.17, RemainingFraction: 0.83, ResetAt: &reset},
+				},
+			},
+		},
+	}
+}
+
+// flatten collects every canvas object of the tabs, in order.
+func flatten(t *testing.T, objs []fyne.CanvasObject) []fyne.CanvasObject {
+	t.Helper()
+	var out []fyne.CanvasObject
+	var walk func(o fyne.CanvasObject)
+	walk = func(o fyne.CanvasObject) {
+		out = append(out, o)
+		switch c := o.(type) {
+		case fyne.Widget:
+			for _, child := range test.TempWidgetRenderer(t, c).Objects() {
+				walk(child)
+			}
+		case *fyne.Container:
+			for _, child := range c.Objects {
+				walk(child)
+			}
+		}
+	}
+	for _, o := range objs {
+		walk(o)
+	}
+	return out
+}
+
+// The per-second ticker must age the time-dependent labels (freshness,
+// reset countdowns) in place: updateTimeTexts changes those texts while
+// the canvas object tree stays identical. Rebuilding the tree every second
+// was exactly the cache churn the ticker exists to avoid.
+func TestUpdateTimeTextsAgesLabelsInPlace(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &quotaCtrl{}
+	m := NewMonitor(app, ctrl, done)
+	m.Show()
+
+	beforeObjs := append(flatten(t, m.overviewBox.Objects), flatten(t, m.remoteBox.Objects)...)
+	beforeTexts := allTexts(t, m.overviewBox)
+	beforeTexts = append(beforeTexts, allTexts(t, m.remoteBox)...)
+
+	m.updateTimeTexts(ctrl.now.Add(90 * time.Second))
+
+	afterObjs := append(flatten(t, m.overviewBox.Objects), flatten(t, m.remoteBox.Objects)...)
+	afterTexts := allTexts(t, m.overviewBox)
+	afterTexts = append(afterTexts, allTexts(t, m.remoteBox)...)
+
+	if len(beforeObjs) != len(afterObjs) {
+		t.Fatalf("tree size changed: %d -> %d objects", len(beforeObjs), len(afterObjs))
+	}
+	for i := range beforeObjs {
+		if beforeObjs[i] != afterObjs[i] {
+			t.Fatalf("object %d was replaced by the tick; labels must age in place", i)
+		}
+	}
+
+	// The freshness label aged from "0s ago" to "1m ago".
+	if !slices.Contains(beforeTexts, "0s ago") {
+		t.Errorf("initial texts lack the fresh status; texts = %v", beforeTexts)
+	}
+	if !slices.Contains(afterTexts, "1m ago") {
+		t.Errorf("tick did not age the freshness label; texts = %v", afterTexts)
+	}
+	// The quota row countdown counted down: 2h minus the build/tick skew
+	// renders as 1h59m, then 1h58m ninety seconds later.
+	if !slices.Contains(beforeTexts, "5-hour · 1h59m") {
+		t.Errorf("initial texts lack the quota countdown; texts = %v", beforeTexts)
+	}
+	if !slices.Contains(afterTexts, "5-hour · 1h58m") {
+		t.Errorf("tick did not age the countdown; texts = %v", afterTexts)
+	}
+}
+
+// A rebuild replaces the tick refresher set: after new states land, the
+// ticker must drive the labels of the new tree. If the closures of the
+// discarded tree survived, the status would keep aging from the old
+// snapshot ("1h ago") instead of the new one ("1m ago").
+func TestRebuildReplacesTickRefreshers(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &quotaCtrl{}
+	m := NewMonitor(app, ctrl, done)
+	m.Show()
+
+	ctrl.now = time.Now().Add(time.Hour) // a new snapshot lands an hour later
+	m.OnStatesChanged()                  // visible: rebuilds from fresh states
+	m.updateTimeTexts(ctrl.now.Add(90 * time.Second))
+
+	texts := allTexts(t, m.remoteBox)
+	if !slices.Contains(texts, "1m ago") {
+		t.Errorf("ticker did not adopt the rebuilt tree; texts = %v", texts)
+	}
+	if slices.Contains(texts, "1h ago") {
+		t.Errorf("stale refresher from the discarded tree still drives a label; texts = %v", texts)
+	}
+}
+
 func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	t.Helper()
 	var out []string

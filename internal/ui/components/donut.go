@@ -2,6 +2,7 @@ package components
 
 import (
 	"image/color"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -151,20 +152,37 @@ func (r *donutRenderer) Refresh() {
 // its column at its natural size — a stretched cell would squash the ring
 // into an ellipse — with its reset countdown centered directly beneath it.
 // Windows without a reliable reset time show no countdown line at all.
-func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) fyne.CanvasObject {
+//
+// The second return re-renders the countdown lines for a new time; it is
+// nil when no window shows a countdown. Bodies are never rebuilt for time:
+// the monitor's ticker calls this instead.
+func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now time.Time)) {
 	if !vm.HasData {
-		return widget.NewLabelWithStyle("No data yet", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+		return widget.NewLabelWithStyle("No data yet", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}), nil
 	}
 
 	cells := make([]fyne.CanvasObject, 0, len(vm.Windows))
+	var ticks []func(now time.Time)
 	for _, w := range vm.Windows {
 		col := container.NewVBox(NewQuotaDonut(w.PctText, w.Label, w.Used, w.Remaining))
-		if w.ResetText != "" {
+		if w.ResetAt != nil {
 			reset := widget.NewLabel(w.ResetText)
 			reset.Alignment = fyne.TextAlignCenter
 			col.Add(reset)
+			at := w.ResetAt
+			ticks = append(ticks, func(now time.Time) {
+				setText(reset, ui.FormatResetCountdown(at, now))
+			})
 		}
 		cells = append(cells, container.New(layout.NewCenterLayout(), col))
 	}
-	return container.NewGridWithColumns(len(cells), cells...)
+	body := container.NewGridWithColumns(len(cells), cells...)
+	if len(ticks) == 0 {
+		return body, nil
+	}
+	return body, func(now time.Time) {
+		for _, tick := range ticks {
+			tick(now)
+		}
+	}
 }

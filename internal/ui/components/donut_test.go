@@ -1,10 +1,79 @@
 package components
 
 import (
+	"slices"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
+
+// The overview body's aggregate refresher must age every countdown line of
+// every window in one call, so the ticker replaces whole-body rebuilds.
+func TestQuotaOverviewBodyTickAgesCountdowns(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	reset5h := at.Add(2 * time.Hour)
+	resetWeek := at.Add(24 * time.Hour)
+	body, tick := NewQuotaOverviewBody(ui.QuotaOverviewVM{
+		HasData: true,
+		Windows: []ui.OverviewDonutVM{
+			{Label: "5h", PctText: "42%", Used: 0.42, Remaining: 0.58, ResetText: "2h0m", ResetAt: &reset5h},
+			{Label: "week", PctText: "14%", Used: 0.14, Remaining: 0.86, ResetText: "1d0h", ResetAt: &resetWeek},
+		},
+	})
+	if tick == nil {
+		t.Fatal("body with countdowns returned a nil tick refresher")
+	}
+
+	tick(at.Add(3 * time.Hour))
+	texts := donutTexts(t, body)
+	// The 5h window's reset fell 1h in the past; the weekly one has 21h left.
+	if !slices.Contains(texts, "now") {
+		t.Errorf("5h countdown = %v, want %q after its reset passed", texts, "now")
+	}
+	if !slices.Contains(texts, "21h0m") {
+		t.Errorf("week countdown = %v, want 21h0m", texts)
+	}
+}
+
+// No reset instants: the body renders but hands back a nil refresher.
+func TestQuotaOverviewBodyWithoutCountdownsHasNoTick(t *testing.T) {
+	body, tick := NewQuotaOverviewBody(ui.QuotaOverviewVM{
+		HasData: true,
+		Windows: []ui.OverviewDonutVM{{Label: "5h", PctText: "42%", Used: 0.42, Remaining: 0.58}},
+	})
+	if tick != nil {
+		t.Error("body without countdowns returned a non-nil tick refresher")
+	}
+	if body == nil {
+		t.Error("body = nil")
+	}
+}
+
+// donutTexts collects label texts from an overview body tree. Concrete
+// cases must precede fyne.Widget: *widget.Label implements the Widget
+// interface and would otherwise match first.
+func donutTexts(t *testing.T, obj fyne.CanvasObject) []string {
+	t.Helper()
+	var out []string
+	switch o := obj.(type) {
+	case *widget.Label:
+		out = append(out, o.Text)
+	case fyne.Widget:
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			out = append(out, donutTexts(t, child)...)
+		}
+	case *fyne.Container:
+		for _, child := range o.Objects {
+			out = append(out, donutTexts(t, child)...)
+		}
+	}
+	return out
+}
 
 func TestDonutTextBlockCentersBothLinesInHole(t *testing.T) {
 	// 80 DIP donut with CutoutRatio 0.5: the hole is the inner half,

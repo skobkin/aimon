@@ -529,6 +529,33 @@ func TestBuildQuotaVMResetText(t *testing.T) {
 	}
 }
 
+// The per-second ticker re-renders countdowns from the absolute ResetAt,
+// so both quota view models must carry the instant forward (nil stays nil —
+// the component then renders no countdown at all).
+func TestQuotaVMsCarryResetAt(t *testing.T) {
+	reset := now.Add(2 * time.Hour)
+	snap := domain.QuotaSnapshot{
+		Windows: []domain.QuotaWindow{
+			{ID: "interval", Name: "5-hour", UsedFraction: 0.42, RemainingFraction: 0.58, ResetAt: &reset},
+			{ID: "weekly", Name: "Weekly", UsedFraction: 0.14, RemainingFraction: 0.86},
+		},
+	}
+
+	detail := BuildQuotaVM(snap, now, true)
+	if got := detail.Windows[0].ResetAt; got == nil || !got.Equal(reset) {
+		t.Errorf("detail ResetAt = %v, want %v", got, reset)
+	}
+	if got := detail.Windows[1].ResetAt; got != nil {
+		t.Errorf("window without reset carries ResetAt %v, want nil", got)
+	}
+
+	over := BuildQuotaOverview(snap, now)
+	// Headline selection keeps the 5h window (priority 0) first.
+	if got := over.Windows[0].ResetAt; got == nil || !got.Equal(reset) {
+		t.Errorf("overview ResetAt = %v, want %v", got, reset)
+	}
+}
+
 func TestBuildMetricsOverview(t *testing.T) {
 	snap := gpuSnap()
 	vm := BuildMetricsOverview(snap)

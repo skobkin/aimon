@@ -7,6 +7,7 @@ package components
 
 import (
 	"image/color"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -175,14 +176,16 @@ func (r *quotaBarRenderer) Refresh() {
 // the "NN% used" label share the first line, the QuotaBar sits directly
 // beneath, and the optional raw-count secondary line follows. The numeric
 // label stays outside the bar.
-func NewQuotaRow(vm ui.QuotaWindowVM) fyne.CanvasObject {
-	nameText := vm.Name
-	if vm.ResetText != "" {
-		nameText += " · " + vm.ResetText
-	}
+//
+// The second return re-renders the row's reset countdown for a new time
+// (a no-op text write unless the rendered second/minute ticked over); it
+// is nil when the row has no countdown. Rows are never rebuilt for time:
+// the monitor's ticker calls this instead.
+func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
+	title := widget.NewLabelWithStyle(quotaRowTitle(vm), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	row := container.NewVBox(
 		container.NewHBox(
-			widget.NewLabelWithStyle(nameText, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			title,
 			layout.NewSpacer(),
 			widget.NewLabel(vm.UsedText),
 		),
@@ -191,5 +194,33 @@ func NewQuotaRow(vm ui.QuotaWindowVM) fyne.CanvasObject {
 	if vm.Secondary != "" {
 		row.Add(widget.NewLabel(vm.Secondary))
 	}
-	return row
+
+	var tick func(now time.Time)
+	if vm.ResetAt != nil {
+		reset := vm.ResetAt
+		tick = func(now time.Time) {
+			setText(title, quotaRowTitle(ui.QuotaWindowVM{
+				Name:      vm.Name,
+				ResetText: ui.FormatResetCountdown(reset, now),
+			}))
+		}
+	}
+	return row, tick
+}
+
+// quotaRowTitle renders the row's first line: the window name, with the
+// countdown appended when one is known ("Credits-5h · 2h14m").
+func quotaRowTitle(vm ui.QuotaWindowVM) string {
+	if vm.ResetText == "" {
+		return vm.Name
+	}
+	return vm.Name + " · " + vm.ResetText
+}
+
+// setText writes a label's text, skipping the refresh when unchanged so a
+// per-second tick never repaints a line that reads the same.
+func setText(l *widget.Label, s string) {
+	if l.Text != s {
+		l.SetText(s)
+	}
 }
