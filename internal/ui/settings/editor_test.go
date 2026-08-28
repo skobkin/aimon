@@ -193,6 +193,8 @@ func TestEditorBuildsOneCredentialRowPerSlot(t *testing.T) {
 		{domain.KindZAI, 1, 1, 2},
 		{domain.KindOpenRouter, 2, 2, 1},
 		{domain.KindAMDGPUWeb, 0, 0, 2},
+		// API URL + Web UI URL alongside the name, one optional key row.
+		{domain.KindHindsight, 1, 1, 3},
 	}
 	for _, c := range cases {
 		t.Run(string(c.kind), func(t *testing.T) {
@@ -210,6 +212,130 @@ func TestEditorBuildsOneCredentialRowPerSlot(t *testing.T) {
 				t.Errorf("plain entries = %d, want %d", scan.plainEntries, c.wantPlainEntries)
 			}
 		})
+	}
+}
+
+// The Hindsight editor shows the API URL, the optional Web UI URL, and the
+// optional key row with its hint — placeholders included, so the fields are
+// self-explanatory before anything is typed.
+func TestEditorHindsightFields(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindHindsight)
+
+	var apiURL, webURL, apikey *widget.Entry
+	var hint *widget.Label
+	var remove *widget.Button
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			switch w := o.(type) {
+			case *widget.Entry:
+				switch w.PlaceHolder {
+				case config.DefaultHindsightURL:
+					apiURL = w
+				case "http://127.0.0.1:9999 (optional)":
+					webURL = w
+				default:
+					if w.Password {
+						apikey = w
+					}
+				}
+			case *widget.Label:
+				if strings.Contains(w.Text, "Optional Bearer token") {
+					hint = w
+				}
+			case *widget.Button:
+				if w.Text == "Remove" {
+					remove = w
+				}
+			}
+		})
+	}
+	if apiURL == nil || webURL == nil || apikey == nil {
+		t.Fatalf("missing editor entries: api-url=%v web-url=%v api-key=%v", apiURL, webURL, apikey)
+	}
+	if !apikey.Password {
+		t.Error("the key row must be a password entry")
+	}
+	if apiURL.Text != config.DefaultHindsightURL || webURL.Text != "" {
+		t.Errorf("prefill = %q / %q, want the default API URL and an empty Web UI URL", apiURL.Text, webURL.Text)
+	}
+	if remove == nil {
+		t.Error("the key row is missing its Remove button")
+	}
+	if hint == nil {
+		t.Error("the optional key slot is missing its hint label")
+	}
+}
+
+// The editor's collected Hindsight instance carries both URL fields, with
+// the Web UI URL trimmed; an invalid Web UI URL blocks the test locally.
+func TestEditorHindsightCollect(t *testing.T) {
+	delivered := make(chan config.SourceInstance, 1)
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	stub.TestConnection = func(ctx context.Context, inst config.SourceInstance,
+		typed map[credentials.Slot]string) registry.TestReport {
+		delivered <- inst
+		return registry.TestReport{Lines: []string{"x"}, OK: true}
+	}
+
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindHindsight)
+
+	var apiURL, webURL *widget.Entry
+	var testBtn *widget.Button
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			switch w := o.(type) {
+			case *widget.Entry:
+				if w.Password {
+					return
+				}
+				switch w.PlaceHolder {
+				case config.DefaultHindsightURL:
+					apiURL = w
+				case "http://127.0.0.1:9999 (optional)":
+					webURL = w
+				}
+			case *widget.Button:
+				if w.Text == "Test connection" {
+					testBtn = w
+				}
+			}
+		})
+	}
+	if apiURL == nil || webURL == nil || testBtn == nil {
+		t.Fatalf("missing editor widgets: api=%v web=%v test=%v", apiURL, webURL, testBtn)
+	}
+
+	apiURL.SetText("http://127.0.0.1:9001")
+	webURL.SetText("  http://127.0.0.1:9002  ")
+	testBtn.OnTapped()
+
+	select {
+	case got := <-delivered:
+		if got.Hindsight == nil {
+			t.Fatal("collected instance lost its settings")
+		}
+		if got.Hindsight.BaseURL != "http://127.0.0.1:9001" {
+			t.Errorf("BaseURL = %q, want the API URL field", got.Hindsight.BaseURL)
+		}
+		if got.Hindsight.WebUIURL != "http://127.0.0.1:9002" {
+			t.Errorf("WebUIURL = %q, want the trimmed Web UI URL field", got.Hindsight.WebUIURL)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TestConnection was never invoked")
+	}
+
+	// An invalid Web UI URL is refused before any request or delivery.
+	webURL.SetText("not a url")
+	testBtn.OnTapped()
+	select {
+	case got := <-delivered:
+		t.Fatalf("invalid Web UI URL still reached TestConnection: %+v", got.Hindsight)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 

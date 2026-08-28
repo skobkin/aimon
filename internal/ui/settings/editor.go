@@ -40,7 +40,8 @@ type editor struct {
 	enabled  *widget.Check
 	interval *widget.Select
 
-	url    *widget.Entry // amdgputop-web / llama-swap / zai
+	url    *widget.Entry // amdgputop-web / llama-swap / zai / hindsight
+	webURL *widget.Entry // hindsight only: optional independent Web UI URL
 	gpu    *widget.Select
 	gpus   []domain.GPUInfo
 	creds  []*credRow // one per credential slot, definition order
@@ -120,6 +121,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		e.url = widget.NewEntry()
 		e.url.Validator = urlValidator
 		var placeholder string
+		urlLabel := "URL"
 		switch st := def.DefaultSettings().(type) {
 		case config.AMDGPUWebSettings:
 			placeholder = st.BaseURL
@@ -130,10 +132,24 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		case config.ZAISettings:
 			placeholder = st.BaseURL
 			e.url.SetText(inst.ZAI.BaseURL)
+		case config.HindsightSettings:
+			placeholder = st.BaseURL
+			e.url.SetText(inst.Hindsight.BaseURL)
+			// The Web UI URL is a separate field below; the API URL must
+			// say it is the API one.
+			urlLabel = "API URL"
 		}
 		e.url.PlaceHolder = placeholder
 		e.url.Validate()
-		items = append(items, widget.NewFormItem("URL", e.url))
+		items = append(items, widget.NewFormItem(urlLabel, e.url))
+	}
+	if inst.Kind == domain.KindHindsight {
+		e.webURL = widget.NewEntry()
+		e.webURL.Validator = urlValidator
+		e.webURL.PlaceHolder = "http://127.0.0.1:9999 (optional)"
+		e.webURL.SetText(inst.Hindsight.WebUIURL)
+		e.webURL.Validate()
+		items = append(items, widget.NewFormItem("Web UI URL", e.webURL))
 	}
 	if inst.Kind == domain.KindAMDGPUWeb {
 		e.gpu = widget.NewSelect(nil, nil)
@@ -299,6 +315,13 @@ func (e *editor) collect() (config.SourceInstance, error) {
 	case domain.KindOpenRouter:
 		s := *inst.OpenRouter
 		inst.OpenRouter = &s
+	case domain.KindHindsight:
+		s := *inst.Hindsight
+		s.BaseURL = e.url.Text
+		// An empty Web UI URL stays empty: the card's "Open" button and the
+		// tray entry only appear when one is configured.
+		s.WebUIURL = strings.TrimSpace(e.webURL.Text)
+		inst.Hindsight = &s
 	}
 
 	if errs := inst.Validate(); len(errs) > 0 {

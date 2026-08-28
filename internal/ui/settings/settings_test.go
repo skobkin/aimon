@@ -206,6 +206,27 @@ func TestNewDraftPrefillsAndGeneratesID(t *testing.T) {
 	}
 }
 
+// The Hindsight draft starts from the local default API URL with no Web UI
+// URL, so a new instance never inherits an unrelated UI endpoint.
+func TestNewDraftHindsight(t *testing.T) {
+	draft, ok := newDraft(domain.KindHindsight)
+	if !ok {
+		t.Fatal("hindsight must produce a draft")
+	}
+	if draft.Name != "Hindsight" {
+		t.Errorf("draft name = %q, want Hindsight", draft.Name)
+	}
+	if draft.PollInterval != config.DefaultLocalInterval {
+		t.Errorf("draft interval = %v, want the local default", draft.PollInterval)
+	}
+	if draft.Hindsight == nil {
+		t.Fatal("draft must carry hindsight settings")
+	}
+	if draft.Hindsight.BaseURL != config.DefaultHindsightURL || draft.Hindsight.WebUIURL != "" {
+		t.Errorf("draft settings = %+v, want the default API URL and no Web UI URL", draft.Hindsight)
+	}
+}
+
 // The mutation gate: at most one configuration mutation may be in flight;
 // a second entry while one runs is rejected until the first leaves.
 func TestMutationGateSingleFlight(t *testing.T) {
