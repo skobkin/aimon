@@ -42,6 +42,7 @@ type SourceInstance struct {
 	// Exactly one provider settings pointer is non-nil, matching Kind.
 	AMDGPUWeb  *AMDGPUWebSettings
 	LlamaSwap  *LlamaSwapSettings
+	Hindsight  *HindsightSettings
 	MiniMax    *MiniMaxSettings
 	ZAI        *ZAISettings
 	OpenRouter *OpenRouterSettings
@@ -57,6 +58,15 @@ type AMDGPUWebSettings struct {
 // stored in the keychain under the instance's account — never here.
 type LlamaSwapSettings struct {
 	BaseURL string
+}
+
+// HindsightSettings are the Hindsight settings: the API base URL and the
+// independent optional Control Plane Web UI URL. The two are never derived
+// from each other — deployments relocate or proxy the UI freely
+// (docs/S5_HINDSIGHT.md §13). An API key, when used, lives in the keychain.
+type HindsightSettings struct {
+	BaseURL  string
+	WebUIURL string
 }
 
 // MiniMaxSettings are the MiniMax settings; the endpoint is fixed, so there
@@ -76,6 +86,7 @@ type OpenRouterSettings struct{}
 
 func (AMDGPUWebSettings) providerSettings()  {}
 func (LlamaSwapSettings) providerSettings()  {}
+func (HindsightSettings) providerSettings()  {}
 func (MiniMaxSettings) providerSettings()    {}
 func (ZAISettings) providerSettings()        {}
 func (OpenRouterSettings) providerSettings() {}
@@ -92,6 +103,10 @@ func (i SourceInstance) Settings() (ProviderSettings, bool) {
 	case domain.KindLlamaSwap:
 		if i.LlamaSwap != nil {
 			return *i.LlamaSwap, true
+		}
+	case domain.KindHindsight:
+		if i.Hindsight != nil {
+			return *i.Hindsight, true
 		}
 	case domain.KindMiniMax:
 		if i.MiniMax != nil {
@@ -158,6 +173,9 @@ func (i SourceInstance) Validate() []ValidationError {
 	if i.LlamaSwap != nil {
 		set++
 	}
+	if i.Hindsight != nil {
+		set++
+	}
 	if i.MiniMax != nil {
 		set++
 	}
@@ -169,7 +187,7 @@ func (i SourceInstance) Validate() []ValidationError {
 	}
 
 	switch i.Kind {
-	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter:
+	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter:
 	default:
 		errs = append(errs, ValidationError{Source: label, Field: "Kind", Message: fmt.Sprintf("unknown source kind %q", string(i.Kind))})
 	}
@@ -192,6 +210,13 @@ func (i SourceInstance) Validate() []ValidationError {
 			errs = append(errs, mismatchSettings(label))
 		} else {
 			errs = append(errs, validateURL(label, i.LlamaSwap.BaseURL)...)
+		}
+	case domain.KindHindsight:
+		if i.Hindsight == nil {
+			errs = append(errs, mismatchSettings(label))
+		} else {
+			errs = append(errs, validateURL(label, i.Hindsight.BaseURL)...)
+			errs = append(errs, validateOptionalURL(label, i.Hindsight.WebUIURL)...)
 		}
 	case domain.KindMiniMax:
 		if i.MiniMax == nil {
@@ -240,6 +265,9 @@ func SameSettings(a, b ProviderSettings) bool {
 		return ok && av == bv
 	case LlamaSwapSettings:
 		bv, ok := b.(LlamaSwapSettings)
+		return ok && av == bv
+	case HindsightSettings:
+		bv, ok := b.(HindsightSettings)
 		return ok && av == bv
 	case MiniMaxSettings:
 		_, ok := b.(MiniMaxSettings)

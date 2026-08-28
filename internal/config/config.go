@@ -16,6 +16,7 @@ import (
 const (
 	DefaultAMDGPUWebURL = "http://127.0.0.1:8080"
 	DefaultLlamaSwapURL = "http://127.0.0.1:8081"
+	DefaultHindsightURL = "http://127.0.0.1:8888"
 	DefaultZAIURL       = "https://api.z.ai"
 )
 
@@ -44,12 +45,25 @@ func validateURL(source, raw string) []ValidationError {
 	if raw == "" {
 		return []ValidationError{{Source: source, Field: "URL", Message: "must not be empty"}}
 	}
+	return validateURLField(source, "URL", raw)
+}
+
+// validateOptionalURL validates a URL field that may legitimately be left
+// empty; a non-empty value must still be a usable http(s) URL.
+func validateOptionalURL(source, raw string) []ValidationError {
+	return validateURLField(source, "Web UI URL", raw)
+}
+
+func validateURLField(source, field, raw string) []ValidationError {
+	if raw == "" {
+		return nil
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		return []ValidationError{{Source: source, Field: "URL", Message: "must be an http(s) URL with a host"}}
+		return []ValidationError{{Source: source, Field: field, Message: "must be an http(s) URL with a host"}}
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return []ValidationError{{Source: source, Field: "URL", Message: "scheme must be http or https"}}
+		return []ValidationError{{Source: source, Field: field, Message: "scheme must be http or https"}}
 	}
 	return nil
 }

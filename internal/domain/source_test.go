@@ -14,6 +14,7 @@ func TestSourceKindCategory(t *testing.T) {
 	}{
 		{KindAMDGPUWeb, CategoryLocal},
 		{KindLlamaSwap, CategoryLocal},
+		{KindHindsight, CategoryLocal},
 		{KindMiniMax, CategoryRemote},
 		{KindZAI, CategoryRemote},
 		{KindOpenRouter, CategoryRemote},

@@ -70,6 +70,7 @@ type sourceRecord struct {
 	// Exactly one provider block is set, matching Kind.
 	AMDGPUWeb  *amdGPUWebRecord  `json:"amdgputop_web,omitempty"`
 	LlamaSwap  *llamaSwapRecord  `json:"llama_swap,omitempty"`
+	Hindsight  *hindsightRecord  `json:"hindsight,omitempty"`
 	MiniMax    *miniMaxRecord    `json:"minimax,omitempty"`
 	ZAI        *zaiRecord        `json:"zai,omitempty"`
 	OpenRouter *openRouterRecord `json:"openrouter,omitempty"`
@@ -82,6 +83,11 @@ type amdGPUWebRecord struct {
 
 type llamaSwapRecord struct {
 	BaseURL string `json:"base_url"`
+}
+
+type hindsightRecord struct {
+	BaseURL  string `json:"base_url"`
+	WebUIURL string `json:"web_ui_url,omitempty"`
 }
 
 type miniMaxRecord struct{}
@@ -187,6 +193,10 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 		if rec.LlamaSwap != nil {
 			inst.LlamaSwap = &LlamaSwapSettings{BaseURL: rec.LlamaSwap.BaseURL}
 		}
+	case domain.KindHindsight:
+		if rec.Hindsight != nil {
+			inst.Hindsight = &HindsightSettings{BaseURL: rec.Hindsight.BaseURL, WebUIURL: rec.Hindsight.WebUIURL}
+		}
 	case domain.KindMiniMax:
 		if rec.MiniMax != nil {
 			inst.MiniMax = &MiniMaxSettings{}
@@ -221,6 +231,10 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 	case domain.KindLlamaSwap:
 		if inst.LlamaSwap != nil {
 			rec.LlamaSwap = &llamaSwapRecord{BaseURL: inst.LlamaSwap.BaseURL}
+		}
+	case domain.KindHindsight:
+		if inst.Hindsight != nil {
+			rec.Hindsight = &hindsightRecord{BaseURL: inst.Hindsight.BaseURL, WebUIURL: inst.Hindsight.WebUIURL}
 		}
 	case domain.KindMiniMax:
 		if inst.MiniMax != nil {

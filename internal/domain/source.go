@@ -23,6 +23,7 @@ type SourceKind string
 const (
 	KindAMDGPUWeb  SourceKind = "amdgputop-web"
 	KindLlamaSwap  SourceKind = "llama-swap"
+	KindHindsight  SourceKind = "hindsight"
 	KindMiniMax    SourceKind = "minimax"
 	KindZAI        SourceKind = "zai"
 	KindOpenRouter SourceKind = "openrouter"
@@ -30,9 +31,12 @@ const (
 
 // Category reports where the source runs. Source kinds are compile-time
 // constants in this application; any other value groups with remote.
+// Hindsight is a product-level Local grouping: user-controlled local
+// infrastructure even when the configured URL is not on this machine
+// (docs/S5_AGENT_RULES.md §1).
 func (kind SourceKind) Category() Category {
 	switch kind {
-	case KindAMDGPUWeb, KindLlamaSwap:
+	case KindAMDGPUWeb, KindLlamaSwap, KindHindsight:
 		return CategoryLocal
 	default:
 		return CategoryRemote

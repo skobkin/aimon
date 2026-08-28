@@ -22,6 +22,18 @@ func validAMDGPU(id domain.InstanceID, name, url string) SourceInstance {
 	}
 }
 
+// validHindsight is a minimal valid Hindsight instance for list tests.
+func validHindsight(id domain.InstanceID, name, apiURL, webURL string) SourceInstance {
+	return SourceInstance{
+		ID:           id,
+		Kind:         domain.KindHindsight,
+		Name:         name,
+		Enabled:      true,
+		PollInterval: DefaultLocalInterval,
+		Hindsight:    &HindsightSettings{BaseURL: apiURL, WebUIURL: webURL},
+	}
+}
+
 func TestGenerateInstanceID(t *testing.T) {
 	seen := make(map[domain.InstanceID]bool)
 	for i := 0; i < 100; i++ {
@@ -58,6 +70,16 @@ func TestSettingsAccessor(t *testing.T) {
 			ok:   true,
 		},
 		{
+			name: "matching hindsight settings",
+			inst: SourceInstance{Kind: domain.KindHindsight, Hindsight: &HindsightSettings{BaseURL: "http://127.0.0.1:8888", WebUIURL: "http://127.0.0.1:9999"}},
+			want: HindsightSettings{BaseURL: "http://127.0.0.1:8888", WebUIURL: "http://127.0.0.1:9999"},
+			ok:   true,
+		},
+		{
+			name: "missing hindsight settings",
+			inst: SourceInstance{Kind: domain.KindHindsight},
+		},
+		{
 			name: "missing settings",
 			inst: SourceInstance{Kind: domain.KindZAI},
 		},
@@ -89,6 +111,9 @@ func TestInstanceValidate(t *testing.T) {
 		{ID: "id-3", Kind: domain.KindMiniMax, Name: "MiniMax Personal", Enabled: true, PollInterval: DefaultRemoteInterval, MiniMax: &MiniMaxSettings{}},
 		{ID: "id-4", Kind: domain.KindZAI, Name: "Z.AI / GLM", Enabled: true, PollInterval: 5 * time.Minute, ZAI: &ZAISettings{BaseURL: "https://api.z.ai"}},
 		{ID: "id-5", Kind: domain.KindOpenRouter, Name: "OpenRouter", Enabled: true, PollInterval: DefaultRemoteInterval, OpenRouter: &OpenRouterSettings{}},
+		// A blank Web UI URL is valid: the Control Plane UI is optional.
+		validHindsight("id-6", "Hindsight", "http://127.0.0.1:8888", ""),
+		validHindsight("id-7", "Hindsight LAN", "http://10.20.30.40:8888", "http://10.20.30.40:9999"),
 	}
 	for i, inst := range valid {
 		if errs := inst.Validate(); len(errs) > 0 {
@@ -112,20 +137,41 @@ func TestInstanceValidate(t *testing.T) {
 		{"non-preset interval", func(i *SourceInstance) { i.PollInterval = 7 * time.Second }, "Poll interval"},
 		{"remote interval on local kind", func(i *SourceInstance) { i.PollInterval = 5 * time.Minute }, "Poll interval"},
 	}
+
+	hindsightInvalid := []struct {
+		name   string
+		modify func(*SourceInstance)
+		field  string
+	}{
+		{"empty api url", func(i *SourceInstance) { i.Hindsight.BaseURL = "" }, "URL"},
+		{"bad api url", func(i *SourceInstance) { i.Hindsight.BaseURL = "ftp://nope" }, "URL"},
+		{"bad web ui url", func(i *SourceInstance) { i.Hindsight.WebUIURL = "nonsense" }, "Web UI URL"},
+		{"bad web ui url scheme", func(i *SourceInstance) { i.Hindsight.WebUIURL = "ftp://ui.example" }, "Web UI URL"},
+	}
+	checkField := func(t *testing.T, inst SourceInstance, field string) {
+		t.Helper()
+		errs := inst.Validate()
+		for _, e := range errs {
+			if e.Field == field {
+				return
+			}
+		}
+		t.Errorf("errors %v: want a %q error", errs, field)
+	}
+
+	for _, c := range hindsightInvalid {
+		t.Run("hindsight "+c.name, func(t *testing.T) {
+			inst := validHindsight("id-h", "h", "http://127.0.0.1:8888", "")
+			c.modify(&inst)
+			checkField(t, inst, c.field)
+		})
+	}
+
 	for _, c := range invalid {
 		t.Run(c.name, func(t *testing.T) {
 			inst := validAMDGPU("id-x", "x", "http://127.0.0.1:8080")
 			c.modify(&inst)
-			errs := inst.Validate()
-			found := false
-			for _, e := range errs {
-				if e.Field == c.field {
-					found = true
-				}
-			}
-			if !found {
-				t.Errorf("errors %v: want a %q error", errs, c.field)
-			}
+			checkField(t, inst, c.field)
 		})
 	}
 }
@@ -165,6 +211,12 @@ func TestSameSettings(t *testing.T) {
 	if SameSettings(OpenRouterSettings{}, MiniMaxSettings{}) {
 		t.Error("openrouter must not compare equal to another empty kind")
 	}
+	if !SameSettings(HindsightSettings{BaseURL: "http://a", WebUIURL: "http://b"}, HindsightSettings{BaseURL: "http://a", WebUIURL: "http://b"}) {
+		t.Error("equal hindsight settings must compare equal")
+	}
+	if SameSettings(HindsightSettings{BaseURL: "http://a"}, HindsightSettings{BaseURL: "http://a", WebUIURL: "http://b"}) {
+		t.Error("a changed Web UI URL must compare unequal (it rebuilds the adapter)")
+	}
 	if SameSettings(nil, MiniMaxSettings{}) || !SameSettings(nil, nil) {
 		t.Error("nil handling is wrong")
 	}
@@ -195,6 +247,7 @@ func TestSaveLoadInstancesRoundTrip(t *testing.T) {
 		{ID: "mm-1", Kind: domain.KindMiniMax, Name: "MiniMax Personal", Enabled: true, PollInterval: 2 * time.Minute, MiniMax: &MiniMaxSettings{}},
 		{ID: "zai-1", Kind: domain.KindZAI, Name: "Z.AI / GLM", Enabled: false, PollInterval: 5 * time.Minute, ZAI: &ZAISettings{BaseURL: "https://api.z.ai"}},
 		{ID: "or-1", Kind: domain.KindOpenRouter, Name: "OpenRouter", Enabled: true, PollInterval: DefaultRemoteInterval, OpenRouter: &OpenRouterSettings{}},
+		validHindsight("hs-1", "Hindsight", "http://127.0.0.1:8888", "http://127.0.0.1:9999"),
 	}
 	if err := repo.SaveInstances(stored); err != nil {
 		t.Fatalf("save: %v", err)
@@ -228,7 +281,7 @@ func TestSaveLoadInstancesRoundTrip(t *testing.T) {
 	for _, inst := range loaded {
 		order = append(order, string(inst.ID))
 	}
-	want := "gpu-localhost,gpu-server,mm-1,zai-1,or-1"
+	want := "gpu-localhost,gpu-server,mm-1,zai-1,or-1,hs-1"
 	if got := strings.Join(order, ","); got != want {
 		t.Errorf("order = %q, want %q", got, want)
 	}
@@ -284,6 +337,8 @@ func TestLoadInstancesUnknownKindAndBadFields(t *testing.T) {
 		{"empty name", `{"schema_version":1,"sources":[{"id":"a","kind":"minimax","name":"","enabled":true,"poll_interval":"30s","minimax":{}}]}`, "Name"},
 		{"duplicate ids", `{"schema_version":1,"sources":[{"id":"a","kind":"minimax","name":"x","enabled":true,"poll_interval":"30s","minimax":{}},{"id":"a","kind":"zai","name":"y","enabled":true,"poll_interval":"30s","zai":{"base_url":"https://api.z.ai"}}]}`, "duplicate instance ID"},
 		{"missing settings block", `{"schema_version":1,"sources":[{"id":"a","kind":"zai","name":"x","enabled":true,"poll_interval":"30s"}]}`, "Settings"},
+		{"bad hindsight api url", `{"schema_version":1,"sources":[{"id":"a","kind":"hindsight","name":"x","enabled":true,"poll_interval":"5s","hindsight":{"base_url":""}}]}`, "URL"},
+		{"bad hindsight web ui url", `{"schema_version":1,"sources":[{"id":"a","kind":"hindsight","name":"x","enabled":true,"poll_interval":"5s","hindsight":{"base_url":"http://127.0.0.1:8888","web_ui_url":"nope"}}]}`, "Web UI URL"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -307,6 +362,7 @@ func TestSourceDocumentHasNoSecretFields(t *testing.T) {
 				ID: "a", Kind: "amdgputop-web", Name: "n", Enabled: true, PollInterval: "5s",
 				AMDGPUWeb:  &amdGPUWebRecord{BaseURL: "http://127.0.0.1:8080", SelectedGPUID: "gpu"},
 				LlamaSwap:  &llamaSwapRecord{BaseURL: "http://127.0.0.1:8081"},
+				Hindsight:  &hindsightRecord{BaseURL: "http://127.0.0.1:8888", WebUIURL: "http://127.0.0.1:9999"},
 				MiniMax:    &miniMaxRecord{},
 				ZAI:        &zaiRecord{BaseURL: "https://api.z.ai"},
 				OpenRouter: &openRouterRecord{},
