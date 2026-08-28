@@ -381,3 +381,27 @@ separately — including "not configured (skipped)" — and make zero HTTP
 requests for absent credentials; with nothing configured the test is not
 presented as success because nothing was verified. Single-credential
 kinds wrap their historical single-line wording unchanged.
+
+## 2026-08-29 — S5: Hindsight refresh timeout is 10s; db_pool_waiting is sourced from /health first
+
+Two sourcing decisions for the new Hindsight adapter, both about trusting
+the right upstream surface.
+
+1. `RequestTimeout` for the Hindsight source is the 10s remote convention,
+   not the 3s local-daemon value, even though Hindsight is categorized
+   Local (S5: Local is a product grouping, not a latency promise). One
+   refresh chains `/health` + `/metrics` and, when the adapter-local slow
+   cache has expired, `/health/live` plus every page of the bank list
+   sequentially under a single context; on a LAN with a few thousand banks
+   the 3s budget would spuriously fail otherwise-healthy deployments.
+
+2. The DB Waiting row prefers the optional `db_pool_waiting` field of
+   `/health` and falls back to the Prometheus `hindsight_db_pool_waiting`
+   gauge only when the health value is absent. Upstream documents
+   `db_pool_waiting` as a readiness/database-pressure diagnostic of the
+   health endpoint, while the Prometheus DB-pool set (size/idle/min/max)
+   does not guarantee a waiting gauge; neither source is ever required.
+   This replaces the earlier S5 draft stance that /health pool diagnostics
+   are ignored — `db_acquire_ms` and `db_pool_waiting` are now both parsed
+   from `/health`, and `/metrics` remains the source for pool
+   size/idle/max.

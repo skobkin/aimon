@@ -69,6 +69,7 @@ func TestSnapshotConformance(t *testing.T) {
 		"minimax":    QuotaSnapshot{Kind: KindMiniMax, CollectedAt: at},
 		"zai":        QuotaSnapshot{Kind: KindZAI, CollectedAt: at},
 		"openrouter": OpenRouterSnapshot{CollectedAt: at},
+		"hindsight":  HindsightSnapshot{CollectedAt: at},
 		"fake":       fakeSnapshot{source: KindZAI, at: at},
 	}
 	for name, s := range snaps {
@@ -87,6 +88,9 @@ func TestSnapshotConformance(t *testing.T) {
 	}
 	if (OpenRouterSnapshot{}).SnapshotKind() != KindOpenRouter {
 		t.Error("OpenRouterSnapshot source mismatch")
+	}
+	if (HindsightSnapshot{}).SnapshotKind() != KindHindsight {
+		t.Error("HindsightSnapshot source mismatch")
 	}
 }
 
