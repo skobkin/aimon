@@ -310,6 +310,143 @@ func TestRebuildReplacesTickRefreshers(t *testing.T) {
 	}
 }
 
+// hindsightCtrl serves one Hindsight instance with a landed aggregate
+// snapshot. webUI controls the optional Web UI URL, so the tests cover
+// both the "Open Hindsight" button and its absence.
+type hindsightCtrl struct {
+	stubCtrl
+	now   time.Time
+	webUI string
+}
+
+func (c *hindsightCtrl) Instances() []config.SourceInstance {
+	return []config.SourceInstance{{
+		ID: "hs-1", Kind: domain.KindHindsight, Name: "Hindsight",
+		Enabled: true, PollInterval: 5 * time.Second,
+		Hindsight: &config.HindsightSettings{
+			BaseURL:  "http://127.0.0.1:8888",
+			WebUIURL: c.webUI,
+		},
+	}}
+}
+
+func (c *hindsightCtrl) States() map[domain.InstanceID]domain.Runtime {
+	c.now = time.Now()
+	lastWrite := c.now.Add(-3 * time.Minute)
+	return map[domain.InstanceID]domain.Runtime{
+		"hs-1": {
+			Enabled:       true,
+			LastSuccessAt: c.now,
+			Snapshot: domain.HindsightSnapshot{
+				CollectedAt: c.now,
+				Service: domain.HindsightService{
+					Status:   "healthy",
+					Database: "connected",
+					Version:  "0.9.2",
+					Uptime:   2*24*time.Hour + 7*time.Hour,
+				},
+				Memory: domain.HindsightMemory{Banks: 27, Facts: 18400, LastWriteAt: &lastWrite},
+				Activity: domain.HindsightActivity{
+					RecallPerMin:   f64ptr(18),
+					LLMCallsPerMin: f64ptr(4),
+				},
+				Runtime: domain.HindsightRuntime{DBPoolSize: f64ptr(10), DBPoolIdle: f64ptr(8), DBPoolMax: f64ptr(10)},
+				Queue:   &domain.HindsightQueue{Pending: f64ptr(3), Failed: f64ptr(0)},
+			},
+		},
+	}
+}
+
+func f64ptr(v float64) *float64 { return &v }
+
+// The Local tab renders the service detail body with its sections, and the
+// "Open Hindsight" button appears only when a Web UI URL is configured.
+func TestLocalTabRendersServiceBody(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &hindsightCtrl{webUI: "http://127.0.0.1:9999"}
+	m := NewMonitor(app, ctrl, done)
+	m.rebuild()
+
+	texts := allTexts(t, m.localBox)
+	for _, want := range []string{"Service", "Status", "Healthy", "Memory", "Banks", "27", "Activity", "Recall", "18/m", "Queue", "Pending", "3", "Runtime", "DB pool active", "2 / 10"} {
+		if !slices.Contains(texts, want) {
+			t.Errorf("local tab lacks %q; texts = %v", want, texts)
+		}
+	}
+	if !slices.Contains(buttonTexts(t, m.localBox), "Open Hindsight") {
+		t.Error("a Web UI URL must produce the Open Hindsight button")
+	}
+
+	// Without a Web UI URL the body renders but the button must not.
+	ctrl.webUI = ""
+	m.rebuild()
+	texts = allTexts(t, m.localBox)
+	if !slices.Contains(texts, "Banks") {
+		t.Errorf("service body vanished without a Web UI URL; texts = %v", texts)
+	}
+	if slices.Contains(buttonTexts(t, m.localBox), "Open Hindsight") {
+		t.Error("Open Hindsight must be absent without a Web UI URL")
+	}
+}
+
+// The Overview tab renders the compact service body: summary plus headline
+// pairs, none of the detail-only rows.
+func TestOverviewTabRendersServiceBody(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	m := NewMonitor(app, &hindsightCtrl{}, done)
+	m.rebuild()
+
+	texts := allTexts(t, m.overviewBox)
+	for _, want := range []string{"Healthy · v0.9.2", "Banks", "27", "Recall", "18/m", "LLM calls", "4/m", "Pending", "3"} {
+		if !slices.Contains(texts, want) {
+			t.Errorf("overview card lacks %q; texts = %v", want, texts)
+		}
+	}
+	for _, detailOnly := range []string{"Status", "Uptime", "Retain", "Consolidation backlog"} {
+		if slices.Contains(texts, detailOnly) {
+			t.Errorf("overview card shows detail-only row %q", detailOnly)
+		}
+	}
+}
+
+// The memory ages must tick in place through the monitor's collected
+// refreshers, exactly like freshness labels and quota countdowns.
+func TestServiceAgeRowsAgeInPlace(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &hindsightCtrl{}
+	m := NewMonitor(app, ctrl, done)
+	m.rebuild()
+
+	beforeObjs := flatten(t, m.localBox.Objects)
+	if !slices.Contains(allTexts(t, m.localBox), "3m ago") {
+		t.Fatal("initial tree lacks the Last write age")
+	}
+
+	m.updateTimeTexts(ctrl.now.Add(90 * time.Second))
+
+	afterObjs := flatten(t, m.localBox.Objects)
+	if len(beforeObjs) != len(afterObjs) {
+		t.Fatalf("tree size changed: %d -> %d objects", len(beforeObjs), len(afterObjs))
+	}
+	for i := range beforeObjs {
+		if beforeObjs[i] != afterObjs[i] {
+			t.Fatalf("object %d was replaced by the tick; ages must update in place", i)
+		}
+	}
+	if !slices.Contains(allTexts(t, m.localBox), "4m ago") {
+		t.Error("tick did not age the Last write row")
+	}
+}
+
 func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	t.Helper()
 	var out []string
@@ -326,6 +463,27 @@ func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 		out = append(out, o.Text)
 	case *canvas.Text:
 		out = append(out, o.Text)
+	}
+	return out
+}
+
+// buttonTexts collects the visible text of every button in the tree; a
+// button's caption lives on the widget, not in a Label child. The Button
+// case must precede the Widget case: *widget.Button is a fyne.Widget.
+func buttonTexts(t *testing.T, obj fyne.CanvasObject) []string {
+	t.Helper()
+	var out []string
+	switch o := obj.(type) {
+	case *widget.Button:
+		out = append(out, o.Text)
+	case fyne.Widget:
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			out = append(out, buttonTexts(t, child)...)
+		}
+	case *fyne.Container:
+		for _, child := range o.Objects {
+			out = append(out, buttonTexts(t, child)...)
+		}
 	}
 	return out
 }

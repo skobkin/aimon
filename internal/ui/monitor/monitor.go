@@ -316,6 +316,8 @@ func (m *Monitor) overviewCardBody(c ui.OverviewCardVM, tick *[]func(now time.Ti
 		return body
 	case ui.OverviewSpend:
 		return components.NewSpendOverviewBody(c.Spend, m.ctrl.HideSensitiveInfo)
+	case ui.OverviewService:
+		return components.NewServiceOverviewBody(c.Service)
 	default:
 		return noDataYet()
 	}
@@ -408,6 +410,10 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		return box
 	case ui.KindSpend:
 		return components.NewSpendDetailBody(c.Spend, m.ctrl.HideSensitiveInfo)
+	case ui.KindService:
+		body, ticks := components.NewServiceDetailBody(c.Service, time.Now())
+		*tick = append(*tick, ticks...)
+		return body
 	default:
 		return noDataYet()
 	}
