@@ -10,22 +10,28 @@ import (
 
 // selectedFamilies is the closed set of Prometheus exposition families S5
 // consumes (docs/S5_HINDSIGHT.md §4). Everything else is skipped at parse
-// time; absent families are absence, never zero.
+// time; absent families are absence, never zero. The token totals exist
+// under two spellings: the researched upstream name
+// (hindsight_llm_tokens_input_total) and the extra-segment one observed on
+// OTel-based deployments (hindsight_llm_tokens_input_tokens_total); both
+// feed the same counter (DECISION_LOG, 2026-08-29).
 var selectedFamilies = map[string]bool{
-	"hindsight_operation_total":           true,
-	"hindsight_llm_calls_total":           true,
-	"hindsight_llm_tokens_input_total":    true,
-	"hindsight_llm_tokens_output_total":   true,
-	"hindsight_http_requests_total":       true,
-	"hindsight_http_requests_in_progress": true,
-	"hindsight_db_pool_size":              true,
-	"hindsight_db_pool_idle":              true,
-	"hindsight_db_pool_min":               true,
-	"hindsight_db_pool_max":               true,
-	"hindsight_db_pool_waiting":           true,
-	"hindsight_async_operations":          true,
-	"hindsight_consolidation_backlog":     true,
-	"hindsight_consolidation_failed":      true,
+	"hindsight_operation_total":                true,
+	"hindsight_llm_calls_total":                true,
+	"hindsight_llm_tokens_input_total":         true,
+	"hindsight_llm_tokens_output_total":        true,
+	"hindsight_llm_tokens_input_tokens_total":  true,
+	"hindsight_llm_tokens_output_tokens_total": true,
+	"hindsight_http_requests_total":            true,
+	"hindsight_http_requests_in_progress":      true,
+	"hindsight_db_pool_size":                   true,
+	"hindsight_db_pool_idle":                   true,
+	"hindsight_db_pool_min":                    true,
+	"hindsight_db_pool_max":                    true,
+	"hindsight_db_pool_waiting":                true,
+	"hindsight_async_operations":               true,
+	"hindsight_consolidation_backlog":          true,
+	"hindsight_consolidation_failed":           true,
 }
 
 // metricSample is one parsed exposition sample. Only the four label keys
@@ -278,9 +284,9 @@ func aggregateMetrics(samples []metricSample) (metricsCounters, metricsGauges, *
 			}
 		case "hindsight_llm_calls_total":
 			counters.LLMCallsTotal = add(counters.LLMCallsTotal, s.value)
-		case "hindsight_llm_tokens_input_total":
+		case "hindsight_llm_tokens_input_total", "hindsight_llm_tokens_input_tokens_total":
 			counters.InputTokensTotal = add(counters.InputTokensTotal, s.value)
-		case "hindsight_llm_tokens_output_total":
+		case "hindsight_llm_tokens_output_total", "hindsight_llm_tokens_output_tokens_total":
 			counters.OutputTokensTotal = add(counters.OutputTokensTotal, s.value)
 		case "hindsight_http_requests_total":
 			counters.HTTPRequestsTotal = add(counters.HTTPRequestsTotal, s.value)

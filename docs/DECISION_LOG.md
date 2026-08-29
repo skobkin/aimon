@@ -10,6 +10,17 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — S5: accept the OTel spelling of the LLM token counter families
+
+The spec'd token families (`hindsight_llm_tokens_input_total`,
+`hindsight_llm_tokens_output_total`, S5_HINDSIGHT §4) do not exist on an
+observed OTel-based deployment, which spells them with an extra segment:
+`hindsight_llm_tokens_input_tokens_total` /
+`hindsight_llm_tokens_output_tokens_total`. The adapter therefore accepts
+both spellings — both are in the closed selected set and both accumulate
+into the same counter, so a deployment exposing each is summed, and the
+derivation, rate, and availability rules are unchanged.
+
 ## 2026-08-29 — S5: a bank list without pagination metadata is one complete page
 
 S5 models the bank list as always paginated by its own `total`

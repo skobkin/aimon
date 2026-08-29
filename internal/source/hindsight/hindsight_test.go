@@ -907,6 +907,28 @@ func TestRefreshToleratesBrokenLiveness(t *testing.T) {
 	}
 }
 
+// OTel-based deployments spell the token families with an extra _tokens
+// segment; both spellings must pass the family filter and feed the same
+// aggregate counters.
+func TestOTelTokenFamilySpellingsAggregate(t *testing.T) {
+	body := `hindsight_llm_tokens_input_tokens_total{model="m"} 1200
+hindsight_llm_tokens_output_tokens_total{model="m"} 340
+hindsight_llm_tokens_input_total 10
+hindsight_llm_tokens_output_total 4
+`
+	samples, err := parseSelectedMetrics(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	counters, _, _ := aggregateMetrics(samples)
+	if counters.InputTokensTotal == nil || *counters.InputTokensTotal != 1210 {
+		t.Errorf("InputTokensTotal = %v, want 1210 from both spellings", counters.InputTokensTotal)
+	}
+	if counters.OutputTokensTotal == nil || *counters.OutputTokensTotal != 344 {
+		t.Errorf("OutputTokensTotal = %v, want 344 from both spellings", counters.OutputTokensTotal)
+	}
+}
+
 // A bank list without pagination metadata is the complete list: the count
 // is the returned row count and the walk must not advance the offset —
 // servers that ignore offset would hand back the same rows and the facts
