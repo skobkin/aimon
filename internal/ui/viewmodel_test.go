@@ -35,6 +35,8 @@ func inst(id, name string, kind domain.SourceKind, enabled bool) config.SourceIn
 		i.ZAI = &config.ZAISettings{BaseURL: "https://api.z.ai"}
 	case domain.KindOpenRouter:
 		i.OpenRouter = &config.OpenRouterSettings{}
+	case domain.KindHindsight:
+		i.Hindsight = &config.HindsightSettings{BaseURL: "http://127.0.0.1:8888"}
 	}
 	return i
 }

@@ -23,11 +23,12 @@ type CardKind string
 
 // Card body kinds; KindNone means the source has no data yet.
 const (
-	KindNone  CardKind = ""
-	KindGPU   CardKind = "gpu"
-	KindSwap  CardKind = "swap"
-	KindQuota CardKind = "quota"
-	KindSpend CardKind = "spend"
+	KindNone    CardKind = ""
+	KindGPU     CardKind = "gpu"
+	KindSwap    CardKind = "swap"
+	KindQuota   CardKind = "quota"
+	KindSpend   CardKind = "spend"
+	KindService CardKind = "service"
 )
 
 // MetricLevel classifies a metric value by load for coloring. The zero
@@ -128,6 +129,42 @@ type SpendOverviewVM struct {
 	HasData bool
 }
 
+// AgeRowVM is one row whose text is a relative age ("3m ago") that is
+// re-derived as the clock advances. At is the absolute instant the age was
+// measured from; nil renders the unavailable dash and never ticks. Value
+// carries the text derived at build time (the QuotaWindowVM.ResetAt
+// pattern).
+type AgeRowVM struct {
+	Label string
+	Value string
+	At    *time.Time
+	Level MetricLevel
+}
+
+// ServiceVM carries one Hindsight deployment's sectioned detail rows
+// (S5_UI_UX §5). Every section is conditional: a section is nil when
+// nothing in it was observed, so absent optional groups disappear instead
+// of showing placeholder lines. Memory rows age in place (last
+// write/document); the other sections are snapshot-stable text.
+type ServiceVM struct {
+	Service  []MetricRowVM
+	Memory   []AgeRowVM
+	Activity []MetricRowVM
+	Queue    []MetricRowVM // nil unless the deployment exposed backlog metrics
+	Runtime  []MetricRowVM
+	HasData  bool
+}
+
+// ServiceOverviewVM is the compact overview variant: a bold summary line
+// plus at most three label/value pairs rendered two per row (S5_UI_UX §3).
+// A pair is emitted only when its own value exists — a missing optional
+// backlog family never yields an empty cell or a fabricated zero.
+type ServiceOverviewVM struct {
+	Summary string // "Healthy · v0.9.2"
+	Rows    []MetricRowVM
+	HasData bool
+}
+
 // OverviewKind discriminates Overview card presentation.
 type OverviewKind string
 
@@ -137,6 +174,7 @@ const (
 	OverviewRuntime OverviewKind = "runtime"
 	OverviewQuota   OverviewKind = "quota"
 	OverviewSpend   OverviewKind = "spend"
+	OverviewService OverviewKind = "service"
 )
 
 // MetricBarVM is the pure data for one labeled usage bar.
@@ -193,6 +231,7 @@ type OverviewCardVM struct {
 	Runtime RuntimeOverviewVM
 	Quota   QuotaOverviewVM
 	Spend   SpendOverviewVM
+	Service ServiceOverviewVM
 }
 
 // CardVM is one source card. Status is the per-source freshness label
@@ -205,10 +244,11 @@ type CardVM struct {
 	Status   string
 	Footer   string
 
-	GPU   GPUVM
-	Swap  SwapVM
-	Quota QuotaVM
-	Spend SpendVM
+	GPU     GPUVM
+	Swap    SwapVM
+	Quota   QuotaVM
+	Spend   SpendVM
+	Service ServiceVM
 }
 
 // OverviewVM is the full overview tab state.
@@ -287,6 +327,8 @@ func cardKind(kind domain.SourceKind) CardKind {
 		return KindQuota
 	case domain.KindOpenRouter:
 		return KindSpend
+	case domain.KindHindsight:
+		return KindService
 	default:
 		return KindNone
 	}
@@ -303,6 +345,8 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 		return OverviewQuota
 	case domain.KindOpenRouter:
 		return OverviewSpend
+	case domain.KindHindsight:
+		return OverviewService
 	default:
 		return OverviewKind("")
 	}
@@ -329,6 +373,8 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, det
 		card.Quota = BuildQuotaVM(snap, now, detail)
 	case domain.OpenRouterSnapshot:
 		card.Spend = BuildSpendVM(snap, detail)
+	case domain.HindsightSnapshot:
+		card.Service = BuildServiceVM(snap, now)
 	}
 	return card
 }
@@ -353,6 +399,8 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.T
 		card.Quota = BuildQuotaOverview(snap, now)
 	case domain.OpenRouterSnapshot:
 		card.Spend = BuildSpendOverview(snap)
+	case domain.HindsightSnapshot:
+		card.Service = BuildServiceOverviewVM(snap)
 	}
 	return card
 }
@@ -753,6 +801,314 @@ func dashWhenNil(v *float64, format func(*float64) string) string {
 		return "—"
 	}
 	return format(v)
+}
+
+// BuildServiceVM derives a Hindsight card's sectioned rows from one
+// snapshot (S5_UI_UX §5). Unavailable values render as "—" — availability,
+// never a fabricated zero — and a section with nothing observed is omitted
+// entirely. now anchors the memory section's relative ages.
+func BuildServiceVM(snap domain.HindsightSnapshot, now time.Time) ServiceVM {
+	vm := ServiceVM{HasData: true}
+
+	vm.Service = serviceRows(snap.Service)
+	vm.Memory = memoryRows(snap.Memory, now)
+	vm.Activity = activityRows(snap.Activity)
+	vm.Queue = queueRows(snap.Queue)
+	vm.Runtime = runtimeRows(snap)
+	return vm
+}
+
+// serviceRows builds the Service section: the health status plus every
+// optional identity/diagnostic value that was observed.
+func serviceRows(s domain.HindsightService) []MetricRowVM {
+	rows := []MetricRowVM{{Label: "Status", Value: titleFirst(s.Status), Level: serviceStatusLevel(s.Status)}}
+	if s.Version != "" {
+		rows = append(rows, MetricRowVM{Label: "Version", Value: s.Version})
+	}
+	if s.Uptime > 0 {
+		rows = append(rows, MetricRowVM{Label: "Uptime", Value: FormatUptime(s.Uptime)})
+	}
+	if s.Database != "" {
+		rows = append(rows, MetricRowVM{Label: "Database", Value: s.Database, Level: serviceStatusLevel(s.Database)})
+	}
+	if s.DBAcquireMS != nil {
+		rows = append(rows, MetricRowVM{Label: "DB acquire", Value: fmt.Sprintf("%.1f ms", *s.DBAcquireMS)})
+	}
+	return rows
+}
+
+// serviceStatusLevel colors a healthy service/database state green and
+// leaves anything else neutral — S5 invents no threshold system.
+func serviceStatusLevel(state string) MetricLevel {
+	switch strings.ToLower(state) {
+	case "healthy", "connected", "ok":
+		return MetricGood
+	default:
+		return MetricNeutral
+	}
+}
+
+// memoryRows builds the Memory section: aggregate counts and the two
+// relative timestamps that age in place.
+func memoryRows(m domain.HindsightMemory, now time.Time) []AgeRowVM {
+	rows := []AgeRowVM{
+		{Label: "Banks", Value: FormatCount(float64(m.Banks))},
+		{Label: "Facts", Value: FormatCount(float64(m.Facts))},
+		{Label: "Last write", Value: FormatAgePtr(m.LastWriteAt, now), At: m.LastWriteAt},
+		{Label: "Last document", Value: FormatAgePtr(m.LastDocumentAt, now), At: m.LastDocumentAt},
+	}
+	return rows
+}
+
+// activityRows builds the seven rate rows. A rate that is not derivable
+// yet (first sample, counter reset) shows "—" rather than 0/m.
+func activityRows(a domain.HindsightActivity) []MetricRowVM {
+	return []MetricRowVM{
+		{Label: "Retain", Value: FormatRatePerMin(a.RetainPerMin)},
+		{Label: "Recall", Value: FormatRatePerMin(a.RecallPerMin)},
+		{Label: "Reflect", Value: FormatRatePerMin(a.ReflectPerMin)},
+		{Label: "Consolidation", Value: FormatRatePerMin(a.ConsolidatePerMin)},
+		{Label: "LLM calls", Value: FormatRatePerMin(a.LLMCallsPerMin)},
+		{Label: "Input tokens", Value: FormatRatePerMin(a.InputTokensPerMin)},
+		{Label: "Output tokens", Value: FormatRatePerMin(a.OutputTokensPerMin)},
+	}
+}
+
+// queueRows builds the Queue section, which exists only when the
+// deployment exposed at least one backlog family; within it only observed
+// values become rows. Failed backlogs read as critical.
+func queueRows(q *domain.HindsightQueue) []MetricRowVM {
+	if q == nil {
+		return nil
+	}
+	var rows []MetricRowVM
+	if q.Pending != nil {
+		rows = append(rows, MetricRowVM{Label: "Pending", Value: FormatCount(*q.Pending)})
+	}
+	if q.Processing != nil {
+		rows = append(rows, MetricRowVM{Label: "Processing", Value: FormatCount(*q.Processing)})
+	}
+	if q.Failed != nil {
+		rows = append(rows, MetricRowVM{Label: "Failed", Value: FormatCount(*q.Failed), Level: failureLevel(*q.Failed)})
+	}
+	if q.ConsolidationBacklog != nil {
+		rows = append(rows, MetricRowVM{Label: "Consolidation backlog", Value: FormatCount(*q.ConsolidationBacklog)})
+	}
+	if q.ConsolidationFailed != nil {
+		rows = append(rows, MetricRowVM{Label: "Consolidation failed", Value: FormatCount(*q.ConsolidationFailed), Level: failureLevel(*q.ConsolidationFailed)})
+	}
+	return rows
+}
+
+// failureLevel marks a positive failed count critical; zero is normal.
+func failureLevel(v float64) MetricLevel {
+	if v > 0 {
+		return MetricCritical
+	}
+	return MetricNeutral
+}
+
+// runtimeRows builds the Runtime section. DB Waiting prefers the /health
+// diagnostic and falls back to the Prometheus gauge only when the health
+// value is absent (neither source is required).
+func runtimeRows(snap domain.HindsightSnapshot) []MetricRowVM {
+	var rows []MetricRowVM
+	if active, max, ok := dbPoolActive(snap.Runtime.DBPoolSize, snap.Runtime.DBPoolIdle, snap.Runtime.DBPoolMax); ok {
+		value := FormatCount(active)
+		if !math.IsNaN(max) {
+			value += " / " + FormatCount(max)
+		}
+		rows = append(rows, MetricRowVM{Label: "DB pool active", Value: value})
+	}
+	if waiting := preferredDBWaiting(snap); waiting != nil {
+		rows = append(rows, MetricRowVM{Label: "DB waiting", Value: FormatCount(*waiting), Level: positiveLevel(*waiting)})
+	}
+	if snap.Runtime.HTTPInProgress != nil {
+		rows = append(rows, MetricRowVM{Label: "HTTP in progress", Value: FormatCount(*snap.Runtime.HTTPInProgress)})
+	}
+	if snap.Activity.HTTP5xxPercent != nil {
+		rows = append(rows, MetricRowVM{Label: "HTTP 5xx", Value: FormatPct1(snap.Activity.HTTP5xxPercent), Level: positiveLevel(*snap.Activity.HTTP5xxPercent)})
+	}
+	return rows
+}
+
+// preferredDBWaiting applies the S5 sourcing rule: the /health
+// db_pool_waiting diagnostic wins; the Prometheus gauge is the fallback.
+func preferredDBWaiting(snap domain.HindsightSnapshot) *float64 {
+	if snap.Service.DBPoolWaiting != nil {
+		return snap.Service.DBPoolWaiting
+	}
+	return snap.Runtime.DBPoolWaiting
+}
+
+// dbPoolActive derives active connections as size−idle (floored at 0) and
+// caps the result at max when the gauge exists. max returns NaN when no
+// gauge was exposed. ok is false when size or idle is missing — the pair
+// is meaningless half-present.
+func dbPoolActive(size, idle, poolMax *float64) (active, max float64, ok bool) {
+	if size == nil || idle == nil {
+		return 0, math.NaN(), false
+	}
+	active = math.Max(0, *size-*idle)
+	if poolMax != nil {
+		max = *poolMax
+		active = math.Min(active, max)
+	} else {
+		max = math.NaN()
+	}
+	return active, max, true
+}
+
+// positiveLevel warns on any positive value (DB waiting, 5xx share).
+func positiveLevel(v float64) MetricLevel {
+	if v > 0 {
+		return MetricWarning
+	}
+	return MetricNeutral
+}
+
+// titleFirst upper-cases a status word's first rune for display
+// ("healthy" → "Healthy").
+func titleFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
+}
+
+// BuildServiceOverviewVM derives the compact overview body (S5_UI_UX §3-4):
+// health first, then Banks/Facts, then the Recall/LLM rates, then the most
+// useful available bottom row — async backlog when any of it exists,
+// otherwise consolidation backlog, otherwise DB pressure. Pairs whose own
+// value is unavailable show "—"; a family with nothing at all is skipped
+// rather than rendered empty.
+func BuildServiceOverviewVM(snap domain.HindsightSnapshot) ServiceOverviewVM {
+	vm := ServiceOverviewVM{HasData: true}
+
+	vm.Summary = titleFirst(snap.Service.Status)
+	if snap.Service.Version != "" {
+		vm.Summary += " · v" + snap.Service.Version
+	}
+
+	// Memory aggregates land with the first slow refresh; before that the
+	// counts are all zero, which is indistinguishable from an empty
+	// deployment, so the pair waits for real data instead of showing two
+	// fabricated zeros.
+	if snap.Memory.Banks != 0 || snap.Memory.Facts != 0 {
+		vm.Rows = append(vm.Rows,
+			MetricRowVM{Label: "Banks", Value: FormatCount(float64(snap.Memory.Banks))},
+			MetricRowVM{Label: "Facts", Value: FormatCount(float64(snap.Memory.Facts))},
+		)
+	}
+
+	// Rates are headline even before their baseline exists ("—").
+	vm.Rows = append(vm.Rows,
+		MetricRowVM{Label: "Recall", Value: FormatRatePerMin(snap.Activity.RecallPerMin)},
+		MetricRowVM{Label: "LLM calls", Value: FormatRatePerMin(snap.Activity.LLMCallsPerMin)},
+	)
+
+	vm.Rows = append(vm.Rows, overviewBacklogRows(snap)...)
+	return vm
+}
+
+// overviewBacklogRows picks the overview's bottom row by availability:
+// async Pending/Failed when at least one of them exists, else the
+// consolidation pair, else DB pressure with whatever sides are known.
+func overviewBacklogRows(snap domain.HindsightSnapshot) []MetricRowVM {
+	q := snap.Queue
+	if q != nil && (q.Pending != nil || q.Failed != nil) {
+		return []MetricRowVM{
+			{Label: "Pending", Value: dashWhenNil(q.Pending, func(v *float64) string { return FormatCount(*v) })},
+			{Label: "Failed", Value: dashWhenNil(q.Failed, func(v *float64) string { return FormatCount(*v) }), Level: failureLevel(derefOrZero(q.Failed))},
+		}
+	}
+	if q != nil && (q.ConsolidationBacklog != nil || q.ConsolidationFailed != nil) {
+		return []MetricRowVM{
+			{Label: "Consol. backlog", Value: dashWhenNil(q.ConsolidationBacklog, func(v *float64) string { return FormatCount(*v) })},
+			{Label: "Consol. failed", Value: dashWhenNil(q.ConsolidationFailed, func(v *float64) string { return FormatCount(*v) }), Level: failureLevel(derefOrZero(q.ConsolidationFailed))},
+		}
+	}
+
+	active, poolMax, ok := dbPoolActive(snap.Runtime.DBPoolSize, snap.Runtime.DBPoolIdle, snap.Runtime.DBPoolMax)
+	waiting := preferredDBWaiting(snap)
+	if !ok && waiting == nil {
+		return nil
+	}
+	var rows []MetricRowVM
+	if ok {
+		value := FormatCount(active)
+		if !math.IsNaN(poolMax) {
+			value += " / " + FormatCount(poolMax)
+		}
+		rows = append(rows, MetricRowVM{Label: "DB active", Value: value})
+	}
+	if waiting != nil {
+		rows = append(rows, MetricRowVM{Label: "Waiting", Value: FormatCount(*waiting), Level: positiveLevel(*waiting)})
+	}
+	return rows
+}
+
+func derefOrZero(v *float64) float64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+// FormatRatePerMin renders a per-minute rate: unavailable as "—", exact
+// zero as "0/m", a small positive below the first decimal as "<0.1/m",
+// sub-10 rates with one useful decimal (whole numbers stay bare, "2/m"),
+// and larger ones compactly ("12.4k/m").
+func FormatRatePerMin(v *float64) string {
+	if v == nil {
+		return "—"
+	}
+	switch {
+	case *v == 0:
+		return "0/m"
+	case *v < 0.1:
+		return "<0.1/m"
+	case *v < 10:
+		if *v == math.Trunc(*v) {
+			return fmt.Sprintf("%.0f/m", *v)
+		}
+		return fmt.Sprintf("%.1f/m", *v)
+	default:
+		return FormatCount(*v) + "/m"
+	}
+}
+
+// FormatPct1 renders a percentage with one decimal ("0.0%", "9.1%").
+func FormatPct1(v *float64) string {
+	if v == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", *v)
+}
+
+// FormatUptime renders a compact process uptime: "42s", "3m", "2h 5m",
+// "2d 7h".
+func FormatUptime(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd %dh", int(d.Hours()/24), int(d.Hours())%24)
+	}
+}
+
+// FormatAgePtr renders a relative age for an optional instant; nil is the
+// unavailable dash.
+func FormatAgePtr(t *time.Time, now time.Time) string {
+	if t == nil {
+		return "—"
+	}
+	return FormatAge(*t, now)
 }
 
 // formatBytePair renders "13.8 / 16.0 GiB"; an empty string when either
