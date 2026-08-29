@@ -43,6 +43,7 @@ func (e *Error) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s: %s: %v", e.Category, e.Detail, e.Err)
 	}
+
 	return fmt.Sprintf("%s: %s", e.Category, e.Detail)
 }
 
@@ -69,6 +70,7 @@ func (e *Error) UserMessage() string {
 	case CatCredentials, CatConfig:
 		return e.Detail
 	}
+
 	return e.Detail
 }
 
@@ -83,6 +85,7 @@ func classifyTransport(err error) Category {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return CatTimeout
 	}
+
 	return CatConnection
 }
 
@@ -96,6 +99,7 @@ func classifyStatus(code int) Category {
 	case code >= 500:
 		return CatProvider
 	}
+
 	return CatHTTP
 }
 
@@ -122,5 +126,6 @@ func unwrapURLError(err error) error {
 	if errors.As(err, &urlErr) {
 		return urlErr.Err
 	}
+
 	return err
 }

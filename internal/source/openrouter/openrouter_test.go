@@ -44,6 +44,7 @@ func (s *memStore) with(account credentials.AccountID, secret string) *memStore 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secrets[account] = secret
+
 	return s
 }
 
@@ -51,6 +52,7 @@ func (s *memStore) withState(err *credentials.StateError) *memStore {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stateErr = err
+
 	return s
 }
 
@@ -67,6 +69,7 @@ func (s *memStore) Get(ctx context.Context, id credentials.AccountID) (string, e
 	if secret, ok := s.secrets[id]; ok && secret != "" {
 		return secret, nil
 	}
+
 	return "", credentials.ErrNotFound
 }
 
@@ -74,6 +77,7 @@ func (s *memStore) Set(ctx context.Context, id credentials.AccountID, secret str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secrets[id] = secret
+
 	return nil
 }
 
@@ -81,6 +85,7 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.secrets, id)
+
 	return nil
 }
 
@@ -126,12 +131,14 @@ func (s *capServer) handler() http.Handler {
 			s.mu.Unlock()
 			if code != 0 {
 				w.WriteHeader(code)
+
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(s.responsesFor(key)))
 		})
 	}
+
 	return mux
 }
 
@@ -141,6 +148,7 @@ func (s *capServer) responsesFor(key string) string {
 	if key == "key" {
 		return s.responses.key
 	}
+
 	return s.responses.credits
 }
 
@@ -154,6 +162,7 @@ func (s *capServer) requests(t *testing.T, path string) int {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return s.count[path]
 }
 
@@ -161,6 +170,7 @@ func (s *capServer) authHeaders(t *testing.T, path string) []string {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return append([]string(nil), s.auth[path]...)
 }
 
@@ -178,6 +188,7 @@ func (s *capServer) start(t *testing.T, creds credentials.Store) (*Adapter, func
 		keyEndpoint:     hs.URL + "/api/v1/key",
 		creditsEndpoint: hs.URL + "/api/v1/credits",
 	}
+
 	return a, hs.Close
 }
 
@@ -187,6 +198,7 @@ func asSourceError(t *testing.T, err error) *source.Error {
 	if !errors.As(err, &serr) {
 		t.Fatalf("expected *source.Error, got %T: %v", err, err)
 	}
+
 	return serr
 }
 
@@ -207,6 +219,7 @@ func fullSetup(t *testing.T, responses serverResponses) (*capServer, *Adapter) {
 	a, _ := srv.start(t, newMemStore().
 		with(testAPIAccount, testAPIToken).
 		with(testMgmtAccount, testMgmtToken))
+
 	return srv, a
 }
 
@@ -621,6 +634,7 @@ func TestLimitNormalization(t *testing.T) {
 				if key.UsageTotal != 10 {
 					t.Errorf("usage lost while degrading the limit: %+v", key)
 				}
+
 				return
 			}
 			if key.Limit == nil {

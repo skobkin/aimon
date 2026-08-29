@@ -100,6 +100,7 @@ func (e modelRemainEntry) name() string {
 	if e.ModelName != "" {
 		return e.ModelName
 	}
+
 	return e.Model
 }
 
@@ -190,6 +191,7 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 			Err:      stateErr,
 		}
 	}
+
 	return "", &source.Error{
 		Category: source.CatCredentials,
 		Detail:   "Keychain read failed",
@@ -219,6 +221,7 @@ func (a *Adapter) checkProviderError(resp tokenPlanResp) *source.Error {
 	if authFailureCodes[code] {
 		return &source.Error{Category: source.CatAuth, Detail: detail}
 	}
+
 	return &source.Error{Category: source.CatInvalidResponse, Detail: detail}
 }
 
@@ -240,6 +243,7 @@ func selectEntry(resp tokenPlanResp) (entry *modelRemainEntry, agg *tokenPlanDat
 		if agg != nil {
 			return nil, agg, nil // legacy aggregate-only payload
 		}
+
 		return nil, nil, &source.Error{
 			Category: source.CatInvalidResponse,
 			Detail:   "no plan data in response",
@@ -269,6 +273,7 @@ func selectEntry(resp tokenPlanResp) (entry *modelRemainEntry, agg *tokenPlanDat
 	for i := range entries {
 		names[i] = entries[i].name()
 	}
+
 	return nil, nil, &source.Error{
 		Category: source.CatInvalidResponse,
 		Detail: fmt.Sprintf("cannot identify plan entry among %d models: %s",
@@ -372,6 +377,7 @@ func resetAtFromMilliseconds(observedAt time.Time, ms int64) (*time.Time, bool) 
 		return nil, false
 	}
 	t := observedAt.Add(time.Duration(ms) * time.Millisecond)
+
 	return &t, true
 }
 
@@ -381,6 +387,7 @@ func hasReset(windows []domain.QuotaWindow, id string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -388,6 +395,7 @@ func setResetAt(windows []domain.QuotaWindow, id string, reset *time.Time) {
 	for i := range windows {
 		if windows[i].ID == id {
 			windows[i].ResetAt = reset
+
 			return
 		}
 	}
@@ -437,6 +445,7 @@ func deriveWindow(id, name string, pct *float64, counts countPair) (w domain.Quo
 	}
 
 	w.UsedFraction = 1 - w.RemainingFraction
+
 	return w, true, mismatch
 }
 

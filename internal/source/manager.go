@@ -72,6 +72,7 @@ type Manager struct {
 // NewManager creates a manager with no sources applied yet.
 func NewManager(log *slog.Logger) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
+
 	return &Manager{
 		log:         log,
 		rootCtx:     ctx,
@@ -198,6 +199,7 @@ func (m *Manager) States() map[domain.InstanceID]domain.Runtime {
 	for id, rt := range m.runtimes {
 		states[id] = *rt
 	}
+
 	return states
 }
 
@@ -271,6 +273,7 @@ func (m *Manager) detachLoopLocked(id domain.InstanceID) *loop {
 	if l != nil {
 		l.cancel()
 	}
+
 	return l
 }
 
@@ -291,6 +294,7 @@ func (m *Manager) runLoop(l *loop) {
 		select {
 		case <-l.ctx.Done():
 			timer.Stop()
+
 			return
 		case <-l.trigger:
 			timer.Stop()
@@ -326,6 +330,7 @@ func (m *Manager) refreshOnce(l *loop) {
 		m.mu.Lock()
 		rt.Refreshing = false
 		m.mu.Unlock()
+
 		return
 	}
 

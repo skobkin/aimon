@@ -114,6 +114,7 @@ func NewMonitor(a fyne.App, ctrl MonitorController, done <-chan struct{}) *Monit
 		&desktop.CustomShortcut{KeyName: fyne.KeyEscape},
 		func(fyne.Shortcut) { m.hide() },
 	)
+
 	return m
 }
 
@@ -152,6 +153,7 @@ func (m *Monitor) setVisible(v bool) {
 func (m *Monitor) isVisible() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	return m.visible
 }
 
@@ -245,6 +247,7 @@ func (m *Monitor) rebuildOverview(vm ui.OverviewVM, states map[domain.InstanceID
 	if vm.NothingEnabled {
 		objs = append(objs, components.NewEmptyState("No sources enabled.\nConfigure sources in Settings.", m.ctrl.OpenSettings))
 		replaceObjects(m.overviewBox, objs...)
+
 		return
 	}
 
@@ -269,10 +272,12 @@ func (m *Monitor) overviewRow(cards []ui.OverviewCardVM, states map[domain.Insta
 				overviewSourceCard(cards[i], states[cards[i].Instance], m.overviewCardBody(cards[i], tick), tick),
 				overviewSourceCard(cards[i+1], states[cards[i+1].Instance], m.overviewCardBody(cards[i+1], tick), tick),
 			))
+
 			continue
 		}
 		objs = append(objs, overviewSourceCard(cards[i], states[cards[i].Instance], m.overviewCardBody(cards[i], tick), tick))
 	}
+
 	return objs
 }
 
@@ -289,6 +294,7 @@ func overviewSourceCard(vm ui.OverviewCardVM, rt domain.Runtime, body fyne.Canva
 	*tick = append(*tick, func(now time.Time) {
 		setLabelStatus(status, ui.FreshnessText(rt, now))
 	})
+
 	return widget.NewCard("", "", container.NewVBox(header, body))
 }
 
@@ -313,6 +319,7 @@ func (m *Monitor) overviewCardBody(c ui.OverviewCardVM, tick *[]func(now time.Ti
 		if countdown != nil {
 			*tick = append(*tick, countdown)
 		}
+
 		return body
 	case ui.OverviewSpend:
 		return components.NewSpendOverviewBody(c.Spend, m.ctrl.HideSensitiveInfo)
@@ -343,6 +350,7 @@ func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstanc
 		}
 		objs = append(objs, card)
 	}
+
 	return objs
 }
 
@@ -358,8 +366,10 @@ func webLink(c ui.CardVM, instances []config.SourceInstance) (label, target stri
 			return "", "", false
 		}
 		url, has := def.WebURL(inst)
+
 		return def.WebLabel, url, has
 	}
+
 	return "", "", false
 }
 
@@ -380,6 +390,7 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		if len(objs) == 0 {
 			return noDataYet()
 		}
+
 		return container.NewVBox(objs...)
 	case ui.KindSwap:
 		box := container.NewVBox()
@@ -394,6 +405,7 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		if len(c.Swap.ModelLines) == 0 {
 			box.Add(widget.NewLabel("No models running"))
 		}
+
 		return box
 	case ui.KindQuota:
 		box := container.NewVBox()
@@ -407,12 +419,14 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		if len(c.Quota.Windows) == 0 {
 			return noDataYet()
 		}
+
 		return box
 	case ui.KindSpend:
 		return components.NewSpendDetailBody(c.Spend, m.ctrl.HideSensitiveInfo)
 	case ui.KindService:
 		body, ticks := components.NewServiceDetailBody(c.Service, time.Now())
 		*tick = append(*tick, ticks...)
+
 		return body
 	default:
 		return noDataYet()
@@ -427,6 +441,7 @@ func withWebUILink(body fyne.CanvasObject, label, target string) fyne.CanvasObje
 			fyne.CurrentApp().OpenURL(u)
 		}
 	})
+
 	return container.NewVBox(body, btn)
 }
 

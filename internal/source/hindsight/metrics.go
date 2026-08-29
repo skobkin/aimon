@@ -122,6 +122,7 @@ func parseSelectedMetrics(body string) ([]metricSample, error) {
 		}
 		samples = append(samples, s)
 	}
+
 	return samples, nil
 }
 
@@ -154,6 +155,7 @@ func parseSampleLine(line string) (metricSample, bool) {
 		return metricSample{}, false
 	}
 	s.value = v
+
 	return s, true
 }
 
@@ -163,6 +165,7 @@ func cutIdent(line string) (name, rest string) {
 	if i := strings.IndexAny(line, "{ "); i >= 0 {
 		return line[:i], line[i:]
 	}
+
 	return line, ""
 }
 
@@ -200,11 +203,13 @@ func parseLabels(s string) (labels map[string]string, remainder string, ok bool)
 		s = rest
 		if strings.HasPrefix(s, ",") {
 			s = s[1:]
+
 			continue
 		}
 		if strings.HasPrefix(s, "}") {
 			return labels, s[1:], true
 		}
+
 		return nil, "", false
 	}
 }
@@ -238,6 +243,7 @@ func scanQuoted(s string) (value, rest string, ok bool) {
 			b.WriteByte(c)
 		}
 	}
+
 	return "", "", false
 }
 
@@ -263,6 +269,7 @@ func classifyLabels(in map[string]string) map[string]string {
 			out[k] = v
 		}
 	}
+
 	return out
 }
 
@@ -337,6 +344,7 @@ func aggregateMetrics(samples []metricSample) (metricsCounters, metricsGauges, *
 	if queueSeen {
 		queuePtr = &queue
 	}
+
 	return counters, gauges, queuePtr
 }
 
@@ -346,6 +354,7 @@ func add(acc *float64, v float64) *float64 {
 		return &v
 	}
 	*acc += v
+
 	return acc
 }
 
@@ -374,6 +383,7 @@ func mergeSeen(sticky, scrape domain.HindsightActivitySeen) domain.HindsightActi
 	sticky.LLMCalls = sticky.LLMCalls || scrape.LLMCalls
 	sticky.InputTokens = sticky.InputTokens || scrape.InputTokens
 	sticky.OutputTokens = sticky.OutputTokens || scrape.OutputTokens
+
 	return sticky
 }
 

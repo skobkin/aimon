@@ -47,6 +47,7 @@ func (f *fakeSource) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	f.mu.Lock()
 	behavior := f.behavior
 	f.mu.Unlock()
+
 	return behavior(ctx)
 }
 
@@ -95,6 +96,7 @@ func TestManagerStaleRetentionAndRecovery(t *testing.T) {
 	})
 	waitFor(t, 500*time.Millisecond, func() bool {
 		st := m.States()[inst]
+
 		return st.LastError != nil
 	})
 
@@ -112,6 +114,7 @@ func TestManagerStaleRetentionAndRecovery(t *testing.T) {
 	})
 	waitFor(t, 500*time.Millisecond, func() bool {
 		st := m.States()[inst]
+
 		return st.LastError == nil
 	})
 	if got := m.States()[inst].DeriveState(); got != domain.StateHealthy {
@@ -125,6 +128,7 @@ func TestManagerNoOverlapAndCoalescing(t *testing.T) {
 	// produce refreshes in the measurement window.
 	src := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
 		time.Sleep(120 * time.Millisecond)
+
 		return snapOf(domain.KindZAI), nil
 	})
 	m := NewManager(quietLogger())
@@ -163,6 +167,7 @@ func TestManagerIndependentLoops(t *testing.T) {
 	var fastRefreshes atomic.Int64
 	slow := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
 		time.Sleep(400 * time.Millisecond) // blocks a full refresh
+
 		return snapOf(domain.KindMiniMax), nil
 	})
 	fast := &fakeSource{
@@ -170,6 +175,7 @@ func TestManagerIndependentLoops(t *testing.T) {
 		timeout: 2 * time.Second,
 		behavior: func(ctx context.Context) (domain.Snapshot, error) {
 			fastRefreshes.Add(1)
+
 			return snapOf(domain.KindZAI), nil
 		},
 	}
@@ -322,6 +328,7 @@ func TestManagerAdapterSwapRestartsAndClearsSnapshot(t *testing.T) {
 	release := make(chan struct{})
 	second := newFakeSource(domain.KindZAI, func(ctx context.Context) (domain.Snapshot, error) {
 		<-release // hold the first refresh until the swap is asserted
+
 		return snapOf(domain.KindZAI), nil
 	})
 	m := NewManager(quietLogger())
@@ -448,6 +455,7 @@ func TestManagerStopCancelsInFlight(t *testing.T) {
 	src := newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
 		close(entered)
 		<-ctx.Done() // hang until cancelled
+
 		return nil, ctx.Err()
 	})
 	m := NewManager(quietLogger())
@@ -490,6 +498,7 @@ func TestManagerSubscribe(t *testing.T) {
 	waitFor(t, 1*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
+
 		return events[inst] >= 1 // completion only; the in-flight start is not notified
 	})
 

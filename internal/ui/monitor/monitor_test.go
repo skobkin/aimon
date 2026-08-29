@@ -121,6 +121,7 @@ type countingCtrl struct {
 
 func (c *countingCtrl) States() map[domain.InstanceID]domain.Runtime {
 	c.statesReads++
+
 	return nil
 }
 
@@ -197,6 +198,7 @@ func (c *quotaCtrl) Instances() []config.SourceInstance {
 func (c *quotaCtrl) States() map[domain.InstanceID]domain.Runtime {
 	c.now = time.Now()
 	reset := c.now.Add(2 * time.Hour)
+
 	return map[domain.InstanceID]domain.Runtime{
 		"mm-1": {
 			Enabled:       true,
@@ -232,6 +234,7 @@ func flatten(t *testing.T, objs []fyne.CanvasObject) []fyne.CanvasObject {
 	for _, o := range objs {
 		walk(o)
 	}
+
 	return out
 }
 
@@ -333,6 +336,7 @@ func (c *hindsightCtrl) Instances() []config.SourceInstance {
 func (c *hindsightCtrl) States() map[domain.InstanceID]domain.Runtime {
 	c.now = time.Now()
 	lastWrite := c.now.Add(-3 * time.Minute)
+
 	return map[domain.InstanceID]domain.Runtime{
 		"hs-1": {
 			Enabled:       true,
@@ -465,6 +469,7 @@ func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	case *canvas.Text:
 		out = append(out, o.Text)
 	}
+
 	return out
 }
 
@@ -486,6 +491,7 @@ func buttonTexts(t *testing.T, obj fyne.CanvasObject) []string {
 			out = append(out, buttonTexts(t, child)...)
 		}
 	}
+
 	return out
 }
 
@@ -510,5 +516,6 @@ func findCanvasText(t *testing.T, obj fyne.CanvasObject, s string) *canvas.Text 
 			found = o
 		}
 	}
+
 	return found
 }

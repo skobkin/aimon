@@ -139,6 +139,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 			Detail:   "No API key or Management key configured",
 		}
 	}
+
 	return domain.OpenRouterSnapshot{
 		CollectedAt: time.Now(),
 		Key:         key,
@@ -175,6 +176,7 @@ func (a *Adapter) FetchKeyUsage(ctx context.Context) (*domain.OpenRouterKeyUsage
 	if serr != nil {
 		return nil, serr
 	}
+
 	return usage, nil
 }
 
@@ -206,6 +208,7 @@ func (a *Adapter) FetchAccountCredits(ctx context.Context) (*domain.OpenRouterAc
 	if cerr != nil {
 		return nil, cerr
 	}
+
 	return credits, nil
 }
 
@@ -218,6 +221,7 @@ func (a *Adapter) secret(ctx context.Context, account credentials.AccountID) (st
 		if token == "" {
 			return "", false, nil
 		}
+
 		return token, true, nil
 	}
 	if errors.Is(err, credentials.ErrNotFound) {
@@ -231,6 +235,7 @@ func (a *Adapter) secret(ctx context.Context, account credentials.AccountID) (st
 			Err:      stateErr,
 		}
 	}
+
 	return "", false, &source.Error{
 		Category: source.CatCredentials,
 		Detail:   "Keychain read failed",
@@ -254,12 +259,14 @@ func normalizeKeyData(d *keyData, log *slog.Logger) (*domain.OpenRouterKeyUsage,
 	switch {
 	case d.IsManagementKey != nil && *d.IsManagementKey:
 		log.Warn("openrouter: api-key slot holds a management key")
+
 		return nil, &source.Error{
 			Category: source.CatCredentials,
 			Detail:   "The stored API key is a Management key, not an ordinary API key",
 		}
 	case d.IsProvisioningKey != nil && *d.IsProvisioningKey:
 		log.Warn("openrouter: api-key slot holds a provisioning key")
+
 		return nil, &source.Error{
 			Category: source.CatCredentials,
 			Detail:   "The stored API key is a provisioning key, not an ordinary API key",
@@ -275,6 +282,7 @@ func normalizeKeyData(d *keyData, log *slog.Logger) (*domain.OpenRouterKeyUsage,
 	for _, r := range usage {
 		if r.value == nil || !finite(*r.value) {
 			log.Warn("openrouter: key response missing required usage field", "field", r.field)
+
 			return nil, &source.Error{
 				Category: source.CatInvalidResponse,
 				Detail:   "key response is missing required usage values",
@@ -311,6 +319,7 @@ func normalizeKeyData(d *keyData, log *slog.Logger) (*domain.OpenRouterKeyUsage,
 	}
 
 	u.Limit = normalizeLimit(d.Limit, d.LimitRemaining, d.LimitReset, log)
+
 	return u, nil
 }
 
@@ -324,16 +333,19 @@ func normalizeLimit(limit, remaining *float64, reset *string, log *slog.Logger) 
 	}
 	if !finite(*limit) || *limit <= 0 {
 		log.Warn("openrouter: ignoring unusable key limit")
+
 		return nil
 	}
 	if remaining == nil {
 		// Without a remaining amount there is nothing trustworthy to draw
 		// the enforced counter from; period usage fields must NOT stand in.
 		log.Warn("openrouter: key limit reported without a remaining amount; dropping the limit graph")
+
 		return nil
 	}
 	if !finite(*remaining) {
 		log.Warn("openrouter: ignoring key limit with a non-finite remaining amount")
+
 		return nil
 	}
 	lim := *limit
@@ -341,6 +353,7 @@ func normalizeLimit(limit, remaining *float64, reset *string, log *slog.Logger) 
 	// Materially impossible states degrade instead of drawing nonsense.
 	if rem < -balanceNoiseEpsilon || rem > lim+balanceNoiseEpsilon {
 		log.Warn("openrouter: ignoring inconsistent key limit amounts")
+
 		return nil
 	}
 	// Float noise just outside [0, limit] clamps back into range.
@@ -349,6 +362,7 @@ func normalizeLimit(limit, remaining *float64, reset *string, log *slog.Logger) 
 	} else if rem > lim {
 		rem = lim
 	}
+
 	return &domain.OpenRouterLimit{
 		Amount:    lim,
 		Remaining: rem,
@@ -398,6 +412,7 @@ func normalizeCreditsData(d *creditsData) (*domain.OpenRouterAccountCredits, *so
 	if c.Balance < 0 && c.Balance >= -balanceNoiseEpsilon {
 		c.Balance = 0
 	}
+
 	return c, nil
 }
 

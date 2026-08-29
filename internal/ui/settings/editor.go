@@ -65,6 +65,7 @@ type credRow struct {
 func newCredRow(slot credentials.Slot, account credentials.AccountID) credRow {
 	entry := widget.NewPasswordEntry()
 	entry.PlaceHolder = fmt.Sprintf("%s (leave empty to keep the stored one)", slotDisplayName(slot))
+
 	return credRow{
 		slot:    slot,
 		account: account,
@@ -81,6 +82,7 @@ func slotDisplayName(slot credentials.Slot) string {
 	if slot == credentials.SlotManagementKey {
 		return "Management key"
 	}
+
 	return "API key"
 }
 
@@ -160,6 +162,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		account, err := credentials.AccountForInstance(inst.ID, slot)
 		if err != nil {
 			s.status.SetText(err.Error())
+
 			return
 		}
 		row := newCredRow(slot, account)
@@ -208,6 +211,7 @@ func (e *editor) credField(row *credRow) fyne.CanvasObject {
 			parts = append(parts, hintLabel)
 		}
 	}
+
 	return container.NewVBox(parts...)
 }
 
@@ -243,6 +247,7 @@ func (s *Settings) probeEditorKeychain(e *editor) {
 					row.entry.Disable()
 					row.remove.Disable()
 					row.state.SetText("")
+
 					continue
 				}
 				row.entry.Enable()
@@ -327,6 +332,7 @@ func (e *editor) collect() (config.SourceInstance, error) {
 	if errs := inst.Validate(); len(errs) > 0 {
 		return inst, fmt.Errorf("Invalid: %s", errs[0].Message)
 	}
+
 	return inst, nil
 }
 
@@ -336,6 +342,7 @@ func (e *editor) onTest() {
 	inst, err := e.collect()
 	if err != nil {
 		e.testLabel.SetText(err.Error() + " — fix the fields before testing")
+
 		return
 	}
 	typed := make(map[credentials.Slot]string, len(e.creds))
@@ -355,12 +362,14 @@ func (e *editor) onTest() {
 			fyne.Do(func() {
 				if derr != nil {
 					e.testLabel.SetText(testFailure(derr))
+
 					return
 				}
 				keep := e.gpu.Selected
 				e.setGPUOptions(gpus, "", keep)
 				e.testLabel.SetText(fmt.Sprintf("OK — %d GPU(s) discovered", len(gpus)))
 			})
+
 			return
 		}
 
@@ -384,10 +393,12 @@ func (e *editor) onSave() {
 	inst, err := e.collect()
 	if err != nil {
 		e.testLabel.SetText(err.Error())
+
 		return
 	}
 	if !e.s.mutBusy.CompareAndSwap(false, true) {
 		e.testLabel.SetText("Another change is still saving…")
+
 		return
 	}
 	e.saveBtn.Disable()
@@ -408,6 +419,7 @@ func (e *editor) onSave() {
 			cancel()
 			if err != nil {
 				e.finishSave("Keychain write failed: " + err.Error())
+
 				return
 			}
 			wroteAny = true
@@ -421,6 +433,7 @@ func (e *editor) onSave() {
 				cancel()
 			}
 			e.finishSave("Save failed: " + saveErr.Error())
+
 			return
 		}
 		e.finishSave("")
@@ -441,6 +454,7 @@ func (e *editor) finishSave(errText string) {
 			e.close()
 			e.s.status.SetText("")
 			e.s.refresh()
+
 			return
 		}
 		e.testLabel.SetText(errText)
@@ -492,6 +506,7 @@ func (e *editor) selectedGPUID() string {
 			return g.ID
 		}
 	}
+
 	return e.gpu.Selected
 }
 
@@ -499,6 +514,7 @@ func gpuOption(g domain.GPUInfo) string {
 	if g.Name != "" {
 		return fmt.Sprintf("%s (%s)", g.Name, g.ID)
 	}
+
 	return g.ID
 }
 
@@ -508,6 +524,7 @@ func optionForID(gpus []domain.GPUInfo, id string) (string, bool) {
 			return gpuOption(g), true
 		}
 	}
+
 	return "", false
 }
 
@@ -517,6 +534,7 @@ func containsOption(options []string, want string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -526,6 +544,7 @@ func intervalOptions(presets []time.Duration) []string {
 	for _, d := range presets {
 		opts = append(opts, config.IntervalLabel(d))
 	}
+
 	return opts
 }
 
@@ -535,6 +554,7 @@ func selectInterval(sel *widget.Select, d time.Duration, presets []time.Duration
 	for _, p := range presets {
 		if p == d {
 			sel.SetSelected(config.IntervalLabel(p))
+
 			return
 		}
 	}
@@ -548,6 +568,7 @@ func selectedInterval(sel *widget.Select, presets []time.Duration, def time.Dura
 			return p
 		}
 	}
+
 	return def
 }
 
@@ -560,5 +581,6 @@ func urlValidator(s string) error {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("must be an http(s) URL with a host")
 	}
+
 	return nil
 }

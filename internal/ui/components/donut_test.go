@@ -72,6 +72,7 @@ func donutTexts(t *testing.T, obj fyne.CanvasObject) []string {
 			out = append(out, donutTexts(t, child)...)
 		}
 	}
+
 	return out
 }
 

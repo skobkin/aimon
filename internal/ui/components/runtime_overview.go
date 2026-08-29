@@ -25,5 +25,6 @@ func NewRuntimeOverviewBody(vm ui.RuntimeOverviewVM) fyne.CanvasObject {
 			"+"+ui.FormatCount(float64(vm.MoreCount))+" more",
 			fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
 	}
+
 	return container.NewVBox(objs...)
 }

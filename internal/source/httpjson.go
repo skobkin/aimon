@@ -31,6 +31,7 @@ func GetJSON(ctx context.Context, client *http.Client, url string, header http.H
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		drainBody(resp.Body)
+
 		return statusError(resp.StatusCode)
 	}
 
@@ -42,8 +43,10 @@ func GetJSON(ctx context.Context, client *http.Client, url string, header http.H
 		// A truncated (oversized) body leaves the connection unread;
 		// drain what is left before the deferred close.
 		drainBody(resp.Body)
+
 		return &Error{Category: CatInvalidResponse, Detail: "malformed JSON", Err: err}
 	}
+
 	return nil
 }
 
@@ -66,6 +69,7 @@ func GetText(ctx context.Context, client *http.Client, url string, header http.H
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		drainBody(resp.Body)
+
 		return "", statusError(resp.StatusCode)
 	}
 
@@ -73,6 +77,7 @@ func GetText(ctx context.Context, client *http.Client, url string, header http.H
 	if err != nil {
 		return "", &Error{Category: CatConnection, Detail: "reading response body", Err: err}
 	}
+
 	return string(body), nil
 }
 

@@ -155,11 +155,13 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 			// Credit entries are window-assigned only after all of
 			// them are known (their order is reset-time dependent).
 			credits = append(credits, e)
+
 			continue
 		}
 		spec, known := fixedSpecs[e.Type]
 		if !known {
 			a.log.Debug("zai: skipping unknown limit type", "type", e.Type)
+
 			continue
 		}
 		if w, ok := a.limitWindow(e, spec); ok {
@@ -203,6 +205,7 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 			Err:      stateErr,
 		}
 	}
+
 	return "", &source.Error{
 		Category: source.CatCredentials,
 		Detail:   "Keychain read failed",
@@ -230,6 +233,7 @@ func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
 	for _, e := range sorted {
 		if resetKey(e) == math.MinInt64 {
 			a.log.Warn("zai: credit limit entry without nextResetTime; window ordering may be wrong")
+
 			break
 		}
 	}
@@ -238,8 +242,10 @@ func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
 		a.log.Debug("zai: single credit limit entry; treating it as the 5-hour window")
 		if w, ok := a.limitWindow(sorted[0], credit5hSpec); ok {
 			creditUnit(&w)
+
 			return []domain.QuotaWindow{w}
 		}
+
 		return nil
 	}
 	if extra := len(sorted) - 2; extra > 0 {
@@ -255,6 +261,7 @@ func (a *Adapter) creditWindows(entries []limitEntry) []domain.QuotaWindow {
 		creditUnit(&w)
 		out = append(out, w)
 	}
+
 	return out
 }
 
@@ -274,6 +281,7 @@ func resetKey(e limitEntry) int64 {
 	if ms, ok := toFloat(e.NextResetMs); ok && ms > 0 {
 		return int64(ms)
 	}
+
 	return math.MinInt64
 }
 
@@ -296,6 +304,7 @@ func (a *Adapter) limitWindow(e limitEntry, spec windowSpec) (domain.QuotaWindow
 		frac, err := domain.Fraction(rem / lim)
 		if err != nil {
 			a.log.Warn("zai: count fraction out of range; entry dropped", "type", e.Type)
+
 			return domain.QuotaWindow{}, false
 		}
 		w.RemainingFraction = frac
@@ -318,6 +327,7 @@ func (a *Adapter) limitWindow(e limitEntry, spec windowSpec) (domain.QuotaWindow
 		w.RemainingFraction = 1 - *used
 	default:
 		a.log.Warn("zai: limit entry without usable counts or percentage dropped", "type", e.Type)
+
 		return domain.QuotaWindow{}, false
 	}
 
@@ -326,6 +336,7 @@ func (a *Adapter) limitWindow(e limitEntry, spec windowSpec) (domain.QuotaWindow
 	if t, ok := epochMilli(e.NextResetMs); ok {
 		w.ResetAt = &t
 	}
+
 	return w, true
 }
 
@@ -341,9 +352,11 @@ func (a *Adapter) usedFractionFromPercentage(e limitEntry) *float64 {
 	// (percent). Anything else is garbage, not a rounding edge.
 	if math.IsNaN(pct) || pct < 0 || pct > 100 {
 		a.log.Warn("zai: out-of-range percentage ignored", "type", e.Type, "percentage", pct)
+
 		return nil
 	}
 	used := domain.Clamp01(a.resolveUsedFraction(e, pct))
+
 	return &used
 }
 
@@ -370,6 +383,7 @@ func (a *Adapter) resolveUsedFraction(e limitEntry, pct float64) float64 {
 	if pct > 1.0 {
 		return pct / 100
 	}
+
 	return pct
 }
 
@@ -381,6 +395,7 @@ func toFloat(v any) (float64, bool) {
 		return t, true
 	case string:
 		f, err := strconv.ParseFloat(t, 64)
+
 		return f, err == nil
 	default:
 		return 0, false
@@ -394,5 +409,6 @@ func epochMilli(v any) (time.Time, bool) {
 	if !ok || ms <= 0 {
 		return time.Time{}, false
 	}
+
 	return time.UnixMilli(int64(ms)), true
 }

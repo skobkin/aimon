@@ -38,6 +38,7 @@ func NewSensitiveValue(text string, hidden func() bool) *SensitiveValue {
 	}
 	v := &SensitiveValue{text: text, hidden: hidden}
 	v.ExtendBaseWidget(v)
+
 	return v
 }
 
@@ -60,6 +61,7 @@ func (v *SensitiveValue) DisplayText() string {
 	if v.Masked() {
 		return maskText
 	}
+
 	return v.text
 }
 
@@ -84,6 +86,7 @@ func (v *SensitiveValue) MouseMoved(*desktop.MouseEvent) {}
 // strings in MinSize, not from holding both in the tree.
 func (v *SensitiveValue) CreateRenderer() fyne.WidgetRenderer {
 	t := neutralText(v.DisplayText())
+
 	return &sensitiveValueRenderer{w: v, text: t}
 }
 
@@ -103,6 +106,7 @@ func (r *sensitiveValueRenderer) Destroy() {}
 func (r *sensitiveValueRenderer) MinSize() fyne.Size {
 	real := fyne.MeasureText(r.w.text, r.text.TextSize, r.text.TextStyle)
 	mask := fyne.MeasureText(maskText, r.text.TextSize, r.text.TextStyle)
+
 	return real.Max(mask)
 }
 

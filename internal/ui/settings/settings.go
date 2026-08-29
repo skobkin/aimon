@@ -143,6 +143,7 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 	// the next Show.
 	win.SetCloseIntercept(func() { s.win.Hide() })
 	s.win = win
+
 	return s
 }
 
@@ -187,6 +188,7 @@ func (s *Settings) refresh() {
 		if len(rows) == 0 {
 			objs = append(objs, widget.NewLabelWithStyle(cat.emptyMsg,
 				fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
+
 			continue
 		}
 		objs = append(objs, rows...)
@@ -228,6 +230,7 @@ func (s *Settings) row(inst config.SourceInstance, instances []config.SourceInst
 		widget.NewLabelWithStyle(kindName, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 	)
 	actions := container.NewHBox(up, down, edit, del)
+
 	return container.NewBorder(nil, nil, check, actions, title)
 }
 
@@ -249,6 +252,7 @@ func (s *Settings) chooseKind() {
 		for _, def := range all {
 			if def.DefaultName == kindSelect.Selected {
 				s.editDraft(def.Kind)
+
 				return
 			}
 		}
@@ -335,12 +339,14 @@ func (s *Settings) cleanupCredentials(inst config.SourceInstance) {
 func (s *Settings) mutate(candidate func() ([]config.SourceInstance, error), onSuccess func()) {
 	if !s.mutBusy.CompareAndSwap(false, true) {
 		s.status.SetText("Another change is still saving…")
+
 		return
 	}
 	list, err := candidate()
 	if err != nil {
 		s.mutBusy.Store(false)
 		s.status.SetText(err.Error())
+
 		return
 	}
 	s.setMutating(true)

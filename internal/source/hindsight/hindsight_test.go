@@ -40,16 +40,19 @@ func (s *memStore) Get(ctx context.Context, id credentials.AccountID) (string, e
 	if s.notFound || s.secret == "" {
 		return "", credentials.ErrNotFound
 	}
+
 	return s.secret, nil
 }
 
 func (s *memStore) Set(ctx context.Context, id credentials.AccountID, secret string) error {
 	s.secret = secret
+
 	return nil
 }
 
 func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	s.secret = ""
+
 	return nil
 }
 
@@ -123,10 +126,12 @@ func (s *hindsightServer) handler() http.Handler {
 				page, ok := pages[r.URL.Query().Get("offset")]
 				if !ok {
 					http.NotFound(w, r)
+
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.Write([]byte(page))
+
 				return
 			}
 			s.serve(w, s.banksCode, body)
@@ -149,6 +154,7 @@ func (s *hindsightServer) uris() []string {
 	for i, r := range s.requests {
 		out[i] = r.uri
 	}
+
 	return out
 }
 
@@ -159,6 +165,7 @@ func (s *hindsightServer) auths() []string {
 	for i, r := range s.requests {
 		out[i] = r.auth
 	}
+
 	return out
 }
 
@@ -248,6 +255,7 @@ func bankItem(facts int64, name string) string {
 func newAdapter(serverURL string, store credentials.Store, clk *fakeClock) *Adapter {
 	a := New(serverURL, testAccount, store, &http.Client{}, testLogger())
 	a.now = clk.now
+
 	return a
 }
 
@@ -261,6 +269,7 @@ func mustRefresh(t *testing.T, a *Adapter) domain.HindsightSnapshot {
 	if !ok {
 		t.Fatalf("snapshot type = %T, want HindsightSnapshot", snap)
 	}
+
 	return hs
 }
 
@@ -273,6 +282,7 @@ func requireSourceError(t *testing.T, err error, want source.Category) *source.E
 	if serr.Category != want {
 		t.Fatalf("category = %q, want %q (detail: %s)", serr.Category, want, serr.Detail)
 	}
+
 	return serr
 }
 
@@ -985,6 +995,7 @@ func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.records = append(h.records, r)
+
 	return nil
 }
 
@@ -1000,6 +1011,7 @@ func (h *captureHandler) warns() int {
 			n++
 		}
 	}
+
 	return n
 }
 

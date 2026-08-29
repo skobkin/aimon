@@ -271,6 +271,7 @@ func BuildOverview(instances []config.SourceInstance, states map[domain.Instance
 		RemoteCards: buildOverviewCards(instances, domain.CategoryRemote, states, now),
 	}
 	vm.NothingEnabled = len(vm.LocalCards) == 0 && len(vm.RemoteCards) == 0
+
 	return vm
 }
 
@@ -286,6 +287,7 @@ func buildOverviewCards(instances []config.SourceInstance, category domain.Categ
 		}
 		cards = append(cards, BuildOverviewCard(inst, rt, now))
 	}
+
 	return cards
 }
 
@@ -311,6 +313,7 @@ func buildCards(instances []config.SourceInstance, category domain.Category, sta
 		}
 		cards = append(cards, BuildCard(inst, rt, now, true))
 	}
+
 	return cards
 }
 
@@ -376,6 +379,7 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, det
 	case domain.HindsightSnapshot:
 		card.Service = BuildServiceVM(snap, now)
 	}
+
 	return card
 }
 
@@ -402,6 +406,7 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.T
 	case domain.HindsightSnapshot:
 		card.Service = BuildServiceOverviewVM(snap)
 	}
+
 	return card
 }
 
@@ -430,6 +435,7 @@ func BuildMetricsOverview(snap domain.GPUSnapshot) MetricsOverviewVM {
 	}
 
 	vm.HasData = vm.GPU.Text != "" || vm.VRAM.Text != "" || vm.Temp.Value != ""
+
 	return vm
 }
 
@@ -438,10 +444,10 @@ func BuildRuntimeOverview(snap domain.LlamaSwapSnapshot) RuntimeOverviewVM {
 	n := len(snap.RunningModels)
 	vm := RuntimeOverviewVM{HasData: true}
 
-	switch {
-	case n == 0:
+	switch n {
+	case 0:
 		vm.Summary = "No models running"
-	case n == 1:
+	case 1:
 		vm.Summary = "1 model running"
 	default:
 		vm.Summary = fmt.Sprintf("%d models running", n)
@@ -458,6 +464,7 @@ func BuildRuntimeOverview(snap domain.LlamaSwapSnapshot) RuntimeOverviewVM {
 		}
 	}
 	vm.MoreCount = max(0, n-2)
+
 	return vm
 }
 
@@ -476,6 +483,7 @@ func BuildQuotaOverview(snap domain.QuotaSnapshot, now time.Time) QuotaOverviewV
 		})
 	}
 	vm.HasData = len(vm.Windows) > 0
+
 	return vm
 }
 
@@ -515,6 +523,7 @@ func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 	if len(sorted) > 2 {
 		sorted = sorted[:2]
 	}
+
 	return sorted
 }
 
@@ -526,6 +535,7 @@ func formatPctOnly(fraction float64) string {
 	if pct == 0 && fraction > 0 {
 		return "<1%"
 	}
+
 	return fmt.Sprintf("%d%%", pct)
 }
 
@@ -545,6 +555,7 @@ func FreshnessText(rt domain.Runtime, now time.Time) string {
 		if rt.LastSuccessAt.IsZero() {
 			return ""
 		}
+
 		return FormatAge(rt.LastSuccessAt, now)
 	}
 }
@@ -558,6 +569,7 @@ func FooterText(rt domain.Runtime) string {
 			return "Last refresh failed: " + msg
 		}
 	}
+
 	return ""
 }
 
@@ -566,6 +578,7 @@ func userMessage(err error) string {
 	if errors.As(err, &serr) {
 		return serr.UserMessage()
 	}
+
 	return ""
 }
 
@@ -587,6 +600,7 @@ func BuildGPUVM(snap domain.GPUSnapshot, detail bool) GPUVM {
 			{Label: "MCLK", Value: dashWhenNil(snap.MCLKMHz, FormatMHz)},
 		}
 		vm.Detail = rows
+
 		return vm
 	}
 
@@ -599,6 +613,7 @@ func BuildGPUVM(snap domain.GPUSnapshot, detail bool) GPUVM {
 	if snap.TemperatureC != nil {
 		vm.Overview = append(vm.Overview, MetricRowVM{Label: "Temp", Value: FormatTemp(snap.TemperatureC), Level: tempLevel(*snap.TemperatureC)})
 	}
+
 	return vm
 }
 
@@ -641,6 +656,7 @@ func metricLevel(v *float64, level func(float64) MetricLevel) MetricLevel {
 	if v == nil {
 		return MetricNeutral
 	}
+
 	return level(*v)
 }
 
@@ -650,6 +666,7 @@ func bytePairLevel(used, total *uint64) MetricLevel {
 	if used == nil || total == nil || *total == 0 {
 		return MetricNeutral
 	}
+
 	return loadLevel(float64(*used) / float64(*total))
 }
 
@@ -669,6 +686,7 @@ func BuildSwapVM(snap domain.LlamaSwapSnapshot, detail bool) SwapVM {
 		vm.ModelLines = lines[:overviewSwapLines]
 		vm.MoreCount = len(lines) - overviewSwapLines
 	}
+
 	return vm
 }
 
@@ -690,6 +708,7 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM
 		}
 		vm.Windows = append(vm.Windows, row)
 	}
+
 	return vm
 }
 
@@ -707,6 +726,7 @@ func formatCounts(w domain.QuotaWindow) string {
 	if w.Unit != "" {
 		s += " " + w.Unit
 	}
+
 	return s
 }
 
@@ -737,6 +757,7 @@ func BuildSpendVM(snap domain.OpenRouterSnapshot, detail bool) SpendVM {
 		}
 	}
 	vm.HasData = snap.Key != nil || snap.Account != nil
+
 	return vm
 }
 
@@ -750,6 +771,7 @@ func BuildSpendOverview(snap domain.OpenRouterSnapshot) SpendOverviewVM {
 		ov.Balance = &balance
 	}
 	ov.HasData = detail.HasData
+
 	return ov
 }
 
@@ -770,6 +792,7 @@ func spendLimitVM(l *domain.OpenRouterLimit, detail bool) *SpendLimitVM {
 	if detail {
 		vm.RawText = FormatMoney(max(0, used)) + " / " + FormatMoney(l.Amount)
 	}
+
 	return vm
 }
 
@@ -800,6 +823,7 @@ func dashWhenNil(v *float64, format func(*float64) string) string {
 	if v == nil {
 		return "—"
 	}
+
 	return format(v)
 }
 
@@ -815,6 +839,7 @@ func BuildServiceVM(snap domain.HindsightSnapshot, now time.Time) ServiceVM {
 	vm.Activity = activityRows(snap.Activity, snap.ActivitySeen)
 	vm.Queue = queueRows(snap.Queue)
 	vm.Runtime = runtimeRows(snap)
+
 	return vm
 }
 
@@ -834,6 +859,7 @@ func serviceRows(s domain.HindsightService) []MetricRowVM {
 	if s.DBAcquireMS != nil {
 		rows = append(rows, MetricRowVM{Label: "DB acquire", Value: fmt.Sprintf("%.1f ms", *s.DBAcquireMS)})
 	}
+
 	return rows
 }
 
@@ -861,6 +887,7 @@ func memoryRows(m *domain.HindsightMemory, now time.Time) []AgeRowVM {
 		{Label: "Last write", Value: FormatAgePtr(m.LastWriteAt, now), At: m.LastWriteAt},
 		{Label: "Last document", Value: FormatAgePtr(m.LastDocumentAt, now), At: m.LastDocumentAt},
 	}
+
 	return rows
 }
 
@@ -884,6 +911,7 @@ func activityRows(a domain.HindsightActivity, seen domain.HindsightActivitySeen)
 	add(seen.LLMCalls, "LLM calls", a.LLMCallsPerMin)
 	add(seen.InputTokens, "Input tokens", a.InputTokensPerMin)
 	add(seen.OutputTokens, "Output tokens", a.OutputTokensPerMin)
+
 	return rows
 }
 
@@ -910,6 +938,7 @@ func queueRows(q *domain.HindsightQueue) []MetricRowVM {
 	if q.ConsolidationFailed != nil {
 		rows = append(rows, MetricRowVM{Label: "Consolidation failed", Value: FormatCount(*q.ConsolidationFailed), Level: failureLevel(*q.ConsolidationFailed)})
 	}
+
 	return rows
 }
 
@@ -918,6 +947,7 @@ func failureLevel(v float64) MetricLevel {
 	if v > 0 {
 		return MetricCritical
 	}
+
 	return MetricNeutral
 }
 
@@ -942,6 +972,7 @@ func runtimeRows(snap domain.HindsightSnapshot) []MetricRowVM {
 	if snap.Activity.HTTP5xxPercent != nil {
 		rows = append(rows, MetricRowVM{Label: "HTTP 5xx", Value: FormatPct1(snap.Activity.HTTP5xxPercent), Level: positiveLevel(*snap.Activity.HTTP5xxPercent)})
 	}
+
 	return rows
 }
 
@@ -951,6 +982,7 @@ func preferredDBWaiting(snap domain.HindsightSnapshot) *float64 {
 	if snap.Service.DBPoolWaiting != nil {
 		return snap.Service.DBPoolWaiting
 	}
+
 	return snap.Runtime.DBPoolWaiting
 }
 
@@ -969,6 +1001,7 @@ func dbPoolActive(size, idle, poolMax *float64) (active, max float64, ok bool) {
 	} else {
 		max = math.NaN()
 	}
+
 	return active, max, true
 }
 
@@ -977,6 +1010,7 @@ func positiveLevel(v float64) MetricLevel {
 	if v > 0 {
 		return MetricWarning
 	}
+
 	return MetricNeutral
 }
 
@@ -987,6 +1021,7 @@ func titleFirst(s string) string {
 		return s
 	}
 	r := []rune(s)
+
 	return strings.ToUpper(string(r[0])) + string(r[1:])
 }
 
@@ -1024,6 +1059,7 @@ func BuildServiceOverviewVM(snap domain.HindsightSnapshot) ServiceOverviewVM {
 	}
 
 	vm.Rows = append(vm.Rows, overviewBacklogRows(snap)...)
+
 	return vm
 }
 
@@ -1061,6 +1097,7 @@ func overviewBacklogRows(snap domain.HindsightSnapshot) []MetricRowVM {
 	if waiting != nil {
 		rows = append(rows, MetricRowVM{Label: "Waiting", Value: FormatCount(*waiting), Level: positiveLevel(*waiting)})
 	}
+
 	return rows
 }
 
@@ -1068,6 +1105,7 @@ func derefOrZero(v *float64) float64 {
 	if v == nil {
 		return 0
 	}
+
 	return *v
 }
 
@@ -1088,6 +1126,7 @@ func FormatRatePerMin(v *float64) string {
 		if *v == math.Trunc(*v) {
 			return fmt.Sprintf("%.0f/m", *v)
 		}
+
 		return fmt.Sprintf("%.1f/m", *v)
 	default:
 		return FormatCount(*v) + "/m"
@@ -1099,6 +1138,7 @@ func FormatPct1(v *float64) string {
 	if v == nil {
 		return "—"
 	}
+
 	return fmt.Sprintf("%.1f%%", *v)
 }
 
@@ -1123,6 +1163,7 @@ func FormatAgePtr(t *time.Time, now time.Time) string {
 	if t == nil {
 		return "—"
 	}
+
 	return FormatAge(*t, now)
 }
 
@@ -1132,6 +1173,7 @@ func formatBytePair(used, total *uint64) string {
 	if used == nil || total == nil {
 		return ""
 	}
+
 	return FormatBytesGiB(*used) + " / " + FormatBytesGiB(*total) + " GiB"
 }
 
@@ -1139,6 +1181,7 @@ func dashIfEmpty(s string) string {
 	if s == "" {
 		return "—"
 	}
+
 	return s
 }
 
@@ -1223,6 +1266,7 @@ func FormatMoney(v float64) string {
 	if s == "0.00" {
 		return "$0.00"
 	}
+
 	return neg + "$" + s
 }
 
@@ -1251,10 +1295,12 @@ func FormatResetCountdown(resetAt *time.Time, now time.Time) string {
 	case d < 24*time.Hour:
 		h := int(d.Hours())
 		m := int(d.Minutes()) % 60
+
 		return fmt.Sprintf("%dh%dm", h, m)
 	default:
 		days := int(d.Hours() / 24)
 		h := int(d.Hours()) % 24
+
 		return fmt.Sprintf("%dd%dh", days, h)
 	}
 }

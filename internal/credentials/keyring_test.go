@@ -31,6 +31,7 @@ func testAccount() AccountID {
 	if err != nil {
 		panic(err)
 	}
+
 	return acc
 }
 
@@ -42,6 +43,7 @@ func (f *fakeKeyring) get(service, user string) (string, error) {
 	if !ok {
 		return "", keyring.ErrNotFound
 	}
+
 	return v, nil
 }
 
@@ -50,6 +52,7 @@ func (f *fakeKeyring) set(service, user, password string) error {
 		return f.setErr
 	}
 	f.stored[service+"/"+user] = password
+
 	return nil
 }
 
@@ -58,6 +61,7 @@ func (f *fakeKeyring) delete(service, user string) error {
 		return f.deleteErr
 	}
 	delete(f.stored, service+"/"+user)
+
 	return nil
 }
 
@@ -128,6 +132,7 @@ func TestStateClassification(t *testing.T) {
 		var se *StateError
 		if !errors.As(err, &se) {
 			t.Errorf("%s: expected *StateError, got %T %v", tc.name, err, err)
+
 			continue
 		}
 		if se.State != tc.want {
@@ -174,6 +179,7 @@ func TestStatusProbe(t *testing.T) {
 // blockingGet models a wedged Secret Service: the call never returns.
 func blockingGet(service, user string) (string, error) {
 	<-make(chan struct{}) // blocks forever
+
 	return "", nil
 }
 

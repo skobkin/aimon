@@ -40,6 +40,7 @@ func (s *memStore) Get(ctx context.Context, id credentials.AccountID) (string, e
 	if s.notFound || s.secret == "" {
 		return "", credentials.ErrNotFound
 	}
+
 	return s.secret, nil
 }
 
@@ -47,6 +48,7 @@ func (s *memStore) Set(ctx context.Context, id credentials.AccountID, secret str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = secret
+
 	return nil
 }
 
@@ -54,6 +56,7 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = ""
+
 	return nil
 }
 
@@ -93,6 +96,7 @@ func (s *quotaServer) handler() http.Handler {
 func (s *quotaServer) headers() (auth, langs []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return append([]string(nil), s.auth...), append([]string(nil), s.langs...)
 }
 
@@ -106,6 +110,7 @@ func asSourceError(t *testing.T, err error) *source.Error {
 	if !errors.As(err, &serr) {
 		t.Fatalf("expected *source.Error, got %T: %v", err, err)
 	}
+
 	return serr
 }
 
@@ -122,6 +127,7 @@ func refresh(t *testing.T, a *Adapter) domain.QuotaSnapshot {
 	if q.Kind != domain.KindZAI {
 		t.Errorf("source = %q, want zai", q.Kind)
 	}
+
 	return q
 }
 
@@ -131,6 +137,7 @@ func windowByID(q domain.QuotaSnapshot, id string) *domain.QuotaWindow {
 			return &q.Windows[i]
 		}
 	}
+
 	return nil
 }
 

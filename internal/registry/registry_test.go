@@ -160,6 +160,7 @@ func inst(id, name string, kind domain.SourceKind, settings config.ProviderSetti
 	case config.OpenRouterSettings:
 		i.OpenRouter = &s
 	}
+
 	return i
 }
 
@@ -330,6 +331,7 @@ func (s *hindsightTestServer) handler() http.Handler {
 func (s *hindsightTestServer) uris() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return append([]string(nil), s.bankURIs...)
 }
 
@@ -461,12 +463,14 @@ func (t *blockingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	t.mu.Lock()
 	t.attempts++
 	t.mu.Unlock()
+
 	return nil, errors.New("unexpected HTTP request")
 }
 
 func (t *blockingTransport) count() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.attempts
 }
 

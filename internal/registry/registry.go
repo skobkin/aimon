@@ -112,6 +112,7 @@ var definitions = []Definition{
 			if s == nil {
 				return nil, missingSettings(inst)
 			}
+
 			return amdgpuweb.New(s.BaseURL, s.SelectedGPUID, deps.Client, deps.Log), nil
 		},
 		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
@@ -120,12 +121,14 @@ var definitions = []Definition{
 				return failedTestReport(missingSettings(inst))
 			}
 			_, err := amdgpuweb.New(s.BaseURL, s.SelectedGPUID, deps.Client, deps.Log).Discover(ctx)
+
 			return singleTestReport(err)
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.AMDGPUWeb == nil {
 				return "", false
 			}
+
 			return inst.AMDGPUWeb.BaseURL, true
 		},
 	},
@@ -161,12 +164,14 @@ var definitions = []Definition{
 			if err != nil {
 				return failedTestReport(err)
 			}
+
 			return singleTestReport(llamaswap.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log).Test(ctx))
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.LlamaSwap == nil {
 				return "", false
 			}
+
 			return inst.LlamaSwap.BaseURL + "/ui", true
 		},
 	},
@@ -203,6 +208,7 @@ var definitions = []Definition{
 			if inst.Hindsight == nil || inst.Hindsight.WebUIURL == "" {
 				return "", false
 			}
+
 			return inst.Hindsight.WebUIURL, true
 		},
 	},
@@ -228,6 +234,7 @@ var definitions = []Definition{
 			if deps.Creds == nil {
 				return nil, fmt.Errorf("build %s instance %s: a credential store is required", inst.Kind, inst.ID)
 			}
+
 			return minimax.New(account, deps.Creds, deps.Client, deps.Log), nil
 		},
 		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
@@ -242,12 +249,14 @@ var definitions = []Definition{
 				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
 			}
 			_, err = minimax.New(account, deps.Creds, deps.Client, deps.Log).Refresh(ctx)
+
 			return singleTestReport(err)
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.MiniMax == nil {
 				return "", false
 			}
+
 			return MiniMaxConsoleURL, true
 		},
 	},
@@ -274,6 +283,7 @@ var definitions = []Definition{
 			if deps.Creds == nil {
 				return nil, fmt.Errorf("build %s instance %s: a credential store is required", inst.Kind, inst.ID)
 			}
+
 			return zai.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log), nil
 		},
 		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
@@ -289,12 +299,14 @@ var definitions = []Definition{
 				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
 			}
 			_, err = zai.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log).Refresh(ctx)
+
 			return singleTestReport(err)
 		},
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.ZAI == nil {
 				return "", false
 			}
+
 			return ZAIUsageURL, true
 		},
 	},
@@ -347,11 +359,13 @@ var definitions = []Definition{
 				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
 			}
 			a := openrouter.New(apiAccount, mgmtAccount, deps.Creds, deps.Client, deps.Log)
+
 			return capabilityTestReport(ctx, []namedCapability{
 				{
 					label: "API key",
 					run: func(ctx context.Context) (present bool, err error) {
 						key, err := a.FetchKeyUsage(ctx)
+
 						return key != nil, err
 					},
 				},
@@ -359,6 +373,7 @@ var definitions = []Definition{
 					label: "Management key",
 					run: func(ctx context.Context) (present bool, err error) {
 						account, err := a.FetchAccountCredits(ctx)
+
 						return account != nil, err
 					},
 				},
@@ -368,6 +383,7 @@ var definitions = []Definition{
 			if inst.OpenRouter == nil {
 				return "", false
 			}
+
 			return OpenRouterActivityURL, true
 		},
 	},
@@ -384,6 +400,7 @@ func openRouterAccounts(inst config.SourceInstance) (apiAccount, mgmtAccount cre
 	if err != nil {
 		return "", "", err
 	}
+
 	return apiAccount, mgmtAccount, nil
 }
 
@@ -392,6 +409,7 @@ func openRouterAccounts(inst config.SourceInstance) (apiAccount, mgmtAccount cre
 func All() []Definition {
 	out := make([]Definition, len(definitions))
 	copy(out, definitions)
+
 	return out
 }
 
@@ -402,6 +420,7 @@ func Get(kind domain.SourceKind) (Definition, bool) {
 			return d, true
 		}
 	}
+
 	return Definition{}, false
 }
 
@@ -426,6 +445,7 @@ func WebLinks(instances []config.SourceInstance) []Link {
 			links = append(links, Link{Name: inst.Name, URL: url})
 		}
 	}
+
 	return links
 }
 
@@ -477,6 +497,7 @@ func capabilityTestReport(ctx context.Context, checks []namedCapability) TestRep
 		}
 	}
 	report.OK = tested > 0 && failed == 0
+
 	return report
 }
 
@@ -516,6 +537,7 @@ func hindsightTestReport(ctx context.Context, inst config.SourceInstance, deps D
 	if out.BanksErr != nil {
 		banks = "Banks: " + sanitizedReason(out.BanksErr)
 	}
+
 	return TestReport{
 		Lines: []string{health, liveness, metrics, banks},
 		OK:    out.OK(),
@@ -528,6 +550,7 @@ func singleTestReport(err error) TestReport {
 	if err != nil {
 		return TestReport{Lines: []string{"Failed: " + err.Error()}}
 	}
+
 	return TestReport{Lines: []string{"OK"}, OK: true}
 }
 
@@ -544,5 +567,6 @@ func sanitizedReason(err error) string {
 	if errors.As(err, &serr) {
 		return serr.UserMessage()
 	}
+
 	return err.Error()
 }

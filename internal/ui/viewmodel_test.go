@@ -38,6 +38,7 @@ func inst(id, name string, kind domain.SourceKind, enabled bool) config.SourceIn
 	case domain.KindHindsight:
 		i.Hindsight = &config.HindsightSettings{BaseURL: "http://127.0.0.1:8888"}
 	}
+
 	return i
 }
 
@@ -283,6 +284,7 @@ func TestBuildGPUVMMetricLevels(t *testing.T) {
 		}
 		if !found && c.want != MetricNeutral {
 			t.Errorf("%s: no leveled row in %+v", c.name, vm.Detail)
+
 			continue
 		}
 		if found && got != c.want {

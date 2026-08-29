@@ -13,6 +13,7 @@ import (
 
 func serviceTestSnap(now time.Time) ui.ServiceVM {
 	write := now.Add(-3 * time.Minute)
+
 	return ui.ServiceVM{
 		HasData: true,
 		Service: []ui.MetricRowVM{
@@ -42,6 +43,7 @@ func collectTexts(t *testing.T, obj fyne.CanvasObject) []string {
 			out = append(out, txt.Text)
 		}
 	})
+
 	return out
 }
 
@@ -55,6 +57,7 @@ func hasSection(t *testing.T, obj fyne.CanvasObject, title string) bool {
 			}
 		}
 	})
+
 	return found
 }
 
@@ -92,6 +95,7 @@ func contains(list []string, want string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 

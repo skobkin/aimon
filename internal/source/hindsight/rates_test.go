@@ -73,6 +73,7 @@ func TestPercentOf(t *testing.T) {
 			if got != nil {
 				t.Errorf("%s: percentOf = %v, want nil", tc.name, *got)
 			}
+
 			continue
 		}
 		if got == nil || *got != *tc.want {

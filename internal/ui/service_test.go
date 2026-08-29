@@ -16,6 +16,7 @@ import (
 func hindsightSnap() domain.HindsightSnapshot {
 	write := now.Add(-3 * time.Minute)
 	doc := now.Add(-6 * time.Minute)
+
 	return domain.HindsightSnapshot{
 		CollectedAt: now.Add(-4 * time.Second),
 		Service: domain.HindsightService{
@@ -66,6 +67,7 @@ func findRow(t *testing.T, rows []MetricRowVM, label string) MetricRowVM {
 		}
 	}
 	t.Fatalf("no %q row in %+v", label, rows)
+
 	return MetricRowVM{}
 }
 
@@ -77,6 +79,7 @@ func findAgeRow(t *testing.T, rows []AgeRowVM, label string) AgeRowVM {
 		}
 	}
 	t.Fatalf("no %q row in %+v", label, rows)
+
 	return AgeRowVM{}
 }
 

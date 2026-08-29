@@ -15,6 +15,7 @@ import (
 func neutralText(s string) *canvas.Text {
 	t := canvas.NewText(s, foregroundColor())
 	t.TextSize = bodyTextSize()
+
 	return t
 }
 
@@ -28,6 +29,7 @@ func NewMoneyRow(vm ui.MoneyMetricVM, hidden func() bool) fyne.CanvasObject {
 	} else {
 		value = neutralText(vm.Text)
 	}
+
 	return container.NewHBox(
 		widget.NewLabel(vm.Label),
 		layout.NewSpacer(),
@@ -53,6 +55,7 @@ func NewSpendOverviewBody(vm ui.SpendOverviewVM, hidden func() bool) fyne.Canvas
 	if vm.Balance != nil {
 		body.Add(NewMoneyRow(*vm.Balance, hidden))
 	}
+
 	return body
 }
 
@@ -78,6 +81,7 @@ func NewSpendDetailBody(vm ui.SpendVM, hidden func() bool) fyne.CanvasObject {
 			body.Add(NewMoneyRow(row, hidden))
 		}
 	}
+
 	return body
 }
 
@@ -97,6 +101,7 @@ func spendLimitBlock(l *ui.SpendLimitVM, detail bool) fyne.CanvasObject {
 	// Limit rows never carry a reset countdown, so the tick refresher is
 	// always nil here.
 	rowObj, _ := NewQuotaRow(row)
+
 	return rowObj
 }
 

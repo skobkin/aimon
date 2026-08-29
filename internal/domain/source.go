@@ -98,10 +98,12 @@ func (r Runtime) DeriveState() State {
 		if r.LastError != nil {
 			return StateUnavailable
 		}
+
 		return StateLoading
 	}
 	if r.LastError != nil {
 		return StateStale
 	}
+
 	return StateHealthy
 }

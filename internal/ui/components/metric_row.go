@@ -18,6 +18,7 @@ import (
 func NewMetricRow(row ui.MetricRowVM) fyne.CanvasObject {
 	value := canvas.NewText(row.Value, LevelColor(row.Level))
 	value.TextSize = bodyTextSize()
+
 	return container.NewHBox(
 		widget.NewLabel(row.Label),
 		layout.NewSpacer(),
@@ -32,5 +33,6 @@ func bodyTextSize() float32 {
 	if fyne.CurrentApp() == nil {
 		return 14
 	}
+
 	return theme.Size(theme.SizeNameText)
 }

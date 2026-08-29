@@ -222,6 +222,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 	a.baseline = &counters
 	a.baselineAt = now
+
 	return snap, nil
 }
 
@@ -258,6 +259,7 @@ func (a *Adapter) Test(ctx context.Context) TestOutcome {
 	token, err := a.token(ctx)
 	if err != nil {
 		out.Err = err
+
 		return out
 	}
 	header := authHeader(token)
@@ -279,6 +281,7 @@ func (a *Adapter) Test(ctx context.Context) TestOutcome {
 	} else {
 		out.BanksTotal = banks.agg.Count
 	}
+
 	return out
 }
 
@@ -296,6 +299,7 @@ func (a *Adapter) fetchMetrics(ctx context.Context, header http.Header) (string,
 	if err != nil {
 		return "", err
 	}
+
 	return body, nil
 }
 
@@ -314,6 +318,7 @@ func (a *Adapter) fetchHealth(ctx context.Context, header http.Header) (domain.H
 			Detail:   "health response missing status",
 		}
 	}
+
 	return domain.HindsightService{
 		Status:        p.Status,
 		Database:      p.Database,
@@ -339,6 +344,7 @@ func (a *Adapter) fetchLive(ctx context.Context, header http.Header) (live, erro
 	if p.UptimeSeconds != nil && *p.UptimeSeconds > 0 {
 		uptime = time.Duration(*p.UptimeSeconds * float64(time.Second))
 	}
+
 	return live{Version: p.Version, uptime: uptime}, nil
 }
 
@@ -369,6 +375,7 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 			Err:      stateErr,
 		}
 	}
+
 	return "", &source.Error{
 		Category: source.CatCredentials,
 		Detail:   "Keychain read failed",
@@ -384,5 +391,6 @@ func authHeader(token string) http.Header {
 	}
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
+
 	return h
 }

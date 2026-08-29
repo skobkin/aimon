@@ -53,6 +53,7 @@ func validateURL(source, raw string) []ValidationError {
 	if raw == "" {
 		return []ValidationError{{Source: source, Field: "URL", Message: "must not be empty"}}
 	}
+
 	return validateURLField(source, "URL", raw)
 }
 
@@ -73,6 +74,7 @@ func validateURLField(source, field, raw string) []ValidationError {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return []ValidationError{{Source: source, Field: field, Message: "scheme must be http or https"}}
 	}
+
 	return nil
 }
 
@@ -82,6 +84,7 @@ func validateInterval(source string, d time.Duration, presets []time.Duration) [
 			return nil
 		}
 	}
+
 	return []ValidationError{{Source: source, Field: "Poll interval", Message: fmt.Sprintf("must be one of %s", intervalList(presets))}}
 }
 
@@ -90,6 +93,7 @@ func intervalList(presets []time.Duration) string {
 	for i, p := range presets {
 		parts[i] = IntervalLabel(p)
 	}
+
 	return strings.Join(parts, ", ")
 }
 
@@ -100,5 +104,6 @@ func IntervalLabel(d time.Duration) string {
 	if d >= time.Minute && d%time.Minute == 0 {
 		return fmt.Sprintf("%dm", int(d/time.Minute))
 	}
+
 	return d.String()
 }

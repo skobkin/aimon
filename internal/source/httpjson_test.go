@@ -21,6 +21,7 @@ func (l *countingListener) Accept() (net.Conn, error) {
 	if err == nil {
 		l.accepts.Add(1)
 	}
+
 	return c, err
 }
 
@@ -39,6 +40,7 @@ func newCountingServer(t *testing.T, h http.Handler) (*httptest.Server, *atomic.
 	}
 	srv.Start()
 	t.Cleanup(srv.Close)
+
 	return srv, accepts
 }
 

@@ -87,6 +87,7 @@ func (a *Adapter) Discover(ctx context.Context) ([]domain.GPUInfo, error) {
 	a.mu.Lock()
 	a.discovered = gpus
 	a.mu.Unlock()
+
 	return gpus, nil
 }
 
@@ -116,6 +117,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 
 	m := env.Metrics
+
 	return domain.GPUSnapshot{
 		CollectedAt: time.Now(),
 		DeviceID:    gpu.ID,
@@ -152,6 +154,7 @@ func (a *Adapter) resolveTarget(ctx context.Context) (domain.GPUInfo, error) {
 		if g := findGPU(gpus, a.selectedID); g.ID != "" {
 			return g, nil
 		}
+
 		return domain.GPUInfo{}, &source.Error{
 			Category: source.CatConfig,
 			Detail:   "Selected GPU not found",
@@ -175,6 +178,7 @@ func (a *Adapter) resolveTarget(ctx context.Context) (domain.GPUInfo, error) {
 				Detail:   "No GPUs discovered",
 			}
 		}
+
 		return domain.GPUInfo{}, multipleGPUsError(len(gpus))
 	case 1:
 		return gpus[0], nil
@@ -196,12 +200,14 @@ func (a *Adapter) fetchMetrics(ctx context.Context, gpuID string) (metricsEnvelo
 	if err := source.GetJSON(ctx, a.client, url, nil, &env); err != nil {
 		return metricsEnvelope{}, err
 	}
+
 	return env, nil
 }
 
 func (a *Adapter) cached() []domain.GPUInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	return append([]domain.GPUInfo(nil), a.discovered...)
 }
 
@@ -217,5 +223,6 @@ func findGPU(gpus []domain.GPUInfo, id string) domain.GPUInfo {
 			return g
 		}
 	}
+
 	return domain.GPUInfo{}
 }

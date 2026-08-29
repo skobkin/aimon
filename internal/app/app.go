@@ -193,6 +193,7 @@ func New() (*App, error) {
 		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
 	})
 	a.monitor.StartTicker()
+
 	return a, nil
 }
 
@@ -259,6 +260,7 @@ func (a *App) setupTray() {
 	desk, ok := a.fyneApp.(desktop.App)
 	if !ok {
 		a.monitor.Show()
+
 		return
 	}
 	a.deskApp = desk
@@ -350,6 +352,7 @@ func (a *App) Instances() []config.SourceInstance {
 	defer a.mu.RUnlock()
 	out := make([]config.SourceInstance, len(a.instances))
 	copy(out, a.instances)
+
 	return out
 }
 
@@ -395,6 +398,7 @@ func (a *App) SaveInstances(list []config.SourceInstance) error {
 	if a.deskApp != nil {
 		a.rebuildTrayMenu()
 	}
+
 	return nil
 }
 
@@ -415,11 +419,13 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 		def, ok := registry.Get(inst.Kind)
 		if !ok {
 			a.log.Error("unknown source kind; instance skipped", "kind", string(inst.Kind), "instance", string(inst.ID))
+
 			continue
 		}
 		settings, ok := inst.Settings()
 		if !ok {
 			a.log.Error("instance settings missing or mismatched; instance skipped", "kind", string(inst.Kind), "instance", string(inst.ID))
+
 			continue
 		}
 		entry, cached := a.adapters[inst.ID]
@@ -427,6 +433,7 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 			src, err := def.Build(inst, deps)
 			if err != nil {
 				a.log.Error("building source instance failed; instance skipped", "instance", string(inst.ID), "error", err)
+
 				continue
 			}
 			entry = adapterEntry{settings: settings, src: src}
@@ -494,6 +501,7 @@ func (a *App) testConnection(ctx context.Context, inst config.SourceInstance, ty
 		overrides[account] = secret
 	}
 	deps := registry.Deps{Creds: a.testerStore(overrides), Client: a.client, Log: a.log}
+
 	return def.Test(ctx, inst, deps)
 }
 
@@ -510,12 +518,14 @@ func (a *App) cleanupCredentials(ctx context.Context, inst config.SourceInstance
 		account, err := credentials.AccountForInstance(inst.ID, slot)
 		if err != nil {
 			errs = append(errs, err)
+
 			continue
 		}
 		if err := a.creds.Delete(ctx, account); err != nil && !errors.Is(err, credentials.ErrNotFound) {
 			errs = append(errs, fmt.Errorf("%s: %w", slot, err))
 		}
 	}
+
 	return errors.Join(errs...)
 }
 
@@ -531,6 +541,7 @@ func (o *overrideStore) Get(ctx context.Context, id credentials.AccountID) (stri
 	if secret, ok := o.overrides[id]; ok && secret != "" {
 		return secret, nil
 	}
+
 	return o.inner.Get(ctx, id)
 }
 

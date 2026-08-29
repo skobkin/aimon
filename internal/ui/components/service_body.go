@@ -50,6 +50,7 @@ func NewServiceDetailBody(vm ui.ServiceVM, now time.Time) (fyne.CanvasObject, []
 			}
 		}
 	}
+
 	return body, ticks
 }
 
@@ -69,6 +70,7 @@ func newAgeRow(vm ui.AgeRowVM) (fyne.CanvasObject, func(now time.Time)) {
 	if vm.At == nil {
 		return obj, nil
 	}
+
 	return obj, func(now time.Time) {
 		if s := ui.FormatAge(*vm.At, now); s != value.Text {
 			value.Text = s
@@ -91,9 +93,11 @@ func NewServiceOverviewBody(vm ui.ServiceOverviewVM) fyne.CanvasObject {
 	for i := 0; i < len(vm.Rows); i += 2 {
 		if i+1 < len(vm.Rows) {
 			body.Add(container.NewGridWithColumns(2, NewMetricRow(vm.Rows[i]), NewMetricRow(vm.Rows[i+1])))
+
 			continue
 		}
 		body.Add(NewMetricRow(vm.Rows[i]))
 	}
+
 	return body
 }

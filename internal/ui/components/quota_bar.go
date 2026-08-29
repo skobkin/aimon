@@ -73,6 +73,7 @@ func foregroundColor() color.Color {
 	if fyne.CurrentApp() == nil {
 		return color.RGBA{R: 0x00, G: 0x00, B: 0x00, A: 0xFF}
 	}
+
 	return theme.Color(theme.ColorNameForeground)
 }
 
@@ -95,6 +96,7 @@ func NewQuotaBar(used, remaining float64) *QuotaBar {
 	b.ExtendBaseWidget(b)
 	b.used = clamp01(used)
 	b.remaining = clamp01(remaining)
+
 	return b
 }
 
@@ -115,6 +117,7 @@ func (b *QuotaBar) Remaining() float64 { return b.remaining }
 func (b *QuotaBar) CreateRenderer() fyne.WidgetRenderer {
 	track := canvas.NewRectangle(trackColor())
 	fill := canvas.NewRectangle(ThresholdColor(b.remaining))
+
 	return &quotaBarRenderer{bar: b, track: track, fill: fill}
 }
 
@@ -125,6 +128,7 @@ func trackColor() color.Color {
 	if fyne.CurrentApp() == nil {
 		return color.RGBA{R: 0x88, G: 0x88, B: 0x88, A: 0x40}
 	}
+
 	return theme.Color(theme.ColorNameInputBackground)
 }
 
@@ -135,6 +139,7 @@ func clamp01(v float64) float64 {
 	if v > 1 {
 		return 1
 	}
+
 	return v
 }
 
@@ -205,6 +210,7 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 			}))
 		}
 	}
+
 	return row, tick
 }
 
@@ -214,6 +220,7 @@ func quotaRowTitle(vm ui.QuotaWindowVM) string {
 	if vm.ResetText == "" {
 		return vm.Name
 	}
+
 	return vm.Name + " · " + vm.ResetText
 }
 

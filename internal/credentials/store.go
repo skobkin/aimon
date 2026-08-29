@@ -69,6 +69,7 @@ func AccountForInstance(id domain.InstanceID, slot Slot) (AccountID, error) {
 	if slot == "" {
 		return "", fmt.Errorf("credential account: empty slot")
 	}
+
 	return AccountID(fmt.Sprintf("source/%s/%s", id, slot)), nil
 }
 
@@ -105,6 +106,7 @@ func (e *StateError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("keychain %s: %s: %v", e.State, e.Message, e.Err)
 	}
+
 	return fmt.Sprintf("keychain %s: %s", e.State, e.Message)
 }
 

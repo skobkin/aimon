@@ -84,6 +84,7 @@ func keys(m map[string]*widget.Button) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+
 	return out
 }
 
@@ -112,6 +113,7 @@ var parkedForever = make(chan struct{}) // never closed
 
 func (blockedStore) Status(context.Context) credentials.Status {
 	<-parkedForever
+
 	return credentials.Status{State: credentials.StateAvailable}
 }
 
@@ -146,6 +148,7 @@ func scanEditor(t *testing.T, s *Settings) editorScan {
 			}
 		})
 	}
+
 	return scan
 }
 
@@ -278,6 +281,7 @@ func TestEditorHindsightCollect(t *testing.T) {
 	stub.TestConnection = func(ctx context.Context, inst config.SourceInstance,
 		typed map[credentials.Slot]string) registry.TestReport {
 		delivered <- inst
+
 		return registry.TestReport{Lines: []string{"x"}, OK: true}
 	}
 
@@ -371,6 +375,7 @@ func TestEditorSeparatesOpenRouterSlotsInTestPayload(t *testing.T) {
 	stub.TestConnection = func(ctx context.Context, inst config.SourceInstance,
 		typed map[credentials.Slot]string) registry.TestReport {
 		delivered <- typed
+
 		return registry.TestReport{Lines: []string{"x"}, OK: true}
 	}
 

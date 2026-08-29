@@ -51,6 +51,7 @@ type MetricBar struct {
 func NewMetricBar(text string, fraction float64, level ui.MetricLevel) *MetricBar {
 	b := &MetricBar{text: text, fraction: clamp01(fraction), level: level}
 	b.ExtendBaseWidget(b)
+
 	return b
 }
 
@@ -84,6 +85,7 @@ func (b *MetricBar) pillTextSize() float32 {
 	if fyne.CurrentApp() == nil {
 		return 11
 	}
+
 	return theme.Size(theme.SizeNameCaptionText)
 }
 
@@ -145,6 +147,7 @@ func pillGeometry(bar, text fyne.Size) (pillPos fyne.Position, pillSize fyne.Siz
 	pillPos = fyne.NewPos((bar.Width-pillW)/2, (bar.Height-pillH)/2)
 	pillSize = fyne.NewSize(pillW, pillH)
 	textPos = fyne.NewPos((bar.Width-text.Width)/2, (bar.Height-text.Height)/2)
+
 	return pillPos, pillSize, textPos
 }
 
@@ -176,5 +179,6 @@ func NewMetricsOverviewBody(vm ui.MetricsOverviewVM) fyne.CanvasObject {
 	if vm.Temp.Value != "" {
 		objs = append(objs, NewMetricRow(vm.Temp))
 	}
+
 	return container.NewVBox(objs...)
 }

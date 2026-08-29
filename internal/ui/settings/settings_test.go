@@ -46,6 +46,7 @@ func ids(list []config.SourceInstance) []domain.InstanceID {
 	for i, inst := range list {
 		out[i] = inst.ID
 	}
+
 	return out
 }
 

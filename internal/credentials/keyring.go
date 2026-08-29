@@ -95,6 +95,7 @@ func (s *KeyringStore) Status(ctx context.Context) Status {
 	if err == nil || errors.Is(err, keyring.ErrNotFound) {
 		return Status{Backend: backend, State: StateAvailable}
 	}
+
 	return Status{
 		Backend: backend,
 		State:   classifyState(err),
@@ -112,6 +113,7 @@ func (s *KeyringStore) Get(ctx context.Context, id AccountID) (string, error) {
 	if err != nil {
 		return "", mapKeyringError(err)
 	}
+
 	return v, nil
 }
 
@@ -124,6 +126,7 @@ func (s *KeyringStore) Set(ctx context.Context, id AccountID, secret string) err
 	if err != nil {
 		return mapKeyringError(err)
 	}
+
 	return nil
 }
 
@@ -137,8 +140,10 @@ func (s *KeyringStore) Delete(ctx context.Context, id AccountID) error {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return nil
 		}
+
 		return mapKeyringError(err)
 	}
+
 	return nil
 }
 
@@ -149,6 +154,7 @@ func mapKeyringError(err error) error {
 	if errors.Is(err, keyring.ErrNotFound) {
 		return ErrNotFound
 	}
+
 	return &StateError{State: classifyState(err), Message: err.Error(), Err: err}
 }
 
@@ -164,6 +170,7 @@ func classifyState(err error) State {
 	if strings.Contains(msg, "locked") || strings.Contains(msg, "unlock") || strings.Contains(msg, "prompt") {
 		return StateLocked
 	}
+
 	return StateUnavailable
 }
 
@@ -177,5 +184,6 @@ func backendName() string {
 	case "windows":
 		return "Windows Credential Manager"
 	}
+
 	return "system keychain"
 }

@@ -70,6 +70,7 @@ func (s *memStore) Get(ctx context.Context, id credentials.AccountID) (string, e
 	if s.secret == "" {
 		return "", credentials.ErrNotFound
 	}
+
 	return s.secret, nil
 }
 
@@ -77,6 +78,7 @@ func (s *memStore) Set(ctx context.Context, id credentials.AccountID, secret str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = secret
+
 	return nil
 }
 
@@ -84,6 +86,7 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = ""
+
 	return nil
 }
 

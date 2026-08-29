@@ -130,6 +130,7 @@ func (r *Repository) LoadInstances() ([]SourceInstance, error) {
 	if errs := ValidateInstances(list); len(errs) > 0 {
 		return nil, fmt.Errorf("invalid source document: %w", joinValidationErrors(errs))
 	}
+
 	return list, nil
 }
 
@@ -149,6 +150,7 @@ func (r *Repository) SaveInstances(list []SourceInstance) error {
 		return fmt.Errorf("serialize source document: %w", err)
 	}
 	r.prefs.SetString(keySourceDocument, string(b))
+
 	return nil
 }
 
@@ -219,6 +221,7 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 	default:
 		return SourceInstance{}, fmt.Errorf("unknown source kind %q", rec.Kind)
 	}
+
 	return inst, nil
 }
 
@@ -256,5 +259,6 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 			rec.OpenRouter = &openRouterRecord{}
 		}
 	}
+
 	return rec
 }

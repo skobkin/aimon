@@ -121,6 +121,7 @@ func (i SourceInstance) Settings() (ProviderSettings, bool) {
 			return *i.OpenRouter, true
 		}
 	}
+
 	return nil, false
 }
 
@@ -130,6 +131,7 @@ func (i SourceInstance) Label() string {
 	if name := strings.TrimSpace(i.Name); name != "" {
 		return name
 	}
+
 	return string(i.Kind)
 }
 
@@ -152,6 +154,7 @@ func ValidateInstances(list []SourceInstance) []ValidationError {
 			seen[inst.ID] = idx
 		}
 	}
+
 	return errs
 }
 
@@ -193,6 +196,7 @@ func (i SourceInstance) Validate() []ValidationError {
 	}
 	if set != 1 {
 		errs = append(errs, ValidationError{Source: label, Field: "Settings", Message: "exactly one provider settings block is required"})
+
 		return errs
 	}
 
@@ -235,6 +239,7 @@ func (i SourceInstance) Validate() []ValidationError {
 	}
 
 	errs = append(errs, validateInterval(label, i.PollInterval, KindIntervals(i.Kind))...)
+
 	return errs
 }
 
@@ -253,6 +258,7 @@ func KindIntervals(kind domain.SourceKind) []time.Duration {
 	if kind.Category() == domain.CategoryLocal {
 		return LocalIntervals
 	}
+
 	return RemoteIntervals
 }
 
@@ -268,6 +274,7 @@ func normalizeInterval(kind domain.SourceKind, d time.Duration) time.Duration {
 			return d
 		}
 	}
+
 	return snapInterval(presets, d)
 }
 
@@ -288,6 +295,7 @@ func snapInterval(presets []time.Duration, d time.Duration) time.Duration {
 			best, bestDelta = p, delta
 		}
 	}
+
 	return best
 }
 
@@ -295,6 +303,7 @@ func absDuration(d time.Duration) time.Duration {
 	if d < 0 {
 		return -d
 	}
+
 	return d
 }
 
@@ -309,23 +318,30 @@ func SameSettings(a, b ProviderSettings) bool {
 	switch av := a.(type) {
 	case AMDGPUWebSettings:
 		bv, ok := b.(AMDGPUWebSettings)
+
 		return ok && av == bv
 	case LlamaSwapSettings:
 		bv, ok := b.(LlamaSwapSettings)
+
 		return ok && av == bv
 	case HindsightSettings:
 		bv, ok := b.(HindsightSettings)
+
 		return ok && av == bv
 	case MiniMaxSettings:
 		_, ok := b.(MiniMaxSettings)
+
 		return ok
 	case ZAISettings:
 		bv, ok := b.(ZAISettings)
+
 		return ok && av == bv
 	case OpenRouterSettings:
 		_, ok := b.(OpenRouterSettings)
+
 		return ok
 	}
+
 	return false
 }
 
@@ -336,6 +352,7 @@ func joinValidationErrors(errs []ValidationError) error {
 	for i, e := range errs {
 		list[i] = e
 	}
+
 	return errors.Join(list...)
 }
 
@@ -347,5 +364,6 @@ func GenerateInstanceID() (domain.InstanceID, error) {
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("generate instance ID: %w", err)
 	}
+
 	return domain.InstanceID(hex.EncodeToString(b[:])), nil
 }

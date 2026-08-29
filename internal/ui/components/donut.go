@@ -44,6 +44,7 @@ func NewQuotaDonut(pctText, labelText string, used, remaining float64) *QuotaDon
 		remaining: clamp01(remaining),
 	}
 	d.ExtendBaseWidget(d)
+
 	return d
 }
 
@@ -128,6 +129,7 @@ func donutTextBlock(size, pctSize, lblSize fyne.Size) (pctPos, lblPos fyne.Posit
 	top := (size.Height - block) / 2
 	pctPos = fyne.NewPos((size.Width-pctSize.Width)/2, top)
 	lblPos = fyne.NewPos((size.Width-lblSize.Width)/2, top+pctSize.Height+float32(donutTextGap))
+
 	return pctPos, lblPos
 }
 
@@ -180,6 +182,7 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 	if len(ticks) == 0 {
 		return body, nil
 	}
+
 	return body, func(now time.Time) {
 		for _, tick := range ticks {
 			tick(now)

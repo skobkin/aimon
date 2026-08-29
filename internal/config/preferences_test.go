@@ -16,11 +16,13 @@ func newMemPreferences() *memPreferences {
 
 func (p *memPreferences) Bool(key string) bool {
 	v, _ := p.data[key].(bool)
+
 	return v
 }
 
 func (p *memPreferences) String(key string) string {
 	v, _ := p.data[key].(string)
+
 	return v
 }
 
@@ -96,5 +98,6 @@ func keysOf(p *memPreferences) []string {
 	for k := range p.data {
 		out = append(out, k)
 	}
+
 	return out
 }

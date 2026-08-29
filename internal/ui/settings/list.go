@@ -45,6 +45,7 @@ func newDraft(kind domain.SourceKind) (config.SourceInstance, bool) {
 	case config.HindsightSettings:
 		inst.Hindsight = &s
 	}
+
 	return inst, true
 }
 
@@ -54,6 +55,7 @@ func indexByID(list []config.SourceInstance, id domain.InstanceID) int {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -67,18 +69,21 @@ func neighborInCategory(list []config.SourceInstance, i int, dir int) int {
 			return j
 		}
 	}
+
 	return -1
 }
 
 // CanMoveUp reports whether the instance has a same-category predecessor.
 func CanMoveUp(list []config.SourceInstance, id domain.InstanceID) bool {
 	i := indexByID(list, id)
+
 	return i >= 0 && neighborInCategory(list, i, -1) >= 0
 }
 
 // CanMoveDown reports whether the instance has a same-category successor.
 func CanMoveDown(list []config.SourceInstance, id domain.InstanceID) bool {
 	i := indexByID(list, id)
+
 	return i >= 0 && neighborInCategory(list, i, 1) >= 0
 }
 
@@ -96,6 +101,7 @@ func MoveUp(list []config.SourceInstance, id domain.InstanceID) []config.SourceI
 	}
 	out := append([]config.SourceInstance(nil), list...)
 	out[i], out[j] = out[j], out[i]
+
 	return out
 }
 
@@ -113,6 +119,7 @@ func MoveDown(list []config.SourceInstance, id domain.InstanceID) []config.Sourc
 	}
 	out := append([]config.SourceInstance(nil), list...)
 	out[i], out[j] = out[j], out[i]
+
 	return out
 }
 
@@ -123,9 +130,11 @@ func SetEnabled(list []config.SourceInstance, id domain.InstanceID, enabled bool
 	for i := range out {
 		if out[i].ID == id {
 			out[i].Enabled = enabled
+
 			return out
 		}
 	}
+
 	return list
 }
 
@@ -139,6 +148,7 @@ func RemoveInstance(list []config.SourceInstance, id domain.InstanceID) []config
 	out := make([]config.SourceInstance, 0, len(list)-1)
 	out = append(out, list[:i]...)
 	out = append(out, list[i+1:]...)
+
 	return out
 }
 
@@ -150,9 +160,11 @@ func ReplaceInstance(list []config.SourceInstance, inst config.SourceInstance) [
 	if i < 0 {
 		out := make([]config.SourceInstance, 0, len(list)+1)
 		out = append(out, list...)
+
 		return append(out, inst)
 	}
 	out := append([]config.SourceInstance(nil), list...)
 	out[i] = inst
+
 	return out
 }

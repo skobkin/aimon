@@ -9,6 +9,7 @@ func mustSamples(t *testing.T, body string) []metricSample {
 	if err != nil {
 		t.Fatalf("parseSelectedMetrics: %v", err)
 	}
+
 	return samples
 }
 
@@ -17,6 +18,7 @@ func mustSamples(t *testing.T, body string) []metricSample {
 func mustCounters(t *testing.T, body string) metricsCounters {
 	t.Helper()
 	counters, _, _ := aggregateMetrics(mustSamples(t, body))
+
 	return counters
 }
 
@@ -60,10 +62,12 @@ func TestParseSampleLineLabelEscapes(t *testing.T) {
 		samples, err := parseSelectedMetrics(tc.line)
 		if err != nil {
 			t.Errorf("%s: parse error %v", tc.name, err)
+
 			continue
 		}
 		if len(samples) != 1 {
 			t.Errorf("%s: samples = %d, want 1", tc.name, len(samples))
+
 			continue
 		}
 		if samples[0].value != tc.value {

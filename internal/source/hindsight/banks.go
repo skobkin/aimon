@@ -83,6 +83,7 @@ func (a *Adapter) fetchBanks(ctx context.Context, header http.Header) (bankAggre
 				Detail:   "bank list ended before reaching its total",
 			}
 		}
+
 		return agg, nil
 	}
 	if offset >= agg.Count {
@@ -122,6 +123,7 @@ func (a *Adapter) fetchBanks(ctx context.Context, header http.Header) (bankAggre
 					Detail:   "bank list ended before reaching its total",
 				}
 			}
+
 			return agg, nil
 		}
 		offset += res.rows
@@ -178,6 +180,7 @@ func (a *Adapter) fetchBanksPage(ctx context.Context, header http.Header, limit,
 		res.agg.LastWriteAt = maxTime(res.agg.LastWriteAt, item.LastWriteAt)
 		res.agg.LastDocumentAt = maxTime(res.agg.LastDocumentAt, item.LastDocumentAt)
 	}
+
 	return res, nil
 }
 

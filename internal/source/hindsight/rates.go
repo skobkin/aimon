@@ -25,6 +25,7 @@ func counterDelta(prev, curr *float64) (float64, bool) {
 	if *curr < *prev {
 		return 0, false
 	}
+
 	return *curr - *prev, true
 }
 
@@ -36,6 +37,7 @@ func perMinute(delta float64, elapsed time.Duration) *float64 {
 		return nil
 	}
 	rate := delta / elapsed.Seconds() * 60
+
 	return &rate
 }
 
@@ -65,6 +67,7 @@ func percentOf(part, all float64) *float64 {
 	case pct < 0:
 		return nil
 	}
+
 	return &pct
 }
 
@@ -76,6 +79,7 @@ func deriveActivity(prev, curr *metricsCounters, elapsed time.Duration) domain.H
 	if prev == nil {
 		return domain.HindsightActivity{}
 	}
+
 	return domain.HindsightActivity{
 		RetainPerMin:       ratePerMin(prev.RetainTotal, curr.RetainTotal, elapsed),
 		RecallPerMin:       ratePerMin(prev.RecallTotal, curr.RecallTotal, elapsed),
@@ -95,6 +99,7 @@ func ratePerMin(prev, curr *float64, elapsed time.Duration) *float64 {
 	if !ok {
 		return nil
 	}
+
 	return perMinute(delta, elapsed)
 }
 
@@ -110,6 +115,7 @@ func http5xxPercent(prev, curr *metricsCounters) *float64 {
 	if !ok {
 		return nil
 	}
+
 	return percentOf(delta5xx, deltaAll)
 }
 
@@ -132,6 +138,7 @@ func domainQueue(q *queueGauges) *domain.HindsightQueue {
 	if q == nil {
 		return nil
 	}
+
 	return &domain.HindsightQueue{
 		Pending:              q.Pending,
 		Processing:           q.Processing,

@@ -196,6 +196,7 @@ func sensitiveValuesIn(t *testing.T, obj fyne.CanvasObject) []*SensitiveValue {
 			found = append(found, sv)
 		}
 	})
+
 	return found
 }
 
@@ -214,6 +215,7 @@ func containsLabelText(t *testing.T, obj fyne.CanvasObject, s string) bool {
 			}
 		}
 	})
+
 	return found
 }
 

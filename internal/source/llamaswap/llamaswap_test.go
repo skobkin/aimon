@@ -38,6 +38,7 @@ func (s *memStore) Get(ctx context.Context, id credentials.AccountID) (string, e
 	if s.notFound || s.secret == "" {
 		return "", credentials.ErrNotFound
 	}
+
 	return s.secret, nil
 }
 
@@ -45,6 +46,7 @@ func (s *memStore) Set(ctx context.Context, id credentials.AccountID, secret str
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = secret
+
 	return nil
 }
 
@@ -52,6 +54,7 @@ func (s *memStore) Delete(ctx context.Context, id credentials.AccountID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = ""
+
 	return nil
 }
 
@@ -105,6 +108,7 @@ func (s *swapServer) handler() http.Handler {
 func (s *swapServer) authHeaders() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	return append([]string(nil), s.auth...)
 }
 

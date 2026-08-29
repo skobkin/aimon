@@ -60,6 +60,7 @@ func Fraction(v float64) (float64, error) {
 	if v > 1 {
 		return 0, fmt.Errorf("quota fraction exceeds 1: %v", v)
 	}
+
 	return v, nil
 }
 
@@ -71,5 +72,6 @@ func Clamp01(v float64) float64 {
 	if v > 1 {
 		return 1
 	}
+
 	return v
 }

@@ -93,6 +93,7 @@ func (a *Adapter) Test(ctx context.Context) error {
 	if _, herr := source.GetText(ctx, a.client, a.baseURL+"/health", authHeader(token)); herr != nil {
 		return herr
 	}
+
 	return nil
 }
 
@@ -117,6 +118,7 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 			Err:      stateErr,
 		}
 	}
+
 	return "", &source.Error{
 		Category: source.CatCredentials,
 		Detail:   "Keychain read failed",
@@ -130,5 +132,6 @@ func authHeader(token string) http.Header {
 	}
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
+
 	return h
 }

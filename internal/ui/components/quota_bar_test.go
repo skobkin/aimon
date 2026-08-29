@@ -30,6 +30,7 @@ func rowLabels(t *testing.T, obj fyne.CanvasObject) []*widget.Label {
 			out = append(out, rowLabels(t, child)...)
 		}
 	}
+
 	return out
 }
 
