@@ -10,6 +10,39 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — Wayland taskbar icon: GLFW WaylandAppID hint plus a packaged desktop entry
+
+The monitor window showed up in the Plasma taskbar as an empty entry.
+Wayland has no per-window icon: the compositor resolves a toplevel's
+taskbar entry from the xdg-toplevel `app_id`, matched against a `.desktop`
+file and its `Icon=`. Two Fyne 2.8 gaps break that on this platform.
+
+1. Fyne's glfw driver never sets a Wayland app-id, so GLFW's `wl.appId`
+   stays empty and `xdg_toplevel_set_app_id` is never sent; Plasma cannot
+   match the window to any desktop entry.
+2. `Window.SetIcon` returns early on Wayland, so neither the app-level
+   nor the window-level icon reaches the compositor.
+
+`App.New` therefore sets `glfw.WindowHintString(glfw.WaylandAppID, appID)`
+directly, and `packaging/` ships the matching
+`com.skobkin.aimonitor.desktop` plus install instructions (the entry and
+the icon under `~/.local/share` are user-installed; nothing is
+auto-installed from Go code, and the repository keeps a single embedded
+`internal/resources/icon.svg` as the icon source).
+
+This adds a direct dependency on `github.com/go-gl/glfw/v3.4/glfw`
+(previously indirect, and already the GLFW build Fyne links) and reaches
+past the Fyne API for a window-hint call. The call site is constrained:
+GLFW string hints assert that `glfw.Init()` has run, and Fyne initializes
+GLFW lazily inside the first window construction — so the hint is set
+after the monitor and settings windows are built and before any `Show()`
+creates the first GLFW window. `New` runs on the main goroutine, which is
+the thread GLFW requires. Fyne never calls `DefaultWindowHints` nor resets
+string hints, so every window created afterwards inherits the app-id. The
+hint is silently unused on X11 and the other platforms, where the existing
+icon paths keep working. Window code is unchanged.
+
+
 ## 2026-08-29 — Per-second ticker mutates labels in place; notifications coalesce; keychain calls honor ctx
 
 Follow-ups to the 2026-08-28 memory-leak fix. The visibility gate stopped

@@ -1,0 +1,11 @@
+# Desktop entry matching the Wayland app-id set by the GLFW WaylandAppID
+# hint (internal/app/app.go). Install it under ~/.local/share/applications/
+# so the compositor can resolve the taskbar entry to an icon; see README.md.
+[Desktop Entry]
+Type=Application
+Name=AI Monitor
+Exec=aimon
+Icon=com.skobkin.aimonitor
+StartupWMClass=com.skobkin.aimonitor
+Terminal=false
+Categories=Utility;Monitor;
