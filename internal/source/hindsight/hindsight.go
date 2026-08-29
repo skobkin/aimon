@@ -17,6 +17,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
@@ -89,10 +90,13 @@ type Adapter struct {
 
 // New creates an adapter for the configured API base URL, reading the
 // optional API key (when used) from the instance-scoped keychain account
-// on each refresh.
+// on each refresh. The base URL is normalized here (spec §4): surrounding
+// space is dropped and trailing slashes are stripped, so a user-entered
+// "http://host/" joins into "http://host/health" rather than a
+// double-slash path strict proxies reject.
 func New(baseURL string, account credentials.AccountID, creds credentials.Store, client *http.Client, log *slog.Logger) *Adapter {
 	return &Adapter{
-		baseURL:  baseURL,
+		baseURL:  strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		account:  account,
 		creds:    creds,
 		client:   client,

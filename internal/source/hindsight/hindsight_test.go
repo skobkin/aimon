@@ -808,3 +808,26 @@ func TestTestReportsPerSurfaceFailures(t *testing.T) {
 		t.Error("BanksErr = nil, want the invalid bank list failure")
 	}
 }
+
+// A base URL with a trailing slash is valid per the settings validator and
+// must be normalized before joining paths: "http://host/" must request
+// "http://host/health", not "http://host//health" (spec §4).
+func TestNewNormalizesTrailingSlashBaseURL(t *testing.T) {
+	srv := newHindsightServer()
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	a := newAdapter(server.URL+"/", nil, &fakeClock{})
+	if a.baseURL != server.URL {
+		t.Fatalf("normalized base = %q, want %q", a.baseURL, server.URL)
+	}
+	mustRefresh(t, a)
+	for _, uri := range srv.uris() {
+		if strings.Contains(uri, "//") {
+			t.Errorf("request %q contains a doubled slash", uri)
+		}
+	}
+	if got := srv.uris()[0]; got != "/health" {
+		t.Errorf("first request = %q, want /health", got)
+	}
+}
