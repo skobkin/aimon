@@ -405,3 +405,23 @@ the right upstream surface.
    are ignored — `db_acquire_ms` and `db_pool_waiting` are now both parsed
    from `/health`, and `/metrics` remains the source for pool
    size/idle/max.
+
+## 2026-08-29 — S5 follow-ups: adapter rebuild on Web UI URL edits, Test Connection line folding, /metrics body cap
+
+Three smaller S5 notes recorded at implementation time.
+
+1. `SameSettings` compares both Hindsight URLs, so editing the optional
+   Web UI URL rebuilds the adapter like any settings change. This resets
+   the counter baseline, so the next interval reports rates as
+   unavailable (first sample) before recovering — accepted as the cost of
+   keeping the adapter immutable; it only happens on an explicit edit.
+
+2. The Test Connection report folds `/health/live` into the "Health:"
+   line (the spec wants three lines for four probes) and prints the bank
+   aggregate as "Banks: OK (N visible)" — a count only, never identifiers.
+
+3. `/metrics` responses larger than the shared 1 MiB `GetText` cap fail
+   the refresh as an invalid response rather than being parsed partially.
+   A real Hindsight deployment exposing the selected families stays far
+   below the cap; a blown cap almost certainly means a proxy error page,
+   which should not be interpreted as metrics.
