@@ -311,7 +311,9 @@ func (a *App) rebuildTrayMenu() {
 			go func() {
 				for range sub.ClickedCh {
 					if u, err := url.Parse(link.URL); err == nil && u.Scheme != "" {
-						a.fyneApp.OpenURL(u)
+						if err := a.fyneApp.OpenURL(u); err != nil {
+							a.log.Warn("opening web UI failed", "link", link.Name, "error", err)
+						}
 					}
 				}
 			}()

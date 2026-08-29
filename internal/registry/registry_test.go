@@ -309,11 +309,11 @@ func (s *hindsightTestServer) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			w.Write([]byte(`{"status":"healthy","database":"connected"}`))
+			_, _ = w.Write([]byte(`{"status":"healthy","database":"connected"}`))
 		case "/health/live":
-			w.Write([]byte(`{"status":"ok","version":"0.9.2","uptime_seconds":60}`))
+			_, _ = w.Write([]byte(`{"status":"ok","version":"0.9.2","uptime_seconds":60}`))
 		case "/metrics":
-			w.Write([]byte("hindsight_db_pool_size 10\n"))
+			_, _ = w.Write([]byte("hindsight_db_pool_size 10\n"))
 		case "/v1/default/banks":
 			s.mu.Lock()
 			s.bankURIs = append(s.bankURIs, r.URL.RequestURI())
@@ -391,11 +391,11 @@ func TestHindsightTestConnection(t *testing.T) {
 	split := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			w.Write([]byte(`{"status":"healthy","database":"connected"}`))
+			_, _ = w.Write([]byte(`{"status":"healthy","database":"connected"}`))
 		case "/health/live":
-			w.Write([]byte("<!doctype html><html><body>control plane</body></html>"))
+			_, _ = w.Write([]byte("<!doctype html><html><body>control plane</body></html>"))
 		case "/metrics":
-			w.Write([]byte("hindsight_db_pool_size 10\n"))
+			_, _ = w.Write([]byte("hindsight_db_pool_size 10\n"))
 		case "/v1/default/banks":
 			fmt.Fprintf(w, `{"banks":[{"bank_id":"x","fact_count":1}],"total":3,"limit":1,"offset":0}`)
 		default:

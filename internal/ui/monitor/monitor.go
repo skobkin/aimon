@@ -438,7 +438,8 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 func withWebUILink(body fyne.CanvasObject, label, target string) fyne.CanvasObject {
 	btn := widget.NewButtonWithIcon(label, theme.LoginIcon(), func() {
 		if u, err := url.Parse(target); err == nil && u.Scheme != "" {
-			fyne.CurrentApp().OpenURL(u)
+			// Nothing useful to do when the browser cannot be opened.
+			_ = fyne.CurrentApp().OpenURL(u)
 		}
 	})
 

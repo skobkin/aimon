@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // countingListener counts accepted connections so tests can tell a reused
@@ -36,7 +37,7 @@ func newCountingServer(t *testing.T, h http.Handler) (*httptest.Server, *atomic.
 	accepts := &atomic.Int32{}
 	srv := &httptest.Server{
 		Listener: &countingListener{Listener: ln, accepts: accepts},
-		Config:   &http.Server{Handler: h},
+		Config:   &http.Server{Handler: h, ReadHeaderTimeout: time.Second},
 	}
 	srv.Start()
 	t.Cleanup(srv.Close)
@@ -49,7 +50,7 @@ func newCountingServer(t *testing.T, h http.Handler) (*httptest.Server, *atomic.
 func TestGetJSONReusesConnectionAfterErrorStatus(t *testing.T) {
 	srv, accepts := newCountingServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte("rate limited, with a body"))
+		_, _ = w.Write([]byte("rate limited, with a body"))
 	}))
 
 	type payload struct {
@@ -76,7 +77,7 @@ func TestGetJSONReusesConnectionAfterOversizedBody(t *testing.T) {
 		big[i] = 'x'
 	}
 	srv, accepts := newCountingServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(big)
+		_, _ = w.Write(big)
 	}))
 
 	type payload struct {
@@ -99,7 +100,7 @@ func TestGetJSONReusesConnectionAfterOversizedBody(t *testing.T) {
 func TestGetTextReusesConnectionAfterErrorStatus(t *testing.T) {
 	srv, accepts := newCountingServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("unavailable"))
+		_, _ = w.Write([]byte("unavailable"))
 	}))
 
 	client := &http.Client{}

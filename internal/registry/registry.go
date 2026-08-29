@@ -201,9 +201,7 @@ var definitions = []Definition{
 			// deps.Creds may be nil: a known-unauthenticated instance.
 			return hindsight.New(s.BaseURL, account, deps.Creds, deps.Client, deps.Log), nil
 		},
-		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
-			return hindsightTestReport(ctx, inst, deps)
-		},
+		Test: hindsightTestReport,
 		WebURL: func(inst config.SourceInstance) (string, bool) {
 			if inst.Hindsight == nil || inst.Hindsight.WebUIURL == "" {
 				return "", false

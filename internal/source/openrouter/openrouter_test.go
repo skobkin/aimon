@@ -24,8 +24,8 @@ const (
 	testAPIAccount  = credentials.AccountID("source/test-instance/api-key")
 	testMgmtAccount = credentials.AccountID("source/test-instance/management-key")
 
-	testAPIToken  = "sk-or-v1-test-api-token"
-	testMgmtToken = "sk-or-mgmt-test-management-token"
+	testAPIToken  = "sk-or-v1-test-api-token"          //nolint:gosec // fixture value, not a credential
+	testMgmtToken = "sk-or-mgmt-test-management-token" //nolint:gosec // fixture value, not a credential
 )
 
 // memStore is a fake credential store keyed per account — OpenRouter's two
@@ -135,7 +135,7 @@ func (s *capServer) handler() http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(s.responsesFor(key)))
+			_, _ = w.Write([]byte(s.responsesFor(key)))
 		})
 	}
 
@@ -174,8 +174,9 @@ func (s *capServer) authHeaders(t *testing.T, path string) []string {
 	return append([]string(nil), s.auth[path]...)
 }
 
-// start runs the server and returns a test adapter aimed at it.
-func (s *capServer) start(t *testing.T, creds credentials.Store) (*Adapter, func()) {
+// start runs the server and returns a test adapter aimed at it. The
+// server closes via t.Cleanup; no explicit shutdown handle is exposed.
+func (s *capServer) start(t *testing.T, creds credentials.Store) *Adapter {
 	t.Helper()
 	hs := httptest.NewServer(s.handler())
 	t.Cleanup(hs.Close)
@@ -189,7 +190,7 @@ func (s *capServer) start(t *testing.T, creds credentials.Store) (*Adapter, func
 		creditsEndpoint: hs.URL + "/api/v1/credits",
 	}
 
-	return a, hs.Close
+	return a
 }
 
 func asSourceError(t *testing.T, err error) *source.Error {
@@ -216,7 +217,7 @@ func minimalCreditsJSON() string {
 func fullSetup(t *testing.T, responses serverResponses) (*capServer, *Adapter) {
 	t.Helper()
 	srv := newCapServer(responses)
-	a, _ := srv.start(t, newMemStore().
+	a := srv.start(t, newMemStore().
 		with(testAPIAccount, testAPIToken).
 		with(testMgmtAccount, testMgmtToken))
 
@@ -227,7 +228,7 @@ func fullSetup(t *testing.T, responses serverResponses) (*capServer, *Adapter) {
 
 func TestRefreshAPIKeyOnlyNeverCallsCredits(t *testing.T) {
 	srv := newCapServer(serverResponses{key: minimalKeyJSON()})
-	a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+	a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 	snap, err := a.Refresh(context.Background())
 	if err != nil {
@@ -256,7 +257,7 @@ func TestRefreshAPIKeyOnlyNeverCallsCredits(t *testing.T) {
 
 func TestRefreshManagementKeyOnlyNeverCallsKey(t *testing.T) {
 	srv := newCapServer(serverResponses{credits: minimalCreditsJSON()})
-	a, _ := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
+	a := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
 
 	snap, err := a.Refresh(context.Background())
 	if err != nil {
@@ -316,7 +317,7 @@ func TestRefreshWithBothCredentials(t *testing.T) {
 
 func TestRefreshWithNeitherCredentialMakesZeroRequests(t *testing.T) {
 	srv := newCapServer(serverResponses{key: minimalKeyJSON(), credits: minimalCreditsJSON()})
-	a, _ := srv.start(t, newMemStore())
+	a := srv.start(t, newMemStore())
 
 	snap, err := a.Refresh(context.Background())
 	if snap != nil {
@@ -336,7 +337,7 @@ func TestRefreshWithNeitherCredentialMakesZeroRequests(t *testing.T) {
 
 func TestFetchersReportAbsentCapabilityAsNilNotError(t *testing.T) {
 	srv := newCapServer(serverResponses{key: minimalKeyJSON(), credits: minimalCreditsJSON()})
-	a, _ := srv.start(t, newMemStore())
+	a := srv.start(t, newMemStore())
 	ctx := context.Background()
 
 	key, err := a.FetchKeyUsage(ctx)
@@ -360,7 +361,7 @@ func TestAuthFailuresAreCategorizedAndSanitized(t *testing.T) {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
 			srv := newCapServer(serverResponses{key: `{"error":"some provider message"}`})
 			srv.setStatus("key", code)
-			a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+			a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 			_, err := a.Refresh(context.Background())
 			serr := asSourceError(t, err)
@@ -381,7 +382,7 @@ func TestAuthFailuresAreCategorizedAndSanitized(t *testing.T) {
 func TestServerErrorCategory(t *testing.T) {
 	srv := newCapServer(serverResponses{credits: `{}`, key: `{}`})
 	srv.setStatus("credits", http.StatusInternalServerError)
-	a, _ := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
+	a := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
 
 	_, err := a.FetchAccountCredits(context.Background())
 	if serr := asSourceError(t, err); serr.Category != source.CatProvider {
@@ -411,7 +412,7 @@ func TestMalformedJSONIsInvalidResponse(t *testing.T) {
 				with(testAPIAccount, testAPIToken).
 				with(testMgmtAccount, testMgmtToken)
 			srv := newCapServer(tc.responses)
-			a, _ := srv.start(t, store)
+			a := srv.start(t, store)
 
 			if _, err := tc.fetch(a, context.Background()); err == nil {
 				t.Fatal("malformed JSON must fail")
@@ -464,7 +465,7 @@ func TestMissingRequiredUsageFieldsRejected(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newCapServer(serverResponses{key: c.body})
-			a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+			a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 			key, err := a.FetchKeyUsage(context.Background())
 			if err == nil {
@@ -489,7 +490,7 @@ func TestMissingRequiredCreditTotalsRejected(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newCapServer(serverResponses{credits: c.body})
-			a, _ := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
+			a := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
 
 			acct, err := a.FetchAccountCredits(context.Background())
 			if err == nil {
@@ -515,7 +516,7 @@ func TestWrongCredentialTypeInAPISlotRejected(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"data":{%s,"usage":1,"usage_daily":1,"usage_weekly":1,"usage_monthly":1}}`, c.flag)
 			srv := newCapServer(serverResponses{key: body})
-			a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+			a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 			key, err := a.FetchKeyUsage(context.Background())
 			if err == nil {
@@ -551,7 +552,7 @@ func TestOptionalFieldsParseDefensively(t *testing.T) {
 		"rate_limit":{"requests":200},"label":"kept-out","expires_at":null
 	}}`
 	srv := newCapServer(serverResponses{key: body})
-	a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+	a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 	key, err := a.FetchKeyUsage(context.Background())
 	if err != nil {
@@ -579,7 +580,7 @@ func TestOptionalFieldsParseDefensively(t *testing.T) {
 func TestRateLimitIgnoredWithoutError(t *testing.T) {
 	body := `{"data":{"usage":1,"usage_daily":0,"usage_weekly":0,"usage_monthly":0,"rate_limit":{"is_free_tier":false}}}`
 	srv := newCapServer(serverResponses{key: body})
-	a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+	a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 	key, err := a.FetchKeyUsage(context.Background())
 	if err != nil {
@@ -618,7 +619,7 @@ func TestLimitNormalization(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newCapServer(serverResponses{key: c.body})
-			a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
+			a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken))
 
 			key, err := a.FetchKeyUsage(context.Background())
 			if err != nil {
@@ -667,7 +668,7 @@ func TestBalanceDerivationAndNoiseClamp(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newCapServer(serverResponses{credits: c.body})
-			a, _ := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
+			a := srv.start(t, newMemStore().with(testMgmtAccount, testMgmtToken))
 
 			acct, err := a.FetchAccountCredits(context.Background())
 			if err != nil {
@@ -685,7 +686,7 @@ func TestBalanceDerivationAndNoiseClamp(t *testing.T) {
 func TestKeychainFailureIsCategorized(t *testing.T) {
 	state := &credentials.StateError{State: credentials.StateUnavailable, Message: "Secret Service died"}
 	srv := newCapServer(serverResponses{key: minimalKeyJSON(), credits: minimalCreditsJSON()})
-	a, _ := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken).withState(state))
+	a := srv.start(t, newMemStore().with(testAPIAccount, testAPIToken).withState(state))
 
 	_, err := a.Refresh(context.Background())
 	serr := asSourceError(t, err)
@@ -704,7 +705,7 @@ func TestKeychainFailureIsCategorized(t *testing.T) {
 // sent as Bearer "".
 func TestEmptyStoredSecretMeansAbsentCapability(t *testing.T) {
 	srv := newCapServer(serverResponses{key: minimalKeyJSON(), credits: minimalCreditsJSON()})
-	a, _ := srv.start(t, newMemStore().
+	a := srv.start(t, newMemStore().
 		with(testAPIAccount, "").
 		with(testMgmtAccount, testMgmtToken))
 
@@ -722,7 +723,7 @@ func TestEmptyStoredSecretMeansAbsentCapability(t *testing.T) {
 }
 
 func TestRequestTimeoutIsRemoteStandard(t *testing.T) {
-	if got := (time.Duration)(requestTimeout); got == 0 || got > 30*time.Second {
+	if got := requestTimeout; got == 0 || got > 30*time.Second {
 		t.Errorf("request timeout = %v, expected the remote convention magnitude", got)
 	}
 	if got := (&Adapter{}).Kind(); got != domain.KindOpenRouter {

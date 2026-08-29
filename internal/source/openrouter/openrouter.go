@@ -30,7 +30,7 @@ import (
 // the account-credit capability endpoint. Both are official and fixed.
 const (
 	KeyEndpoint     = "https://openrouter.ai/api/v1/key"
-	CreditsEndpoint = "https://openrouter.ai/api/v1/credits"
+	CreditsEndpoint = "https://openrouter.ai/api/v1/credits" //nolint:gosec // endpoint URL, not a credential
 )
 
 // requestTimeout bounds the whole refresh (remote provider).

@@ -8,12 +8,12 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
-func gpu(id, name, url string, enabled bool) config.SourceInstance {
+func gpu(id, name, url string) config.SourceInstance {
 	return config.SourceInstance{
 		ID:           domain.InstanceID(id),
 		Kind:         domain.KindAMDGPUWeb,
 		Name:         name,
-		Enabled:      enabled,
+		Enabled:      true,
 		PollInterval: 5 * time.Second,
 		AMDGPUWeb:    &config.AMDGPUWebSettings{BaseURL: url},
 	}
@@ -34,9 +34,9 @@ func mm(id, name string, enabled bool) config.SourceInstance {
 // must respect category boundaries without re-sorting the whole list.
 func interleaved() []config.SourceInstance {
 	return []config.SourceInstance{
-		gpu("g1", "GPU one", "http://127.0.0.1:1", true),
+		gpu("g1", "GPU one", "http://127.0.0.1:1"),
 		mm("m1", "MiniMax one", true),
-		gpu("g2", "GPU two", "http://127.0.0.1:2", true),
+		gpu("g2", "GPU two", "http://127.0.0.1:2"),
 		mm("m2", "MiniMax two", false),
 	}
 }
@@ -120,7 +120,7 @@ func TestSetEnabledKeyedByID(t *testing.T) {
 	}
 	// A rename-simulation: the same ID with a different name still matches.
 	renamed := append([]config.SourceInstance(nil), list...)
-	renamed[3] = gpu("m2", "renamed", "http://x", true) // wrong kind, same ID: still keyed
+	renamed[3] = gpu("m2", "renamed", "http://x") // wrong kind, same ID: still keyed
 	got = SetEnabled(renamed, "m2", false)
 	if got[3].Enabled {
 		t.Error("SetEnabled keys by instance ID, not name or kind")
@@ -159,7 +159,7 @@ func TestReplaceInstanceEditsInPlaceAndAppendsNew(t *testing.T) {
 		t.Errorf("edit did not land in place: %+v", got[1])
 	}
 
-	fresh := gpu("new-1", "New GPU", "http://127.0.0.1:9", true)
+	fresh := gpu("new-1", "New GPU", "http://127.0.0.1:9")
 	got = ReplaceInstance(list, fresh)
 	if len(got) != 5 || got[4].ID != "new-1" {
 		t.Fatalf("append = %v", ids(got))

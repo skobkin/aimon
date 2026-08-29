@@ -88,19 +88,6 @@ func keys(m map[string]*widget.Button) []string {
 	return out
 }
 
-// stubStore answers every account with "not stored", keeping the keychain
-// probe's goroutine alive without a real backend.
-type stubStore struct{}
-
-func (stubStore) Status(context.Context) credentials.Status {
-	return credentials.Status{State: credentials.StateAvailable}
-}
-func (stubStore) Get(context.Context, credentials.AccountID) (string, error) {
-	return "", credentials.ErrNotFound
-}
-func (stubStore) Set(context.Context, credentials.AccountID, string) error { return nil }
-func (stubStore) Delete(context.Context, credentials.AccountID) error      { return nil }
-
 // blockedStore parks the keychain-status probe forever. In production the
 // probe's results hop back through fyne.Do onto the UI thread; the headless
 // test driver runs that callback inline on the probe goroutine, which would

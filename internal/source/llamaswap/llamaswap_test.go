@@ -95,10 +95,10 @@ func (s *swapServer) handler() http.Handler {
 		switch r.URL.Path {
 		case "/health":
 			w.WriteHeader(s.healthStatus)
-			w.Write([]byte(s.healthBody))
+			_, _ = w.Write([]byte(s.healthBody))
 		case "/running":
 			w.WriteHeader(s.runningCode)
-			w.Write([]byte(s.runningBody))
+			_, _ = w.Write([]byte(s.runningBody))
 		default:
 			http.NotFound(w, r)
 		}

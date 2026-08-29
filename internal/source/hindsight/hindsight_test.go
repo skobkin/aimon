@@ -130,7 +130,7 @@ func (s *hindsightServer) handler() http.Handler {
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(page))
+				_, _ = w.Write([]byte(page))
 
 				return
 			}
@@ -144,7 +144,7 @@ func (s *hindsightServer) handler() http.Handler {
 func (s *hindsightServer) serve(w http.ResponseWriter, code int, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Write([]byte(body))
+	_, _ = w.Write([]byte(body))
 }
 
 func (s *hindsightServer) uris() []string {
@@ -273,7 +273,7 @@ func mustRefresh(t *testing.T, a *Adapter) domain.HindsightSnapshot {
 	return hs
 }
 
-func requireSourceError(t *testing.T, err error, want source.Category) *source.Error {
+func requireSourceError(t *testing.T, err error, want source.Category) {
 	t.Helper()
 	var serr *source.Error
 	if !errors.As(err, &serr) {
@@ -282,8 +282,6 @@ func requireSourceError(t *testing.T, err error, want source.Category) *source.E
 	if serr.Category != want {
 		t.Fatalf("category = %q, want %q (detail: %s)", serr.Category, want, serr.Detail)
 	}
-
-	return serr
 }
 
 func approx(t *testing.T, got *float64, want float64) {

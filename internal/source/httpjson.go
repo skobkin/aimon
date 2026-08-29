@@ -27,7 +27,7 @@ func GetJSON(ctx context.Context, client *http.Client, url string, header http.H
 	if err != nil {
 		return transportError("request failed", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		drainBody(resp.Body)
@@ -65,7 +65,7 @@ func GetText(ctx context.Context, client *http.Client, url string, header http.H
 	if err != nil {
 		return "", transportError("request failed", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		drainBody(resp.Body)

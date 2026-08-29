@@ -128,7 +128,7 @@ func TestGetJSONClassifications(t *testing.T) {
 
 	// malformed body -> invalid response
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{not json`))
+		_, _ = w.Write([]byte(`{not json`))
 	}))
 	if err := GetJSON(context.Background(), client, srv.URL, nil, &p); err == nil || err.Category != CatInvalidResponse {
 		t.Errorf("malformed: got %v", err)
@@ -143,7 +143,7 @@ func TestGetJSONClassifications(t *testing.T) {
 	// request timeout -> timeout
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -158,7 +158,7 @@ func TestGetJSONHeadersAndBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotAccept = r.Header.Get("Accept-Language")
-		w.Write([]byte(`{"value":3}`))
+		_, _ = w.Write([]byte(`{"value":3}`))
 	}))
 	defer srv.Close()
 
@@ -183,7 +183,7 @@ func TestGetJSONHeadersAndBody(t *testing.T) {
 
 func TestGetText(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}))
 	defer srv.Close()
 

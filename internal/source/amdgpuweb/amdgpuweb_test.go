@@ -59,9 +59,9 @@ func (f *serverFixture) handler() http.Handler {
 		switch r.URL.Path {
 		case "/api/gpus":
 			f.gpuCalls.Add(1)
-			w.Write([]byte(f.gpus.Load().(string)))
+			_, _ = w.Write([]byte(f.gpus.Load().(string)))
 		case "/api/gpus/amdgpu0/metrics":
-			w.Write([]byte(f.metrics.Load().(string)))
+			_, _ = w.Write([]byte(f.metrics.Load().(string)))
 		default:
 			http.NotFound(w, r)
 		}
@@ -218,11 +218,11 @@ func TestMetrics404TriggersRediscoveryRetry(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/gpus":
 			f.gpuCalls.Add(1)
-			w.Write([]byte(f.gpus.Load().(string)))
+			_, _ = w.Write([]byte(f.gpus.Load().(string)))
 		case "/api/gpus/amdgpu0/metrics":
 			// 404 until discovery has been re-run, then succeed.
 			if f.gpuCalls.Load() >= 2 {
-				w.Write([]byte(f.metrics.Load().(string)))
+				_, _ = w.Write([]byte(f.metrics.Load().(string)))
 
 				return
 			}
@@ -255,7 +255,7 @@ func TestMetrics404TriggersRediscoveryRetry(t *testing.T) {
 func TestSamplerNotReadyIsProviderError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/gpus" {
-			w.Write([]byte(gpusOne))
+			_, _ = w.Write([]byte(gpusOne))
 
 			return
 		}

@@ -142,7 +142,8 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 			urlLabel = "API URL"
 		}
 		e.url.PlaceHolder = placeholder
-		e.url.Validate()
+		// Force the validation state on load; the result is only shown.
+		_ = e.url.Validate()
 		items = append(items, widget.NewFormItem(urlLabel, e.url))
 	}
 	if inst.Kind == domain.KindHindsight {
@@ -150,7 +151,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		e.webURL.Validator = urlValidator
 		e.webURL.PlaceHolder = "http://127.0.0.1:9999 (optional)"
 		e.webURL.SetText(inst.Hindsight.WebUIURL)
-		e.webURL.Validate()
+		_ = e.webURL.Validate()
 		items = append(items, widget.NewFormItem("Web UI URL", e.webURL))
 	}
 	if inst.Kind == domain.KindAMDGPUWeb {
@@ -330,7 +331,7 @@ func (e *editor) collect() (config.SourceInstance, error) {
 	}
 
 	if errs := inst.Validate(); len(errs) > 0 {
-		return inst, fmt.Errorf("Invalid: %s", errs[0].Message)
+		return inst, fmt.Errorf("invalid: %s", errs[0].Message)
 	}
 
 	return inst, nil

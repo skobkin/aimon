@@ -452,14 +452,13 @@ func TestServiceAgeRowsAgeInPlace(t *testing.T) {
 	}
 }
 
+// allTexts collects the visible text of every label in the tree. The Label
+// and Text cases must precede the Widget case: *widget.Label and
+// *canvas.Text are fyne.CanvasObjects, and a Label is a fyne.Widget too.
 func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	t.Helper()
 	var out []string
 	switch o := obj.(type) {
-	case fyne.Widget:
-		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
-			out = append(out, allTexts(t, child)...)
-		}
 	case *fyne.Container:
 		for _, child := range o.Objects {
 			out = append(out, allTexts(t, child)...)
@@ -468,6 +467,10 @@ func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 		out = append(out, o.Text)
 	case *canvas.Text:
 		out = append(out, o.Text)
+	case fyne.Widget:
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			out = append(out, allTexts(t, child)...)
+		}
 	}
 
 	return out

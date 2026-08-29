@@ -87,7 +87,7 @@ func (s *planServer) handler() http.Handler {
 		s.mu.Unlock()
 
 		w.WriteHeader(s.status)
-		w.Write([]byte(s.body))
+		_, _ = w.Write([]byte(s.body))
 	})
 }
 
