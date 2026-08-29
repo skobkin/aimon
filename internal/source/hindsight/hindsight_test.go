@@ -831,3 +831,35 @@ func TestNewNormalizesTrailingSlashBaseURL(t *testing.T) {
 		t.Errorf("first request = %q, want /health", got)
 	}
 }
+
+// A 200 /metrics body that is not valid exposition fails the refresh like
+// any other broken fetch — and before the slow requests run, so neither
+// the counter baseline nor the slow cache commits (the next successful
+// interval must derive rates against the last good sample, not over a
+// broken scrape).
+func TestRefreshMalformedMetricsFailsWithoutCommitting(t *testing.T) {
+	srv := newHindsightServer()
+	srv.metricsBody = "<html>502 Bad Gateway</html>"
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	clk := &fakeClock{}
+	a := newAdapter(server.URL, nil, clk)
+	_, err := a.Refresh(context.Background())
+	requireSourceError(t, err, source.CatInvalidResponse)
+
+	for _, uri := range srv.uris() {
+		if uri == "/health/live" || strings.HasPrefix(uri, "/v1/default/banks") {
+			t.Errorf("slow request %q ran after the metrics parse failed", uri)
+		}
+	}
+	if a.baseline != nil || a.slow != nil {
+		t.Errorf("state committed on a malformed scrape (baseline=%v slow=%v)", a.baseline, a.slow)
+	}
+
+	// The connection test reports the same failure on the metrics surface.
+	out := a.Test(context.Background())
+	if out.MetricsErr == nil {
+		t.Error("Test.MetricsErr = nil, want the malformed-exposition failure")
+	}
+}

@@ -2,11 +2,21 @@ package hindsight
 
 import "testing"
 
+// mustSamples parses one valid exposition body or fails the test.
+func mustSamples(t *testing.T, body string) []metricSample {
+	t.Helper()
+	samples, err := parseSelectedMetrics(body)
+	if err != nil {
+		t.Fatalf("parseSelectedMetrics: %v", err)
+	}
+	return samples
+}
+
 // mustCounters parses and aggregates one exposition body, returning the
 // counters block for assertions.
 func mustCounters(t *testing.T, body string) metricsCounters {
 	t.Helper()
-	counters, _, _ := aggregateMetrics(parseSelectedMetrics(body))
+	counters, _, _ := aggregateMetrics(mustSamples(t, body))
 	return counters
 }
 
@@ -21,7 +31,10 @@ hindsight_operation_total{operation="retain"} 2
 hindsight_llm_calls_total{provider="p"} NaN
 hindsight_llm_calls_total 7
 `
-	samples := parseSelectedMetrics(body)
+	samples, err := parseSelectedMetrics(body)
+	if err != nil {
+		t.Fatalf("parseSelectedMetrics: %v", err)
+	}
 	if len(samples) != 4 {
 		t.Fatalf("samples = %d (%+v), want 4", len(samples), samples)
 	}
@@ -44,7 +57,11 @@ func TestParseSampleLineLabelEscapes(t *testing.T) {
 		{"escaped newline", `hindsight_operation_total{operation="re\ntain"} 5`, 5, "re\ntain"},
 	}
 	for _, tc := range cases {
-		samples := parseSelectedMetrics(tc.line)
+		samples, err := parseSelectedMetrics(tc.line)
+		if err != nil {
+			t.Errorf("%s: parse error %v", tc.name, err)
+			continue
+		}
 		if len(samples) != 1 {
 			t.Errorf("%s: samples = %d, want 1", tc.name, len(samples))
 			continue
@@ -58,21 +75,45 @@ func TestParseSampleLineLabelEscapes(t *testing.T) {
 	}
 }
 
-func TestParseSampleLineMalformed(t *testing.T) {
+// Structurally malformed lines fail the whole parse — whatever family they
+// claim — so a broken or truncated exposition cannot pass for a successful
+// scrape (the baseline may only advance after /metrics parses).
+func TestParseSelectedMetricsRejectsMalformedLines(t *testing.T) {
 	bad := []string{
 		`hindsight_llm_calls_total{unterminated="v} 1`,
 		`hindsight_llm_calls_total{novalue} 1`,
 		`hindsight_llm_calls_total 1 2 3`,
 		`hindsight_llm_calls_total notanumber`,
-		`hindsight_llm_calls_total Inf`,
-		`hindsight_llm_calls_total +Inf`,
-		`hindsight_llm_calls_total -Inf`,
 		`hindsight_llm_calls_total`,
+		// An error page or truncated response is not exposition either.
+		`<html>502 Bad Gateway</html>`,
+		`some_other_metric{broken`,
+		`502`,
 	}
 	for _, line := range bad {
-		if got := parseSelectedMetrics(line); len(got) != 0 {
-			t.Errorf("parseSelectedMetrics(%q) = %+v, want none", line, got)
+		got, err := parseSelectedMetrics(line)
+		if err == nil {
+			t.Errorf("parseSelectedMetrics(%q) = %+v, want an error", line, got)
 		}
+	}
+}
+
+// Non-finite values are valid exposition (Prometheus marks missing data
+// with NaN) but unrepresentable for us: the sample is skipped as absence,
+// never stored as zero and never an error.
+func TestParseSelectedMetricsSkipsNonFiniteValues(t *testing.T) {
+	body := `hindsight_llm_calls_total Inf
+hindsight_llm_calls_total +Inf
+hindsight_llm_calls_total -Inf
+hindsight_db_pool_size NaN
+hindsight_db_pool_size 7
+`
+	samples, err := parseSelectedMetrics(body)
+	if err != nil {
+		t.Fatalf("parseSelectedMetrics: %v", err)
+	}
+	if len(samples) != 1 || samples[0].value != 7 {
+		t.Errorf("samples = %+v, want only the finite pool size 7", samples)
 	}
 }
 
@@ -107,7 +148,7 @@ hindsight_db_pool_max 12
 hindsight_db_pool_waiting 2
 hindsight_http_requests_in_progress 3
 `
-	_, g, q := aggregateMetrics(parseSelectedMetrics(body))
+	_, g, q := aggregateMetrics(mustSamples(t, body))
 	if g.DBPoolSize == nil || *g.DBPoolSize != 10 {
 		t.Errorf("DBPoolSize = %v, want 10", g.DBPoolSize)
 	}
@@ -136,7 +177,7 @@ hindsight_async_operations{operation_type="reflect",status="mystery"} 7
 hindsight_consolidation_backlog 8
 hindsight_consolidation_failed 3
 `
-	_, _, q := aggregateMetrics(parseSelectedMetrics(body))
+	_, _, q := aggregateMetrics(mustSamples(t, body))
 	if q == nil {
 		t.Fatal("Queue = nil, want populated")
 	}
@@ -164,7 +205,10 @@ func TestAggregateDropsIdentityLabels(t *testing.T) {
 	body := `hindsight_llm_calls_total{provider="p",bank="b-secret",model="m"} 1
 hindsight_llm_calls_total{provider="p",bank="b-other",model="m"} 2
 `
-	samples := parseSelectedMetrics(body)
+	samples, err := parseSelectedMetrics(body)
+	if err != nil {
+		t.Fatalf("parseSelectedMetrics: %v", err)
+	}
 	for _, s := range samples {
 		if _, ok := s.labels["bank"]; ok {
 			t.Errorf("bank label retained on parsed sample: %+v", s.labels)

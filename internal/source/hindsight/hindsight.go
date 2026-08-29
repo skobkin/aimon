@@ -133,7 +133,14 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	counters, gauges, queue := aggregateMetrics(parseSelectedMetrics(metricsBody))
+	// A 200 body that is not parsable exposition is a failed metrics fetch:
+	// treating it as an empty-but-successful scrape would publish a snapshot
+	// and advance the counter baseline over broken data.
+	samples, err := parseSelectedMetrics(metricsBody)
+	if err != nil {
+		return nil, err
+	}
+	counters, gauges, queue := aggregateMetrics(samples)
 
 	// Slow data: fetch only when missing or past the TTL; otherwise serve
 	// the cached liveness/bank aggregates.
@@ -230,7 +237,9 @@ func (a *Adapter) Test(ctx context.Context) TestOutcome {
 	if _, err := a.fetchLive(ctx, header); err != nil {
 		out.LiveErr = err
 	}
-	if _, err := a.fetchMetrics(ctx, header); err != nil {
+	if body, err := a.fetchMetrics(ctx, header); err != nil {
+		out.MetricsErr = err
+	} else if _, err := parseSelectedMetrics(body); err != nil {
 		out.MetricsErr = err
 	}
 	banks, err := a.fetchBanksPage(ctx, header, 1, 0)

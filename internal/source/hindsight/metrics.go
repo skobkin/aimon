@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // selectedFamilies is the closed set of Prometheus exposition families S5
@@ -79,10 +81,16 @@ type queueGauges struct {
 }
 
 // parseSelectedMetrics parses the exposition text into samples of the
-// selected families. Line-oriented by design: comments, HELP/TYPE lines,
-// unknown families, malformed lines, and non-finite values are skipped.
-// An optional trailing sample timestamp is ignored.
-func parseSelectedMetrics(body string) []metricSample {
+// selected families. Line-oriented: comments and HELP/TYPE lines are
+// skipped. Every other line must be structurally valid exposition —
+// whatever its family — and a body that is not returns an error, so a
+// truncated scrape or a proxy error page cannot pass for a successful
+// one: the rate baseline must advance only after /metrics parses
+// successfully (S5_IMPLEMENTATION_SPEC §6). Absence stays absence:
+// samples of unselected families are skipped, and a selected sample with
+// a non-finite value (Prometheus's "no data" marker) is skipped rather
+// than becoming a zero. An optional trailing sample timestamp is ignored.
+func parseSelectedMetrics(body string) ([]metricSample, error) {
 	var samples []metricSample
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -90,24 +98,29 @@ func parseSelectedMetrics(body string) []metricSample {
 			continue
 		}
 		s, ok := parseSampleLine(line)
-		if ok {
-			samples = append(samples, s)
+		if !ok {
+			return nil, &source.Error{
+				Category: source.CatInvalidResponse,
+				Detail:   "metrics response is not valid Prometheus exposition",
+			}
 		}
+		if !selectedFamilies[s.name] || !isFinite(s.value) {
+			continue
+		}
+		samples = append(samples, s)
 	}
-	return samples
+	return samples, nil
 }
 
-// parseSampleLine parses one exposition line:
+// parseSampleLine structurally parses one exposition line:
 //
 //	name{label="value",...} value [timestamp]
 //	name value [timestamp]
 //
-// ok is false for anything not in a selected family or not parseable.
+// ok is false for anything not shaped like an exposition sample,
+// regardless of which family the line belongs to.
 func parseSampleLine(line string) (metricSample, bool) {
 	name, rest := cutIdent(line)
-	if !selectedFamilies[name] {
-		return metricSample{}, false
-	}
 
 	s := metricSample{name: name}
 	if strings.HasPrefix(rest, "{") {
@@ -124,7 +137,7 @@ func parseSampleLine(line string) (metricSample, bool) {
 		return metricSample{}, false
 	}
 	v, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil || !isFinite(v) {
+	if err != nil {
 		return metricSample{}, false
 	}
 	s.value = v
