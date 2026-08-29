@@ -1,0 +1,66 @@
+version: 2
+
+project_name: aimon
+
+gitea_urls:
+  api: "{{ .Env.FORGE_API_URL }}"
+  download: "{{ .Env.FORGE_DOWNLOAD_URL }}"
+
+builds:
+  - id: aimon-linux
+    main: ./cmd/aimon
+    binary: aimon
+    env:
+      - CGO_ENABLED=1
+      - CC=gcc
+      - CXX=g++
+    goos:
+      - linux
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -buildid=
+      - -X git.skobk.in/skobkin/aimonitor/internal/app.Version={{ .Version }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/app.BuildDate={{ .Date }}
+
+  - id: aimon-windows
+    main: ./cmd/aimon
+    binary: aimon
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+      - CXX=x86_64-w64-mingw32-g++
+    goos:
+      - windows
+    goarch:
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -H=windowsgui -buildid=
+      - -X git.skobk.in/skobkin/aimonitor/internal/app.Version={{ .Version }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/app.BuildDate={{ .Date }}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^build(\([^)]*\))?!?:'
+      - '^docs(\([^)]*\))?!?:'
+      - '^refactor(\([^)]*\))?!?:'
+      - '^style(\([^)]*\))?!?:'
+      - '^test(\([^)]*\))?!?:'

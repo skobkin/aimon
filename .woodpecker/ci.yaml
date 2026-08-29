@@ -1,0 +1,101 @@
+when:
+  - event: push
+  - event: pull_request
+  - event: tag
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      depth: 0
+
+steps:
+  fmt:
+    image: golang:1.26-alpine
+    depends_on: []
+    commands:
+      - |
+        export PATH=/usr/local/go/bin:/go/bin:$PATH
+        fmt_out=$(/usr/local/go/bin/gofmt -l ./cmd ./internal 2>/dev/null)
+        if [ -n "$fmt_out" ]; then
+          echo "The following files need gofmt:"
+          echo "$fmt_out"
+          exit 1
+        fi
+
+  lint:
+    image: golangci/golangci-lint:v2.13-alpine
+    depends_on: []
+    commands:
+      - export CACHE_ROOT="$PWD/.ci-cache"
+      - export GOMODCACHE="$CACHE_ROOT/gomod"
+      - export GOCACHE="$CACHE_ROOT/gobuild"
+      - export GOPATH="$CACHE_ROOT/gopath"
+      - export GOLANGCI_LINT_CACHE="$CACHE_ROOT/golangci-lint"
+      - export XDG_CACHE_HOME="$CACHE_ROOT/xdg"
+      - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" "$GOLANGCI_LINT_CACHE" "$XDG_CACHE_HOME"
+      - apk add --no-cache git build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - golangci-lint run ./...
+
+  vet:
+    image: golang:1.26-alpine
+    depends_on: []
+    commands:
+      - export PATH=/usr/local/go/bin:/go/bin:$PATH
+      - export CACHE_ROOT="$PWD/.ci-cache"
+      - export GOMODCACHE="$CACHE_ROOT/gomod"
+      - export GOCACHE="$CACHE_ROOT/gobuild"
+      - export GOPATH="$CACHE_ROOT/gopath"
+      - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin"
+      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - go vet ./...
+
+  test:
+    image: golang:1.26-alpine
+    depends_on: []
+    commands:
+      - export PATH=/usr/local/go/bin:/go/bin:$PATH
+      - export CACHE_ROOT="$PWD/.ci-cache"
+      - export GOMODCACHE="$CACHE_ROOT/gomod"
+      - export GOCACHE="$CACHE_ROOT/gobuild"
+      - export GOPATH="$CACHE_ROOT/gopath"
+      - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin"
+      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - go test ./...
+
+  build:
+    image: golang:1.26-alpine
+    depends_on: []
+    when:
+      - event: push
+      - event: pull_request
+    commands:
+      - export PATH=/usr/local/go/bin:/go/bin:$PATH
+      - export CACHE_ROOT="$PWD/.ci-cache"
+      - export GOMODCACHE="$CACHE_ROOT/gomod"
+      - export GOCACHE="$CACHE_ROOT/gobuild"
+      - export GOPATH="$CACHE_ROOT/gopath"
+      - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" dist
+      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - go build -trimpath -o dist/aimon ./cmd/aimon
+
+  release:
+    image: goreleaser/goreleaser-cross:v1.26
+    depends_on:
+      - fmt
+      - lint
+      - vet
+      - test
+    environment:
+      GITEA_TOKEN:
+        from_secret: GITEA_TOKEN
+    commands:
+      - test -n "$CI_FORGE_URL" || (echo "CI_FORGE_URL is empty. Cannot derive Forge URLs for GoReleaser." && exit 1)
+      - test -n "$FORGE_API_URL" || export FORGE_API_URL="$CI_FORGE_URL/api/v1"
+      - test -n "$FORGE_DOWNLOAD_URL" || export FORGE_DOWNLOAD_URL="$CI_FORGE_URL"
+      - apt-get update
+      - apt-get install --no-install-recommends -y pkg-config libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxxf86vm-dev
+      - rm -rf "$PWD/.ci-cache"
+      - goreleaser release --clean
+    when:
+      - event: tag
