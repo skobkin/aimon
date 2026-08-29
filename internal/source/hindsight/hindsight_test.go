@@ -219,6 +219,16 @@ hindsight_consolidation_failed 1
 const metricsBodyBacklogOnly = `hindsight_consolidation_backlog 9
 `
 
+// metricsBodyNoRecall drops the operation="recall" and consolidation
+// series: counters materialize upstream only on first activity, so a
+// deployment serving recall synchronously never exports them at all.
+const metricsBodyNoRecall = `hindsight_operation_total{operation="retain"} 10
+hindsight_operation_total{operation="reflect"} 2
+hindsight_llm_calls_total 5
+hindsight_llm_tokens_input_total 1200
+hindsight_llm_tokens_output_total 340
+`
+
 func banksPage(total int64, items ...string) string {
 	return fmt.Sprintf(`{"banks":[%s],"total":%d,"limit":%d,"offset":0}`,
 		strings.Join(items, ","), total, len(items))
@@ -572,6 +582,62 @@ func TestCounterResetSkipsOneIntervalThenRecovers(t *testing.T) {
 	approx(t, snap.Activity.RetainPerMin, 3)
 }
 
+// The seen-set latches per family: a family absent from every scrape so far
+// stays unseen (the UI hides its row), a family materializing later latches
+// on first appearance, and a seen family stays seen when a later scrape
+// lacks the series again — its row degrades to "—" instead of vanishing.
+func TestActivitySeenLatchesPerFamily(t *testing.T) {
+	srv := newHindsightServer()
+	srv.metricsBody = metricsBodyNoRecall
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	clk := &fakeClock{t: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)}
+	a := newAdapter(server.URL, nil, clk)
+
+	snap := mustRefresh(t, a)
+	seen := snap.ActivitySeen
+	if !seen.Retain || !seen.Reflect || !seen.LLMCalls {
+		t.Fatalf("ActivitySeen = %+v, want the scraped families latched", seen)
+	}
+	if seen.Recall || seen.Consolidate {
+		t.Errorf("ActivitySeen = %+v, want never-exported families unseen", seen)
+	}
+	if snap.Activity.RecallPerMin != nil {
+		t.Errorf("RecallPerMin = %v, want nil for an unseen family", snap.Activity.RecallPerMin)
+	}
+
+	// The family materializing later latches on its first appearance; the
+	// rate itself needs the series on both sides of the interval, so that
+	// first interval is still unavailable.
+	clk.advance(60 * time.Second)
+	srv.metricsBody = metricsBodyA
+	snap = mustRefresh(t, a)
+	if !snap.ActivitySeen.Recall || !snap.ActivitySeen.Consolidate {
+		t.Fatalf("ActivitySeen = %+v, want the newly exported families latched", snap.ActivitySeen)
+	}
+	if snap.Activity.RecallPerMin != nil {
+		t.Errorf("RecallPerMin = %v, want nil on the family's first interval", *snap.Activity.RecallPerMin)
+	}
+
+	// The next interval derives normally.
+	clk.advance(60 * time.Second)
+	srv.metricsBody = metricsBodyB
+	snap = mustRefresh(t, a)
+	approx(t, snap.Activity.RecallPerMin, 2)
+
+	// Once seen, never unseen: the row keeps its place with a dash.
+	clk.advance(60 * time.Second)
+	srv.metricsBody = metricsBodyNoRecall
+	snap = mustRefresh(t, a)
+	if !snap.ActivitySeen.Recall {
+		t.Error("a seen family must stay seen when a later scrape lacks it")
+	}
+	if snap.Activity.RecallPerMin != nil {
+		t.Errorf("RecallPerMin = %v, want nil without the series", snap.Activity.RecallPerMin)
+	}
+}
+
 func TestBacklogAbsentLeavesQueueNil(t *testing.T) {
 	srv := newHindsightServer()
 	server := httptest.NewServer(srv.handler())
@@ -782,8 +848,8 @@ func TestTestProbesFourEndpointsWithoutMutatingState(t *testing.T) {
 			t.Errorf("Authorization = %q, want the stored key", h)
 		}
 	}
-	if a.slow != nil || a.baseline != nil {
-		t.Errorf("Test must not touch the ephemeral state (slow=%v baseline=%v)", a.slow, a.baseline)
+	if a.slow != nil || a.baseline != nil || a.everSeen != (domain.HindsightActivitySeen{}) {
+		t.Errorf("Test must not touch the ephemeral state (slow=%v baseline=%v seen=%+v)", a.slow, a.baseline, a.everSeen)
 	}
 
 	// A Refresh afterwards still runs the full first-refresh sequence
@@ -860,8 +926,8 @@ func TestRefreshMalformedMetricsFailsWithoutCommitting(t *testing.T) {
 			t.Errorf("slow request %q ran after the metrics parse failed", uri)
 		}
 	}
-	if a.baseline != nil || a.slow != nil {
-		t.Errorf("state committed on a malformed scrape (baseline=%v slow=%v)", a.baseline, a.slow)
+	if a.baseline != nil || a.slow != nil || a.everSeen != (domain.HindsightActivitySeen{}) {
+		t.Errorf("state committed on a malformed scrape (baseline=%v slow=%v seen=%+v)", a.baseline, a.slow, a.everSeen)
 	}
 
 	// The connection test reports the same failure on the metrics surface.

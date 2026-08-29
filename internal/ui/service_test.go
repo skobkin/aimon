@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -35,6 +36,10 @@ func hindsightSnap() domain.HindsightSnapshot {
 			InputTokensPerMin:  f(12400),
 			OutputTokensPerMin: f(1800),
 			HTTP5xxPercent:     f(0),
+		},
+		ActivitySeen: domain.HindsightActivitySeen{
+			Retain: true, Recall: true, Reflect: true, Consolidate: true,
+			LLMCalls: true, InputTokens: true, OutputTokens: true,
 		},
 		Runtime: domain.HindsightRuntime{
 			DBPoolSize:     f(10),
@@ -287,9 +292,14 @@ func TestBuildServiceOverviewVMPriority(t *testing.T) {
 		t.Errorf("Rows = %+v, want only the memory and rate pairs", vm.Rows)
 	}
 
-	// First sample: rates read as unavailable, never 0/m; memory that has
-	// not landed yet produces no fabricated zeros.
-	empty := domain.HindsightSnapshot{CollectedAt: now, Service: domain.HindsightService{Status: "loading"}}
+	// First sample: the families were scraped (seen) but no baseline exists
+	// yet, so the rates read as unavailable, never 0/m; memory that has not
+	// landed yet produces no fabricated zeros.
+	empty := domain.HindsightSnapshot{
+		CollectedAt:  now,
+		Service:      domain.HindsightService{Status: "loading"},
+		ActivitySeen: domain.HindsightActivitySeen{Recall: true, LLMCalls: true},
+	}
 	vm = BuildServiceOverviewVM(empty)
 	if vm.Summary != "Loading" {
 		t.Errorf("Summary = %q, want Loading", vm.Summary)
@@ -313,6 +323,34 @@ func TestBuildServiceOverviewVMPriority(t *testing.T) {
 	}
 	if vm.Rows[1].Label != "Facts" || vm.Rows[1].Value != "0" {
 		t.Errorf("row[1] = %+v, want Facts 0", vm.Rows[1])
+	}
+}
+
+// A family the deployment never exported has no rate row at all — in the
+// detail Activity block and in the overview's headline pair — instead of a
+// permanent dash.
+func TestBuildServiceVMHidesNeverSeenFamilies(t *testing.T) {
+	snap := hindsightSnap()
+	snap.Activity = domain.HindsightActivity{RetainPerMin: f(2), LLMCallsPerMin: f(4)}
+	snap.ActivitySeen = domain.HindsightActivitySeen{Retain: true, LLMCalls: true}
+
+	vm := BuildServiceVM(snap, now)
+	labels := make([]string, 0, len(vm.Activity))
+	for _, r := range vm.Activity {
+		labels = append(labels, r.Label)
+	}
+	if want := []string{"Retain", "LLM calls"}; !slices.Equal(labels, want) {
+		t.Errorf("Activity rows = %v, want %v", labels, want)
+	}
+
+	overview := BuildServiceOverviewVM(snap)
+	labels = labels[:0]
+	for _, r := range overview.Rows {
+		labels = append(labels, r.Label)
+	}
+	// Banks and Facts, then LLM calls (Recall hidden), then the async pair.
+	if want := []string{"Banks", "Facts", "LLM calls", "Pending", "Failed"}; !slices.Equal(labels, want) {
+		t.Errorf("overview rows = %v, want %v", labels, want)
 	}
 }
 

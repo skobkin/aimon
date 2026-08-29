@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
@@ -346,6 +347,34 @@ func add(acc *float64, v float64) *float64 {
 	}
 	*acc += v
 	return acc
+}
+
+// activitySeenFrom reports which activity counter families one scrape
+// exposed. The HTTP request counters are excluded: the 5xx row is driven
+// by its own derivability rule, and a missing 5xx series means "no errors
+// observed", not "family not exported".
+func activitySeenFrom(c metricsCounters) domain.HindsightActivitySeen {
+	return domain.HindsightActivitySeen{
+		Retain:       c.RetainTotal != nil,
+		Recall:       c.RecallTotal != nil,
+		Reflect:      c.ReflectTotal != nil,
+		Consolidate:  c.ConsolidateTotal != nil,
+		LLMCalls:     c.LLMCallsTotal != nil,
+		InputTokens:  c.InputTokensTotal != nil,
+		OutputTokens: c.OutputTokensTotal != nil,
+	}
+}
+
+// mergeSeen ORs one scrape's families into the sticky seen-set.
+func mergeSeen(sticky, scrape domain.HindsightActivitySeen) domain.HindsightActivitySeen {
+	sticky.Retain = sticky.Retain || scrape.Retain
+	sticky.Recall = sticky.Recall || scrape.Recall
+	sticky.Reflect = sticky.Reflect || scrape.Reflect
+	sticky.Consolidate = sticky.Consolidate || scrape.Consolidate
+	sticky.LLMCalls = sticky.LLMCalls || scrape.LLMCalls
+	sticky.InputTokens = sticky.InputTokens || scrape.InputTokens
+	sticky.OutputTokens = sticky.OutputTokens || scrape.OutputTokens
+	return sticky
 }
 
 // isFinite reports whether v is a usable sample value.

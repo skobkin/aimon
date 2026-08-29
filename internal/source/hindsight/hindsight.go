@@ -87,10 +87,14 @@ type Adapter struct {
 	// liveness fetch failed, so its warning fires on the transition into
 	// the degraded state instead of on every slow cycle — a permanently
 	// misrouted /health/live would otherwise repeat it every ~60s.
+	// everSeen latches the activity families any successful scrape has
+	// exposed, so the UI can hide a family the deployment never exports
+	// instead of showing its rate row as a permanent dash.
 	slow       *slowState
 	baseline   *metricsCounters
 	baselineAt time.Time
 	liveBroken bool
+	everSeen   domain.HindsightActivitySeen
 }
 
 // New creates an adapter for the configured API base URL, reading the
@@ -179,12 +183,17 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 		slow = st
 	}
 
+	// Everything fallible has passed; latch this scrape's families into the
+	// sticky seen-set so the snapshot carries the union including itself.
+	a.everSeen = mergeSeen(a.everSeen, activitySeenFrom(counters))
+
 	snap := domain.HindsightSnapshot{
-		CollectedAt: now,
-		Service:     health,
-		Activity:    deriveActivity(a.baseline, &counters, now.Sub(a.baselineAt)),
-		Runtime:     domainRuntime(gauges),
-		Queue:       domainQueue(queue),
+		CollectedAt:  now,
+		Service:      health,
+		Activity:     deriveActivity(a.baseline, &counters, now.Sub(a.baselineAt)),
+		ActivitySeen: a.everSeen,
+		Runtime:      domainRuntime(gauges),
+		Queue:        domainQueue(queue),
 	}
 	if slow != nil {
 		snap.Service.Version = slow.version

@@ -19,7 +19,10 @@ type HindsightSnapshot struct {
 	// counts, not as "no data yet".
 	Memory   *HindsightMemory
 	Activity HindsightActivity
-	Runtime  HindsightRuntime
+	// ActivitySeen latches which activity counter families this deployment
+	// has ever exported; a never-seen family has no rate row at all.
+	ActivitySeen HindsightActivitySeen
+	Runtime      HindsightRuntime
 	// Queue is nil when the deployment exposed no backlog metric family at
 	// all (they are disabled by default upstream); any populated field
 	// inside is independently optional.
@@ -79,6 +82,26 @@ type HindsightActivity struct {
 	OutputTokensPerMin *float64
 
 	HTTP5xxPercent *float64
+}
+
+// HindsightActivitySeen latches, per activity counter family, whether any
+// successful scrape of the current adapter has exposed its series. Upstream
+// creates a counter only on first activity, so a family can be genuinely
+// absent from a deployment (recall is never recorded on synchronous-recall
+// deployments) — the UI hides such a family's rate row instead of showing a
+// permanent "—", and a seen-but-nil rate keeps its dash (first sample,
+// counter reset). Once true a flag never clears, so rows can appear when a
+// counter first materializes but never disappear for the adapter's
+// lifetime.
+type HindsightActivitySeen struct {
+	Retain      bool
+	Recall      bool
+	Reflect     bool
+	Consolidate bool
+
+	LLMCalls     bool
+	InputTokens  bool
+	OutputTokens bool
 }
 
 // HindsightRuntime holds the current gauges read from /metrics. DB pool

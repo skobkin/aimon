@@ -812,7 +812,7 @@ func BuildServiceVM(snap domain.HindsightSnapshot, now time.Time) ServiceVM {
 
 	vm.Service = serviceRows(snap.Service)
 	vm.Memory = memoryRows(snap.Memory, now)
-	vm.Activity = activityRows(snap.Activity)
+	vm.Activity = activityRows(snap.Activity, snap.ActivitySeen)
 	vm.Queue = queueRows(snap.Queue)
 	vm.Runtime = runtimeRows(snap)
 	return vm
@@ -864,18 +864,27 @@ func memoryRows(m *domain.HindsightMemory, now time.Time) []AgeRowVM {
 	return rows
 }
 
-// activityRows builds the seven rate rows. A rate that is not derivable
-// yet (first sample, counter reset) shows "—" rather than 0/m.
-func activityRows(a domain.HindsightActivity) []MetricRowVM {
-	return []MetricRowVM{
-		{Label: "Retain", Value: FormatRatePerMin(a.RetainPerMin)},
-		{Label: "Recall", Value: FormatRatePerMin(a.RecallPerMin)},
-		{Label: "Reflect", Value: FormatRatePerMin(a.ReflectPerMin)},
-		{Label: "Consolidation", Value: FormatRatePerMin(a.ConsolidatePerMin)},
-		{Label: "LLM calls", Value: FormatRatePerMin(a.LLMCallsPerMin)},
-		{Label: "Input tokens", Value: FormatRatePerMin(a.InputTokensPerMin)},
-		{Label: "Output tokens", Value: FormatRatePerMin(a.OutputTokensPerMin)},
+// activityRows builds the rate rows of the families the deployment has
+// exported at least once. A never-seen family has no row at all — recall is
+// never recorded on some deployments, and a permanent dash reads as broken —
+// while a seen-but-underivable rate keeps its "—" (first sample, counter
+// reset) rather than 0/m. The adapter latches the seen-set, so a row can
+// appear when a counter first materializes but never disappears.
+func activityRows(a domain.HindsightActivity, seen domain.HindsightActivitySeen) []MetricRowVM {
+	rows := make([]MetricRowVM, 0, 7)
+	add := func(ok bool, label string, rate *float64) {
+		if ok {
+			rows = append(rows, MetricRowVM{Label: label, Value: FormatRatePerMin(rate)})
+		}
 	}
+	add(seen.Retain, "Retain", a.RetainPerMin)
+	add(seen.Recall, "Recall", a.RecallPerMin)
+	add(seen.Reflect, "Reflect", a.ReflectPerMin)
+	add(seen.Consolidate, "Consolidation", a.ConsolidatePerMin)
+	add(seen.LLMCalls, "LLM calls", a.LLMCallsPerMin)
+	add(seen.InputTokens, "Input tokens", a.InputTokensPerMin)
+	add(seen.OutputTokens, "Output tokens", a.OutputTokensPerMin)
+	return rows
 }
 
 // queueRows builds the Queue section, which exists only when the
@@ -982,7 +991,8 @@ func titleFirst(s string) string {
 }
 
 // BuildServiceOverviewVM derives the compact overview body (S5_UI_UX §3-4):
-// health first, then Banks/Facts, then the Recall/LLM rates, then the most
+// health first, then Banks/Facts, then the Recall/LLM rates (only for
+// families the deployment exports), then the most
 // useful available bottom row — async backlog when any of it exists,
 // otherwise consolidation backlog, otherwise DB pressure. Pairs whose own
 // value is unavailable show "—"; a family with nothing at all is skipped
@@ -1004,11 +1014,14 @@ func BuildServiceOverviewVM(snap domain.HindsightSnapshot) ServiceOverviewVM {
 		)
 	}
 
-	// Rates are headline even before their baseline exists ("—").
-	vm.Rows = append(vm.Rows,
-		MetricRowVM{Label: "Recall", Value: FormatRatePerMin(snap.Activity.RecallPerMin)},
-		MetricRowVM{Label: "LLM calls", Value: FormatRatePerMin(snap.Activity.LLMCallsPerMin)},
-	)
+	// Rates are headline even before their baseline exists ("—") — but only
+	// for families the deployment has actually exported.
+	if snap.ActivitySeen.Recall {
+		vm.Rows = append(vm.Rows, MetricRowVM{Label: "Recall", Value: FormatRatePerMin(snap.Activity.RecallPerMin)})
+	}
+	if snap.ActivitySeen.LLMCalls {
+		vm.Rows = append(vm.Rows, MetricRowVM{Label: "LLM calls", Value: FormatRatePerMin(snap.Activity.LLMCallsPerMin)})
+	}
 
 	vm.Rows = append(vm.Rows, overviewBacklogRows(snap)...)
 	return vm

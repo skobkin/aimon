@@ -10,6 +10,35 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — S5: a rate row renders only for a counter family the deployment has exported
+
+The S5 wireframe gives the Activity block a fixed seven rows, "—" marking a
+rate that is not derivable (S5_UI_UX). A real deployment broke the
+assumption that every family eventually appears: recall served synchronously
+is never recorded in the operations counter family at all — the
+`operation="recall"` series does not exist in its `/metrics` — so the Recall
+row rendered as a permanent dash that reads as a fault. The same
+first-activity materialization means any family can be genuinely absent on
+one deployment and present on another.
+
+From this date onward the adapter latches, per activity counter family,
+whether any successful scrape has exposed its series. The latch is sticky
+for the adapter's lifetime — a seen family stays seen when a later scrape
+lacks the series again (an upstream restart drops counters until first
+activity), so a row degrades to "—" instead of vanishing; rows can appear
+when a family first materializes but never disappear mid-session. The
+snapshot carries the latch, and the UI omits a never-seen family's row both
+in the detail Activity block and in the overview's headline rate pair — a
+block whose families were all never exported is omitted entirely. "—" keeps
+one meaning: the family is exported but the interval's rate is not derivable
+(first sample, counter reset, missing side).
+
+The HTTP 5xx row keeps its own rule: a missing 5xx series means "no errors
+observed", not "not exported", so it never participates in the latch. The
+Queue and Runtime sections' render-only-what-was-observed behavior is
+unchanged; this entry brings the Activity block in line with them.
+
+
 ## 2026-08-29 — S5: accept the OTel spellings of the deviating metric families
 
 The family names in S5_HINDSIGHT §4 come from the upstream snapshot

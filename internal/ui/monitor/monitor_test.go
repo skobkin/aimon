@@ -350,8 +350,9 @@ func (c *hindsightCtrl) States() map[domain.InstanceID]domain.Runtime {
 					RecallPerMin:   f64ptr(18),
 					LLMCallsPerMin: f64ptr(4),
 				},
-				Runtime: domain.HindsightRuntime{DBPoolSize: f64ptr(10), DBPoolIdle: f64ptr(8), DBPoolMax: f64ptr(10)},
-				Queue:   &domain.HindsightQueue{Pending: f64ptr(3), Failed: f64ptr(0)},
+				ActivitySeen: domain.HindsightActivitySeen{Recall: true, LLMCalls: true},
+				Runtime:      domain.HindsightRuntime{DBPoolSize: f64ptr(10), DBPoolIdle: f64ptr(8), DBPoolMax: f64ptr(10)},
+				Queue:        &domain.HindsightQueue{Pending: f64ptr(3), Failed: f64ptr(0)},
 			},
 		},
 	}
