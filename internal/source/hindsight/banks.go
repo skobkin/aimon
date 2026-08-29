@@ -79,7 +79,16 @@ func (a *Adapter) fetchBanks(ctx context.Context, header http.Header) (bankAggre
 			}
 			agg.Count = res.agg.Count
 		}
-		agg.Facts += res.agg.Facts
+		// Same overflow guard as the within-page accumulation: each page's
+		// sum fits, but the deployment-wide total can still overflow.
+		next := agg.Facts + res.agg.Facts
+		if next < agg.Facts {
+			return bankAggregates{}, &source.Error{
+				Category: source.CatInvalidResponse,
+				Detail:   "bank fact counts overflow",
+			}
+		}
+		agg.Facts = next
 		agg.LastWriteAt = maxTime(agg.LastWriteAt, res.agg.LastWriteAt)
 		agg.LastDocumentAt = maxTime(agg.LastDocumentAt, res.agg.LastDocumentAt)
 

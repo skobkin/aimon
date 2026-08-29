@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -880,4 +881,24 @@ func TestRefreshEmptyDeploymentLandsZeroMemory(t *testing.T) {
 	if snap.Memory.Banks != 0 || snap.Memory.Facts != 0 {
 		t.Errorf("Memory = %+v, want Banks 0 Facts 0", snap.Memory)
 	}
+}
+
+// Each page's fact sum fits int64 while their deployment-wide total may
+// not: the cross-page accumulation carries the same overflow guard as the
+// within-page one.
+func TestRefreshCrossPageFactOverflowIsInvalid(t *testing.T) {
+	srv := newHindsightServer()
+	srv.banksPages = map[string]string{
+		"0": banksPage(4,
+			fmt.Sprintf(`{"fact_count":%d,"last_write_at":"2026-08-29T10:00:00Z"}`, int64(math.MaxInt64)),
+			bankItem(0, "b")),
+		"2": banksPage(4, bankItem(1, "c"), bankItem(0, "d")),
+	}
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	a := newAdapter(server.URL, nil, &fakeClock{})
+	a.pageSize = 2
+	_, err := a.Refresh(context.Background())
+	requireSourceError(t, err, source.CatInvalidResponse)
 }
