@@ -10,28 +10,34 @@ import (
 
 // selectedFamilies is the closed set of Prometheus exposition families S5
 // consumes (docs/S5_HINDSIGHT.md §4). Everything else is skipped at parse
-// time; absent families are absence, never zero. The token totals exist
-// under two spellings: the researched upstream name
-// (hindsight_llm_tokens_input_total) and the extra-segment one observed on
-// OTel-based deployments (hindsight_llm_tokens_input_tokens_total); both
-// feed the same counter (DECISION_LOG, 2026-08-29).
+// time; absent families are absence, never zero. Three families exist
+// under two spellings: the researched upstream name and the extra-segment
+// form observed on OTel-based deployments (DECISION_LOG, 2026-08-29) —
+//
+//	hindsight_operation_total                  hindsight_operation_operations_total
+//	hindsight_llm_tokens_{in,out}put_total     hindsight_llm_tokens_{in,out}put_tokens_total
+//	hindsight_http_requests_in_progress        hindsight_http_requests_in_progress_requests
+//
+// Both spellings feed the same counter or gauge.
 var selectedFamilies = map[string]bool{
-	"hindsight_operation_total":                true,
-	"hindsight_llm_calls_total":                true,
-	"hindsight_llm_tokens_input_total":         true,
-	"hindsight_llm_tokens_output_total":        true,
-	"hindsight_llm_tokens_input_tokens_total":  true,
-	"hindsight_llm_tokens_output_tokens_total": true,
-	"hindsight_http_requests_total":            true,
-	"hindsight_http_requests_in_progress":      true,
-	"hindsight_db_pool_size":                   true,
-	"hindsight_db_pool_idle":                   true,
-	"hindsight_db_pool_min":                    true,
-	"hindsight_db_pool_max":                    true,
-	"hindsight_db_pool_waiting":                true,
-	"hindsight_async_operations":               true,
-	"hindsight_consolidation_backlog":          true,
-	"hindsight_consolidation_failed":           true,
+	"hindsight_operation_total":                    true,
+	"hindsight_operation_operations_total":         true,
+	"hindsight_llm_calls_total":                    true,
+	"hindsight_llm_tokens_input_total":             true,
+	"hindsight_llm_tokens_output_total":            true,
+	"hindsight_llm_tokens_input_tokens_total":      true,
+	"hindsight_llm_tokens_output_tokens_total":     true,
+	"hindsight_http_requests_total":                true,
+	"hindsight_http_requests_in_progress":          true,
+	"hindsight_http_requests_in_progress_requests": true,
+	"hindsight_db_pool_size":                       true,
+	"hindsight_db_pool_idle":                       true,
+	"hindsight_db_pool_min":                        true,
+	"hindsight_db_pool_max":                        true,
+	"hindsight_db_pool_waiting":                    true,
+	"hindsight_async_operations":                   true,
+	"hindsight_consolidation_backlog":              true,
+	"hindsight_consolidation_failed":               true,
 }
 
 // metricSample is one parsed exposition sample. Only the four label keys
@@ -271,7 +277,7 @@ func aggregateMetrics(samples []metricSample) (metricsCounters, metricsGauges, *
 
 	for _, s := range samples {
 		switch s.name {
-		case "hindsight_operation_total":
+		case "hindsight_operation_total", "hindsight_operation_operations_total":
 			switch s.labels["operation"] {
 			case "retain":
 				counters.RetainTotal = add(counters.RetainTotal, s.value)
@@ -293,7 +299,7 @@ func aggregateMetrics(samples []metricSample) (metricsCounters, metricsGauges, *
 			if s.labels["status_class"] == "5xx" {
 				counters.HTTP5xxTotal = add(counters.HTTP5xxTotal, s.value)
 			}
-		case "hindsight_http_requests_in_progress":
+		case "hindsight_http_requests_in_progress", "hindsight_http_requests_in_progress_requests":
 			gauges.HTTPInProgress = add(gauges.HTTPInProgress, s.value)
 		case "hindsight_db_pool_size":
 			gauges.DBPoolSize = add(gauges.DBPoolSize, s.value)

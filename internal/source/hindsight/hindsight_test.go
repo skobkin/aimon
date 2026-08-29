@@ -929,6 +929,30 @@ hindsight_llm_tokens_output_total 4
 	}
 }
 
+// The operations counter and the in-progress gauge have the same
+// extra-segment OTel spellings, classified by the same labels as the
+// documented names.
+func TestOTelOperationsAndInProgressSpellingsAggregate(t *testing.T) {
+	body := `hindsight_operation_operations_total{operation="retain",source="worker",success="true"} 3
+hindsight_operation_operations_total{operation="recall",source="api",success="false"} 2
+hindsight_http_requests_in_progress_requests 4
+`
+	samples, err := parseSelectedMetrics(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	counters, gauges, _ := aggregateMetrics(samples)
+	if counters.RetainTotal == nil || *counters.RetainTotal != 3 {
+		t.Errorf("RetainTotal = %v, want 3", counters.RetainTotal)
+	}
+	if counters.RecallTotal == nil || *counters.RecallTotal != 2 {
+		t.Errorf("RecallTotal = %v, want 2", counters.RecallTotal)
+	}
+	if gauges.HTTPInProgress == nil || *gauges.HTTPInProgress != 4 {
+		t.Errorf("HTTPInProgress = %v, want 4", gauges.HTTPInProgress)
+	}
+}
+
 // A bank list without pagination metadata is the complete list: the count
 // is the returned row count and the walk must not advance the offset —
 // servers that ignore offset would hand back the same rows and the facts

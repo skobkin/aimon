@@ -10,16 +10,25 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
-## 2026-08-29 — S5: accept the OTel spelling of the LLM token counter families
+## 2026-08-29 — S5: accept the OTel spellings of the deviating metric families
 
-The spec'd token families (`hindsight_llm_tokens_input_total`,
-`hindsight_llm_tokens_output_total`, S5_HINDSIGHT §4) do not exist on an
-observed OTel-based deployment, which spells them with an extra segment:
-`hindsight_llm_tokens_input_tokens_total` /
-`hindsight_llm_tokens_output_tokens_total`. The adapter therefore accepts
-both spellings — both are in the closed selected set and both accumulate
-into the same counter, so a deployment exposing each is summed, and the
-derivation, rate, and availability rules are unchanged.
+The family names in S5_HINDSIGHT §4 come from the upstream snapshot
+researched at commit dc1664d0 (OpenAPI 0.9.2). A real OTel-based
+deployment renames three of them with an extra segment, so their series
+never reached the aggregates and the corresponding rows stayed
+permanently unavailable while the rest of the card worked:
+
+| documented name | observed OTel name |
+| --- | --- |
+| `hindsight_operation_total` | `hindsight_operation_operations_total` |
+| `hindsight_llm_tokens_{input,output}_total` | `hindsight_llm_tokens_{input,output}_tokens_total` |
+| `hindsight_http_requests_in_progress` | `hindsight_http_requests_in_progress_requests` |
+
+The adapter accepts both spellings: both are in the closed selected set
+and both accumulate into the same counter or gauge, so a deployment
+exposing each is summed. Classification labels (`operation`,
+`status_class`, `status`) are unchanged — the observed deployment keeps
+them. Derivation, rate, and availability rules are otherwise untouched.
 
 ## 2026-08-29 — S5: a bank list without pagination metadata is one complete page
 
