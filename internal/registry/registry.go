@@ -480,11 +480,13 @@ func capabilityTestReport(ctx context.Context, checks []namedCapability) TestRep
 	return report
 }
 
-// hindsightTestReport renders the Hindsight connection test as three
-// lines: Health (folding the /health/live liveness probe in), Metrics, and
-// Banks with the visible bank count. All four surfaces are probed even
-// when one fails, so a partial misconfiguration shows every broken surface
-// at once.
+// hindsightTestReport renders the Hindsight connection test as four
+// lines: Health, Liveness (/health/live), Metrics, and Banks with the
+// visible bank count. The liveness probe reports on its own line so a
+// proxy rule stranding exactly that endpoint is visible by name instead
+// of masquerading as a /health failure (DECISION_LOG, 2026-08-29). All
+// four surfaces are probed even when one fails, so a partial
+// misconfiguration shows every broken surface at once.
 func hindsightTestReport(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
 	s := inst.Hindsight
 	if s == nil {
@@ -498,13 +500,13 @@ func hindsightTestReport(ctx context.Context, inst config.SourceInstance, deps D
 	if out.Err != nil {
 		return failedTestReport(out.Err)
 	}
-	healthErr := out.HealthErr
-	if healthErr == nil {
-		healthErr = out.LiveErr
-	}
 	health := "Health: OK"
-	if healthErr != nil {
-		health = "Health: " + sanitizedReason(healthErr)
+	if out.HealthErr != nil {
+		health = "Health: " + sanitizedReason(out.HealthErr)
+	}
+	liveness := "Liveness: OK"
+	if out.LiveErr != nil {
+		liveness = "Liveness: " + sanitizedReason(out.LiveErr)
 	}
 	metrics := "Metrics: OK"
 	if out.MetricsErr != nil {
@@ -515,7 +517,7 @@ func hindsightTestReport(ctx context.Context, inst config.SourceInstance, deps D
 		banks = "Banks: " + sanitizedReason(out.BanksErr)
 	}
 	return TestReport{
-		Lines: []string{health, metrics, banks},
+		Lines: []string{health, liveness, metrics, banks},
 		OK:    out.OK(),
 	}
 }

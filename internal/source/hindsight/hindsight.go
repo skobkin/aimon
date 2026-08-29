@@ -143,18 +143,26 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	counters, gauges, queue := aggregateMetrics(samples)
 
 	// Slow data: fetch only when missing or past the TTL; otherwise serve
-	// the cached liveness/bank aggregates.
+	// the cached liveness/bank aggregates. Liveness is cosmetic — version
+	// and uptime only — so a broken or badly routed /health/live degrades
+	// those two fields instead of failing the refresh and going dark over a
+	// proxy rule (DECISION_LOG, 2026-08-29). The bank walk stays required:
+	// its failure leaves no slow data worth showing.
 	var slow *slowState
 	if a.slowExpired(now) {
-		live, err := a.fetchLive(ctx, header)
-		if err != nil {
-			return nil, err
+		st := &slowState{fetchedAt: now}
+		if live, err := a.fetchLive(ctx, header); err != nil {
+			a.log.Warn("hindsight liveness fetch failed; version and uptime unavailable", "error", err)
+		} else {
+			st.version = live.Version
+			st.uptime = live.uptime
 		}
 		banks, err := a.fetchBanks(ctx, header)
 		if err != nil {
 			return nil, err
 		}
-		slow = &slowState{fetchedAt: now, version: live.Version, uptime: live.uptime, banks: banks}
+		st.banks = banks
+		slow = st
 	}
 
 	snap := domain.HindsightSnapshot{
@@ -195,8 +203,8 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 }
 
 // TestOutcome is the Settings connection-test result: one probe per
-// configured surface, reported by the registry as the three-line
-// Health/Metrics/Banks report (the liveness probe folds into Health).
+// configured surface, reported by the registry as the four-line
+// Health/Liveness/Metrics/Banks report.
 type TestOutcome struct {
 	// Err is a local failure (keychain) that prevented every probe.
 	Err error

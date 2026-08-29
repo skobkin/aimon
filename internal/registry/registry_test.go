@@ -343,7 +343,7 @@ func TestHindsightTestConnection(t *testing.T) {
 	def, _ := Get(domain.KindHindsight)
 
 	report := def.Test(context.Background(), instance, Deps{Creds: fakeStore{}, Client: server.Client()})
-	want := []string{"Health: OK", "Metrics: OK", "Banks: OK (27 visible)"}
+	want := []string{"Health: OK", "Liveness: OK", "Metrics: OK", "Banks: OK (27 visible)"}
 	if len(report.Lines) != len(want) {
 		t.Fatalf("report = %v, want %v", report.Lines, want)
 	}
@@ -381,6 +381,45 @@ func TestHindsightTestConnection(t *testing.T) {
 	}
 	if report.Lines[0] != "Health: Authentication failed" {
 		t.Errorf("health line = %q, want the sanitized auth message", report.Lines[0])
+	}
+
+	// A proxy stranding exactly /health/live (an exact-match Path(/health)
+	// rule, say) hands that endpoint to the web UI, which answers with
+	// HTML: the report must blame Liveness by name and leave Health OK.
+	split := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.Write([]byte(`{"status":"healthy","database":"connected"}`))
+		case "/health/live":
+			w.Write([]byte("<!doctype html><html><body>control plane</body></html>"))
+		case "/metrics":
+			w.Write([]byte("hindsight_db_pool_size 10\n"))
+		case "/v1/default/banks":
+			fmt.Fprintf(w, `{"banks":[{"bank_id":"x","fact_count":1}],"total":3,"limit":1,"offset":0}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer split.Close()
+
+	instance.Hindsight = &config.HindsightSettings{BaseURL: split.URL}
+	report = def.Test(context.Background(), instance, Deps{Creds: fakeStore{}, Client: split.Client()})
+	wantSplit := []string{
+		"Health: OK",
+		"Liveness: Invalid provider response",
+		"Metrics: OK",
+		"Banks: OK (3 visible)",
+	}
+	if len(report.Lines) != len(wantSplit) {
+		t.Fatalf("report = %v, want %v", report.Lines, wantSplit)
+	}
+	for i := range wantSplit {
+		if report.Lines[i] != wantSplit[i] {
+			t.Errorf("line[%d] = %q, want %q", i, report.Lines[i], wantSplit[i])
+		}
+	}
+	if report.OK {
+		t.Error("a broken liveness surface must not count as a success")
 	}
 
 	// Missing settings is an infrastructure failure, not a probe report.

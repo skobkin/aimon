@@ -10,6 +10,32 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — S5: the /health/live liveness probe degrades instead of failing, and reports on its own line
+
+The S5 spec makes the liveness fetch a required step of the slow path
+(S5_IMPLEMENTATION_SPEC §5) and suggests a three-line test report folding
+liveness into the Health line (S5_UI_UX §2). Real deployments break both
+assumptions in a specific way: a reverse proxy with an exact-match
+`Path(/health)` rule routes only `/health` to the API and strands
+`/health/live` on the web UI, whose HTML answer fails JSON parsing. Under
+the strict reading one cosmetic endpoint then blanks the entire source —
+every Refresh errored, so no snapshot ever published and the deployment
+read as Unavailable everywhere — while the test report blamed `/health`,
+the one surface that worked.
+
+Two changes, from that date onward:
+
+1. Refresh downgrades the liveness fetch to best-effort. A failed
+   `/health/live` logs a warning and publishes the snapshot without
+   version/uptime (the UI already omits absent rows); the bank walk stays
+   required, and the slow cache still commits only on overall success.
+2. The Settings report renders four lines — Health, Liveness, Metrics,
+   Banks — so the stranded endpoint is named instead of masquerading as a
+   `/health` failure. `TestOutcome.OK` still requires all four probes.
+
+The spec's request budget, cache atomicity, and "suggested" report shape
+are otherwise unchanged.
+
 ## 2026-08-29 — S5: Hindsight gets its own poll-interval ladder and a load-time nearest-preset migration
 
 Poll presets stop being a per-category property and become a per-kind one.

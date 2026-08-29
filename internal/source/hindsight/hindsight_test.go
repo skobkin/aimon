@@ -865,6 +865,42 @@ func TestRefreshMalformedMetricsFailsWithoutCommitting(t *testing.T) {
 	}
 }
 
+// A broken liveness endpoint — e.g. a proxy routing /health/live to the
+// web UI, which answers with HTML — must not fail the refresh: liveness
+// carries only version and uptime, so the refresh degrades to a snapshot
+// without them while health, metrics and the bank aggregates still land.
+func TestRefreshToleratesBrokenLiveness(t *testing.T) {
+	srv := newHindsightServer()
+	srv.liveCode = http.StatusOK
+	srv.liveBody = "<!doctype html><html><body>control plane</body></html>"
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	clk := &fakeClock{t: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)}
+	a := newAdapter(server.URL, nil, clk)
+	snap := mustRefresh(t, a)
+
+	if snap.Service.Version != "" || snap.Service.Uptime != 0 {
+		t.Errorf("version/uptime = %q/%v, want absent on a broken liveness fetch", snap.Service.Version, snap.Service.Uptime)
+	}
+	if snap.Service.Status != "healthy" {
+		t.Errorf("health block = %+v, want the /health data", snap.Service)
+	}
+	if snap.Memory == nil || snap.Memory.Banks != 3 {
+		t.Errorf("Memory = %+v, want the bank aggregate despite the broken liveness fetch", snap.Memory)
+	}
+
+	// The slow cache still commits, so the steady-state budget is unchanged.
+	clk.advance(5 * time.Second)
+	snap = mustRefresh(t, a)
+	if got := srv.uris()[4:]; len(got) != 2 {
+		t.Errorf("fast-poll requests = %v, want only /health and /metrics", got)
+	}
+	if snap.Service.Version != "" {
+		t.Errorf("Version = %q, want the cached absence", snap.Service.Version)
+	}
+}
+
 // A valid empty deployment (total 0) must land a populated Memory block —
 // nil memory means "slow data not fetched yet", not "no banks" — so the UI
 // can show the real zeros instead of waiting forever.
