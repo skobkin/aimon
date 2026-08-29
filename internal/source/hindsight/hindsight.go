@@ -5,7 +5,8 @@
 //	GET /health                    fast (every refresh)
 //	GET /metrics                   fast (every refresh)
 //	GET /health/live               slow (adapter-local ~60s cache)
-//	GET /v1/default/banks?limit=1000&offset=N   slow, paginated by total
+//	GET /v1/default/banks?limit=1000&offset=N   slow; paginated by the
+//	    response's own total, or a single complete page when it has none
 //
 // No /version, no per-bank request, no LLM health probe. The source is
 // deliberately deployment-summary-only: bank identity fields are never

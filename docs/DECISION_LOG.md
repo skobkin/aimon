@@ -10,6 +10,23 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — S5: a bank list without pagination metadata is one complete page
+
+S5 models the bank list as always paginated by its own `total`
+(S5_HINDSIGHT §8, S5_IMPLEMENTATION_SPEC §6, from the upstream response
+model researched at commit dc1664d0 / OpenAPI 0.9.2). A real deployment
+returns `{"banks":[...]}` with no `total` at all — and ignores `limit`
+and `offset` — so the adapter read `total` as its zero value and reported
+"Banks 0" while the fact aggregate still summed correctly, and any walk
+past the first page would have re-read the same rows and double-counted
+their facts.
+
+From this date: `total` is optional. Present, it stays authoritative and
+the walk covers it exactly as specified; absent, the returned rows are
+the complete list — the count is the row count and the walk stops after
+that one page. A negative `total` remains invalid. The spec's
+request-budget and "never trust the echoed limit" rules are unchanged.
+
 ## 2026-08-29 — S5: the /health/live liveness probe degrades instead of failing, and reports on its own line
 
 The S5 spec makes the liveness fetch a required step of the slow path

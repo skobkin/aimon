@@ -13,9 +13,11 @@ import (
 // list. The upstream items carry bank identity/profile fields (IDs, names,
 // missions) that S5 deliberately does not map: what is not in the struct
 // cannot leak into snapshots, logs, or the UI (docs/S5_AGENT_RULES.md §2).
+// Total is optional: observed deployments omit the pagination fields
+// entirely (and ignore limit/offset), so absence is modeled, not guessed.
 type bankListResponse struct {
 	Banks  []bankAggregateItem `json:"banks"`
-	Total  int64               `json:"total"`
+	Total  *int64              `json:"total"`
 	Limit  int64               `json:"limit"`
 	Offset int64               `json:"offset"`
 }
@@ -31,18 +33,22 @@ type bankAggregateItem struct {
 // bankAggregates is the deployment-wide result of walking the bank list.
 type bankAggregates struct {
 	// Count is the response's total bank count — never a row count, so a
-	// truncated walk cannot silently under-report.
+	// truncated walk cannot silently under-report. A response without a
+	// total does not paginate at all, so there its row count IS the
+	// complete list's size.
 	Count          int64
 	Facts          int64
 	LastWriteAt    *time.Time
 	LastDocumentAt *time.Time
 }
 
-// pageResult is one fetched page: its aggregate contribution plus the row
-// count the pagination walk advances by.
+// pageResult is one fetched page: its aggregate contribution, the row
+// count the pagination walk advances by, and whether the response carried
+// its own total.
 type pageResult struct {
-	agg  bankAggregates
-	rows int64
+	agg          bankAggregates
+	rows         int64
+	totalPresent bool
 }
 
 // maxBankPages bounds the pagination walk. With the 1000-row page size
@@ -50,16 +56,40 @@ type pageResult struct {
 // while a broken server cannot keep the adapter requesting forever.
 const maxBankPages = 10000
 
-// fetchBanks walks GET /v1/default/banks?limit=N&offset=M until the
-// response's own total is covered. The echoed limit is never trusted for
-// advancement (the server may cap the page size); progress is measured by
-// returned rows. Only list-page requests are ever made — never one
-// request per bank.
+// fetchBanks reads GET /v1/default/banks?limit=N&offset=M. When the
+// response carries its own total the walk continues until that total is
+// covered; the echoed limit is never trusted for advancement (the server
+// may cap the page size), progress is measured by returned rows, and only
+// list-page requests are ever made — never one request per bank. A
+// response without a total does not paginate at all: the rows it returned
+// are the complete list, and advancing the offset would re-read those same
+// rows on servers that ignore offset, double-counting their facts
+// (DECISION_LOG, 2026-08-29).
 func (a *Adapter) fetchBanks(ctx context.Context, header http.Header) (bankAggregates, error) {
-	var agg bankAggregates
-	var offset int64
+	first, err := a.fetchBanksPage(ctx, header, int64(a.pageSize), 0)
+	if err != nil {
+		return bankAggregates{}, err
+	}
+	if !first.totalPresent {
+		return first.agg, nil
+	}
 
-	for page := 0; ; page++ {
+	agg := first.agg
+	offset := first.rows
+	if first.rows <= 0 {
+		if offset < agg.Count {
+			return bankAggregates{}, &source.Error{
+				Category: source.CatInvalidResponse,
+				Detail:   "bank list ended before reaching its total",
+			}
+		}
+		return agg, nil
+	}
+	if offset >= agg.Count {
+		return agg, nil
+	}
+
+	for page := 1; ; page++ {
 		if page >= maxBankPages {
 			return bankAggregates{}, &source.Error{
 				Category: source.CatInvalidResponse,
@@ -69,15 +99,6 @@ func (a *Adapter) fetchBanks(ctx context.Context, header http.Header) (bankAggre
 		res, err := a.fetchBanksPage(ctx, header, int64(a.pageSize), offset)
 		if err != nil {
 			return bankAggregates{}, err
-		}
-		if page == 0 {
-			if res.agg.Count < 0 {
-				return bankAggregates{}, &source.Error{
-					Category: source.CatInvalidResponse,
-					Detail:   "bank list total is negative",
-				}
-			}
-			agg.Count = res.agg.Count
 		}
 		// Same overflow guard as the within-page accumulation: each page's
 		// sum fits, but the deployment-wide total can still overflow.
@@ -123,15 +144,19 @@ func (a *Adapter) fetchBanksPage(ctx context.Context, header http.Header, limit,
 	if err := source.GetJSON(ctx, a.client, url, header, &resp); err != nil {
 		return pageResult{}, err
 	}
-	if resp.Total < 0 || resp.Offset < 0 {
+	if (resp.Total != nil && *resp.Total < 0) || resp.Offset < 0 {
 		return pageResult{}, &source.Error{
 			Category: source.CatInvalidResponse,
 			Detail:   "bank list pagination fields are negative",
 		}
 	}
 
-	res := pageResult{rows: int64(len(resp.Banks))}
-	res.agg.Count = resp.Total
+	res := pageResult{rows: int64(len(resp.Banks)), totalPresent: resp.Total != nil}
+	if resp.Total != nil {
+		res.agg.Count = *resp.Total
+	} else {
+		res.agg.Count = res.rows
+	}
 	for i := range resp.Banks {
 		item := &resp.Banks[i]
 		if item.FactCount != nil {

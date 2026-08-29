@@ -224,6 +224,12 @@ func banksPage(total int64, items ...string) string {
 		strings.Join(items, ","), total, len(items))
 }
 
+// banksPageNoTotal serves the shape observed on deployments that do not
+// paginate the bank list at all: no total, and no limit/offset echo.
+func banksPageNoTotal(items ...string) string {
+	return fmt.Sprintf(`{"banks":[%s]}`, strings.Join(items, ","))
+}
+
 func bankItem(facts int64, name string) string {
 	return fmt.Sprintf(`{"bank_id":"b-%[1]s","name":"Bank %[1]s","mission_statement":"mission %[1]s","fact_count":%d,"last_write_at":"2026-08-29T10:00:00Z"}`,
 		name, facts)
@@ -898,6 +904,74 @@ func TestRefreshToleratesBrokenLiveness(t *testing.T) {
 	}
 	if snap.Service.Version != "" {
 		t.Errorf("Version = %q, want the cached absence", snap.Service.Version)
+	}
+}
+
+// A bank list without pagination metadata is the complete list: the count
+// is the returned row count and the walk must not advance the offset —
+// servers that ignore offset would hand back the same rows and the facts
+// would be counted twice.
+func TestRefreshUnpaginatedBankListIsComplete(t *testing.T) {
+	srv := newHindsightServer()
+	srv.banksBody = banksPageNoTotal(bankItem(649, "a"), bankItem(907, "b"))
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	clk := &fakeClock{t: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)}
+	a := newAdapter(server.URL, nil, clk)
+	snap := mustRefresh(t, a)
+
+	if snap.Memory == nil || snap.Memory.Banks != 2 || snap.Memory.Facts != 649+907 {
+		t.Fatalf("Memory = %+v, want Banks 2 Facts %d", snap.Memory, 649+907)
+	}
+
+	// Exactly one bank request: there is nothing to walk.
+	var bankReqs int
+	for _, uri := range srv.uris() {
+		if strings.HasPrefix(uri, "/v1/default/banks") {
+			bankReqs++
+		}
+	}
+	if bankReqs != 1 {
+		t.Errorf("bank requests = %d, want the single unpaginated page", bankReqs)
+	}
+
+	// The count survives the TTL the same way the facts do.
+	clk.advance(61 * time.Second)
+	snap = mustRefresh(t, a)
+	if snap.Memory.Banks != 2 || snap.Memory.Facts != 649+907 {
+		t.Errorf("Memory after TTL = %+v, want the same complete list", snap.Memory)
+	}
+}
+
+// The Settings test reports the row count for a deployment without
+// pagination metadata instead of a misleading 0.
+func TestTestReportsUnpaginatedBankTotal(t *testing.T) {
+	srv := newHindsightServer()
+	srv.banksBody = banksPageNoTotal(bankItem(1, "a"), bankItem(2, "b"), bankItem(3, "c"))
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	out := newAdapter(server.URL, nil, &fakeClock{}).Test(context.Background())
+	if out.BanksErr != nil {
+		t.Fatalf("BanksErr = %v, want nil", out.BanksErr)
+	}
+	if out.BanksTotal != 3 {
+		t.Errorf("BanksTotal = %d, want the 3 returned rows", out.BanksTotal)
+	}
+}
+
+// An unpaginated empty list is a real empty deployment: zeros land, not
+// an absent Memory block.
+func TestRefreshUnpaginatedEmptyBankListLandsZeroMemory(t *testing.T) {
+	srv := newHindsightServer()
+	srv.banksBody = banksPageNoTotal()
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	snap := mustRefresh(t, newAdapter(server.URL, nil, &fakeClock{}))
+	if snap.Memory == nil || snap.Memory.Banks != 0 || snap.Memory.Facts != 0 {
+		t.Fatalf("Memory = %+v, want landed zeros", snap.Memory)
 	}
 }
 
