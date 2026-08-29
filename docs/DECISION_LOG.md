@@ -10,6 +10,36 @@ supersedes the affected document from its date onward. Newest entries
 first.
 
 
+## 2026-08-29 — S5: Hindsight gets its own poll-interval ladder and a load-time nearest-preset migration
+
+Poll presets stop being a per-category property and become a per-kind one.
+`config.KindIntervals` answers `domain.KindHindsight` first and only then
+falls through to the category lists, and the Hindsight registry `Definition`
+carries its own values. `docs/S5_UI_UX.md` §1 and
+`docs/S5_IMPLEMENTATION_SPEC.md` §1 still say "existing Local presets /
+Local polling preset architecture"; that historical wording is not
+rewritten, this entry supersedes it.
+
+1. The new ladder is `10s, 15s, 30s, 1m, 5m` with a `10s`
+   (`config.DefaultHindsightInterval`) default, replacing the inherited
+   local `5s … 1m` and its 5s default. Hindsight is a memory-service
+   aggregate, not telemetry: its values move only when a memory bank or the
+   process does, so a 5s poll spends requests on answers that cannot change
+   and every Hindsight refresh already chains several endpoints. The other
+   local kinds keep the unchanged local ladder and 5s default.
+
+2. Load-time migration for stored intervals that the current list no longer
+   offers (in practice a Hindsight instance saved with the old 5s default,
+   which `ValidateInstances` would otherwise reject and `LoadInstances`
+   would turn into a failed load — an empty source list at startup).
+   `recordToInstance` — the one place every loaded record passes through —
+   snaps an off-list value to the nearest offered preset, with an exact tie
+   resolved toward the longer interval (never silently speed a source up);
+   values below the ladder and corrupt/absurd ones snap to the boundary
+   presets. Normalization is in memory only: a load never rewrites the
+   stored document, and `SaveInstances` still refuses off-list values, so
+   the snapped value reaches storage only through an explicit save.
+
 ## 2026-08-29 — Wayland taskbar icon: GLFW WaylandAppID hint plus a packaged desktop entry
 
 The monitor window showed up in the Plasma taskbar as an empty entry.

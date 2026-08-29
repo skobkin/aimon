@@ -102,7 +102,9 @@ type openRouterRecord struct{}
 // the valid zero-source state (nil, nil) — the expected first S3 startup,
 // since v0.2 fixed-source configuration is intentionally not migrated. A
 // present but malformed, unsupported, or invalid document is an error; the
-// caller must surface it and must not overwrite the document.
+// caller must surface it and must not overwrite the document. A stored poll
+// interval the current preset list no longer offers is normalized in memory
+// to the nearest offered preset; the document itself stays untouched.
 func (r *Repository) LoadInstances() ([]SourceInstance, error) {
 	raw := r.prefs.String(keySourceDocument)
 	if raw == "" {
@@ -177,6 +179,11 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 	if err != nil {
 		return SourceInstance{}, fmt.Errorf("poll interval %q: %w", rec.PollInterval, err)
 	}
+	// Snap an interval the current preset list no longer offers (an instance
+	// saved with the old 5s Hindsight default) instead of failing the load of
+	// the whole document. In-memory only: the stored document is never
+	// rewritten by a load, and SaveInstances still refuses off-list values.
+	interval = normalizeInterval(kind, interval)
 	inst := SourceInstance{
 		ID:           domain.InstanceID(rec.ID),
 		Kind:         kind,

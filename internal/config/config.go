@@ -21,13 +21,21 @@ const (
 )
 
 // Polling presets and defaults (DECISIONS D8). Free-text interval entry is
-// forbidden; users pick from these lists.
+// forbidden; users pick from these lists. The lists are per kind, not per
+// category: Hindsight is a memory-service aggregate rather than GPU
+// telemetry, so its ladder starts one step higher — re-polling an aggregate
+// that only changes when the memory bank does wastes requests (2026-08-29).
 var (
 	LocalIntervals  = []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second}
 	RemoteIntervals = []time.Duration{30 * time.Second, 1 * time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
 
-	DefaultLocalInterval  = 5 * time.Second
-	DefaultRemoteInterval = 60 * time.Second
+	// HindsightIntervals is the shifted-up ladder for the Hindsight kind
+	// only; the other local kinds keep LocalIntervals.
+	HindsightIntervals = []time.Duration{10 * time.Second, 15 * time.Second, 30 * time.Second, 1 * time.Minute, 5 * time.Minute}
+
+	DefaultLocalInterval     = 5 * time.Second
+	DefaultHindsightInterval = 10 * time.Second
+	DefaultRemoteInterval    = 60 * time.Second
 )
 
 // ValidationError describes one invalid field.

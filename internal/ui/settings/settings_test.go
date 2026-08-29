@@ -216,8 +216,8 @@ func TestNewDraftHindsight(t *testing.T) {
 	if draft.Name != "Hindsight" {
 		t.Errorf("draft name = %q, want Hindsight", draft.Name)
 	}
-	if draft.PollInterval != config.DefaultLocalInterval {
-		t.Errorf("draft interval = %v, want the local default", draft.PollInterval)
+	if draft.PollInterval != config.DefaultHindsightInterval {
+		t.Errorf("draft interval = %v, want the hindsight default", draft.PollInterval)
 	}
 	if draft.Hindsight == nil {
 		t.Fatal("draft must carry hindsight settings")
@@ -278,6 +278,14 @@ func TestIntervalOptions(t *testing.T) {
 	if remote[0] != "30s" || remote[1] != "1m" || remote[4] != "10m" {
 		t.Errorf("remote options = %v", remote)
 	}
+	// Hindsight has its own shifted-up ladder.
+	hindsight := intervalOptions(config.HindsightIntervals)
+	wantHindsight := []string{"10s", "15s", "30s", "1m", "5m"}
+	for i := range wantHindsight {
+		if hindsight[i] != wantHindsight[i] {
+			t.Errorf("hindsight option[%d] = %q, want %q", i, hindsight[i], wantHindsight[i])
+		}
+	}
 }
 
 func TestGPUOption(t *testing.T) {
@@ -300,7 +308,7 @@ func TestOptionForID(t *testing.T) {
 }
 
 func TestFormatDurationsRoundTrip(t *testing.T) {
-	for _, d := range append(append([]time.Duration{}, config.LocalIntervals...), config.RemoteIntervals...) {
+	for _, d := range append(append(append([]time.Duration{}, config.LocalIntervals...), config.HindsightIntervals...), config.RemoteIntervals...) {
 		if got := config.IntervalLabel(d); got == "" {
 			t.Errorf("IntervalLabel(%v) empty", d)
 		}

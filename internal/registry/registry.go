@@ -174,8 +174,8 @@ var definitions = []Definition{
 		Kind:            domain.KindHindsight,
 		Category:        domain.CategoryLocal,
 		DefaultName:     "Hindsight",
-		DefaultInterval: config.DefaultLocalInterval,
-		Intervals:       config.LocalIntervals,
+		DefaultInterval: config.DefaultHindsightInterval,
+		Intervals:       config.HindsightIntervals,
 		CredentialSlots: apiKeySlots, // optional: no stored key means unauthenticated
 		SlotHint: func(slot credentials.Slot) string {
 			return "Optional Bearer token for protected/cloud Hindsight APIs"

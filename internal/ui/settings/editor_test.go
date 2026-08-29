@@ -339,6 +339,29 @@ func TestEditorHindsightCollect(t *testing.T) {
 	}
 }
 
+// A Hindsight editor offers its own shifted-up ladder, and a stored
+// interval that is no longer on it falls back to the kind's 10s default
+// rather than to the local 5s one. The selection stays a standard Select.
+func TestSelectIntervalHindsightFallback(t *testing.T) {
+	presets, def := config.HindsightIntervals, config.DefaultHindsightInterval
+
+	sel := widget.NewSelect(intervalOptions(presets), nil)
+	selectInterval(sel, 15*time.Second, presets, def)
+	if sel.Selected != "15s" {
+		t.Errorf("offered interval selected %q, want 15s", sel.Selected)
+	}
+
+	selectInterval(sel, 5*time.Second, presets, def) // the old stored default
+	if sel.Selected != config.IntervalLabel(def) {
+		t.Errorf("stale interval fell back to %q, want %q", sel.Selected, config.IntervalLabel(def))
+	}
+
+	// Round-tripping the selection keeps the chosen preset.
+	if got := selectedInterval(sel, presets, def); got != def {
+		t.Errorf("selectedInterval = %v, want %v", got, def)
+	}
+}
+
 // The Management-key row must be distinguishable from the API-key row
 // even with both empty.
 func TestEditorSeparatesOpenRouterSlotsInTestPayload(t *testing.T) {

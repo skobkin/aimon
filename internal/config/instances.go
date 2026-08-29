@@ -242,13 +242,60 @@ func mismatchSettings(label string) ValidationError {
 	return ValidationError{Source: label, Field: "Settings", Message: "provider settings do not match the source kind"}
 }
 
-// KindIntervals returns the offered poll interval presets for a kind's
-// category (DECISIONS D8: local sources poll faster than remote plans).
+// KindIntervals returns the offered poll interval presets for a kind. The
+// lists are per kind: Hindsight has its own shifted-up ladder and the
+// remaining kinds follow their category (DECISIONS D8: local sources poll
+// faster than remote plans).
 func KindIntervals(kind domain.SourceKind) []time.Duration {
+	if kind == domain.KindHindsight {
+		return HindsightIntervals
+	}
 	if kind.Category() == domain.CategoryLocal {
 		return LocalIntervals
 	}
 	return RemoteIntervals
+}
+
+// normalizeInterval snaps a stored poll interval onto its kind's presets,
+// returning it unchanged when it is already offered. Load-time only: a
+// document written by an older build with a different preset list must still
+// load instead of failing validation for the whole source list, and the
+// offered presets are never widened to include the stale value.
+func normalizeInterval(kind domain.SourceKind, d time.Duration) time.Duration {
+	presets := KindIntervals(kind)
+	for _, p := range presets {
+		if d == p {
+			return d
+		}
+	}
+	return snapInterval(presets, d)
+}
+
+// snapInterval returns the preset nearest to d. An exact tie between two
+// presets resolves toward the longer interval — a drifted value came from a
+// slower or a no-longer-offered faster setting, and silently speeding a
+// source up is the worse surprise. Values below the ladder (zero, negative,
+// corrupt small ones) and values above it snap to the boundary presets.
+// presets must be ordered ascending, as the package's lists are.
+func snapInterval(presets []time.Duration, d time.Duration) time.Duration {
+	best := presets[0]
+	bestDelta := absDuration(best - d)
+	for _, p := range presets[1:] {
+		switch delta := absDuration(p - d); {
+		case delta < bestDelta:
+			best, bestDelta = p, delta
+		case delta == bestDelta && p > best:
+			best, bestDelta = p, delta
+		}
+	}
+	return best
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }
 
 // SameSettings reports whether two provider settings values are equal (same

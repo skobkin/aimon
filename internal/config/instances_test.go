@@ -29,7 +29,7 @@ func validHindsight(id domain.InstanceID, name, apiURL, webURL string) SourceIns
 		Kind:         domain.KindHindsight,
 		Name:         name,
 		Enabled:      true,
-		PollInterval: DefaultLocalInterval,
+		PollInterval: DefaultHindsightInterval,
 		Hindsight:    &HindsightSettings{BaseURL: apiURL, WebUIURL: webURL},
 	}
 }
@@ -349,6 +349,72 @@ func TestLoadInstancesUnknownKindAndBadFields(t *testing.T) {
 				t.Fatalf("error = %v, want it to mention %q", err, c.want)
 			}
 		})
+	}
+}
+
+// A stored interval the current preset list no longer offers must not fail
+// the load of the whole document: it snaps to the nearest offered preset in
+// memory only, while the stored document stays byte-for-byte as written.
+func TestLoadInstancesNormalizesOffListIntervals(t *testing.T) {
+	raw := `{"schema_version":1,"sources":[` +
+		`{"id":"hs-old","kind":"hindsight","name":"Hindsight old","enabled":true,"poll_interval":"5s","hindsight":{"base_url":"http://127.0.0.1:8888"}},` +
+		`{"id":"hs-kept","kind":"hindsight","name":"Hindsight kept","enabled":true,"poll_interval":"1m0s","hindsight":{"base_url":"http://127.0.0.1:8889"}},` +
+		`{"id":"gpu-drifted","kind":"amdgputop-web","name":"AMD GPU drifted","enabled":true,"poll_interval":"12s","amdgputop_web":{"base_url":"http://127.0.0.1:8080"}},` +
+		`{"id":"gpu-absurd","kind":"amdgputop-web","name":"AMD GPU absurd","enabled":true,"poll_interval":"1h","amdgputop_web":{"base_url":"http://127.0.0.1:8081"}}]}`
+
+	prefs := newMemPreferences()
+	prefs.SetString(keySourceDocument, raw)
+
+	loaded, err := NewRepository(prefs).LoadInstances()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	want := map[domain.InstanceID]time.Duration{
+		// The stored 5s is the old Hindsight default; it moves to the new one.
+		"hs-old": DefaultHindsightInterval,
+		// A value still on the ladder passes through untouched.
+		"hs-kept": time.Minute,
+		// 12s is nearer 10s than 15s on the local ladder.
+		"gpu-drifted": 10 * time.Second,
+		// A corrupt/absurd value snaps to the longest local preset.
+		"gpu-absurd": time.Minute,
+	}
+	if len(loaded) != len(want) {
+		t.Fatalf("loaded %d sources, want %d", len(loaded), len(want))
+	}
+	for _, inst := range loaded {
+		if d, ok := want[inst.ID]; !ok {
+			t.Errorf("unexpected source %q in the loaded list", inst.ID)
+		} else if inst.PollInterval != d {
+			t.Errorf("%s poll interval = %v, want %v", inst.ID, inst.PollInterval, d)
+		}
+	}
+
+	// Normalization is in-memory: a load never rewrites the document.
+	if stored := prefs.String(keySourceDocument); stored != raw {
+		t.Errorf("load rewrote the stored document:\n%s\nwant\n%s", stored, raw)
+	}
+
+	// Saving the normalized list is what finally persists the snapped value.
+	if err := NewRepository(prefs).SaveInstances(loaded); err != nil {
+		t.Fatalf("save normalized list: %v", err)
+	}
+}
+
+// Normalization exists for load only. Saving keeps refusing an off-list
+// interval, so the offered presets are never widened behind the user's back.
+func TestSaveInstancesStillRefusesOffListInterval(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	stale := validHindsight("hs-old", "Hindsight", "http://127.0.0.1:8888", "")
+	stale.PollInterval = 5 * time.Second
+	if err := repo.SaveInstances([]SourceInstance{stale}); err == nil {
+		t.Fatal("saving an off-list interval must still fail")
+	}
+	if stored := prefs.String(keySourceDocument); stored != "" {
+		t.Errorf("a rejected save wrote %q", stored)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -77,13 +78,35 @@ func TestDefinitionMetadata(t *testing.T) {
 				t.Errorf("%s slot[%d] = %q, want %q (spelling is stable storage)", c.kind, i, slot, c.slots[i])
 			}
 		}
-		// Interval presets come from the kind's category.
-		if len(def.Intervals) != len(config.KindIntervals(c.kind)) {
-			t.Errorf("%s intervals do not match config.KindIntervals", c.kind)
+		// Interval presets come from the kind's (per-kind) preset list.
+		want := config.KindIntervals(c.kind)
+		if len(def.Intervals) != len(want) {
+			t.Errorf("%s intervals = %v, want %v", c.kind, def.Intervals, want)
+		} else {
+			for i := range want {
+				if def.Intervals[i] != want[i] {
+					t.Errorf("%s interval[%d] = %v, want %v", c.kind, i, def.Intervals[i], want[i])
+				}
+			}
 		}
 		if def.DefaultInterval == 0 {
 			t.Errorf("%s has no default interval", c.kind)
 		}
+		if !slices.Contains(def.Intervals, def.DefaultInterval) {
+			t.Errorf("%s default interval %v is not one of its presets %v", c.kind, def.DefaultInterval, def.Intervals)
+		}
+	}
+
+	// Hindsight is Local but polls a memory-service aggregate, so it carries
+	// its own shifted-up ladder instead of the local 5s one.
+	hs, _ := Get(domain.KindHindsight)
+	if hs.DefaultInterval != config.DefaultHindsightInterval {
+		t.Errorf("hindsight default interval = %v, want %v", hs.DefaultInterval, config.DefaultHindsightInterval)
+	}
+	if local, _ := Get(domain.KindAMDGPUWeb); local.DefaultInterval != config.DefaultLocalInterval ||
+		local.Intervals[0] == hs.Intervals[0] {
+		t.Errorf("the local kinds must keep their own %v ladder, hindsight starts at %v",
+			config.DefaultLocalInterval, hs.Intervals[0])
 	}
 
 	def, _ := Get(domain.KindOpenRouter)
@@ -117,7 +140,12 @@ func TestDefaultSettings(t *testing.T) {
 }
 
 func inst(id, name string, kind domain.SourceKind, settings config.ProviderSettings) config.SourceInstance {
-	i := config.SourceInstance{ID: domain.InstanceID(id), Kind: kind, Name: name, Enabled: true, PollInterval: 5 * time.Second}
+	// Hindsight polls a memory aggregate, so it starts one preset higher.
+	interval := config.DefaultLocalInterval
+	if kind == domain.KindHindsight {
+		interval = config.DefaultHindsightInterval
+	}
+	i := config.SourceInstance{ID: domain.InstanceID(id), Kind: kind, Name: name, Enabled: true, PollInterval: interval}
 	switch s := settings.(type) {
 	case config.AMDGPUWebSettings:
 		i.AMDGPUWeb = &s
