@@ -66,6 +66,11 @@ Two changes, from that date onward:
    `/health/live` logs a warning and publishes the snapshot without
    version/uptime (the UI already omits absent rows); the bank walk stays
    required, and the slow cache still commits only on overall success.
+   The warning is edge-triggered: it fires when liveness transitions into
+   the degraded state (first failure, or a success followed by a failure)
+   and while the failure persists it repeats at debug level only — a
+   permanently misrouted `/health/live` would otherwise warn on every
+   ~60s slow cycle.
 2. The Settings report renders four lines — Health, Liveness, Metrics,
    Banks — so the stranded endpoint is named instead of masquerading as a
    `/health` failure. `TestOutcome.OK` still requires all four probes.

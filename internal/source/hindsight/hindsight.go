@@ -83,10 +83,14 @@ type Adapter struct {
 	// slow is nil until the first successful slow fetch. baseline holds
 	// the previous successful /metrics counters (nil before the first) so
 	// the next successful refresh can derive rates. Both commit only when
-	// the whole Refresh succeeds.
+	// the whole Refresh succeeds. liveBroken tracks whether the last
+	// liveness fetch failed, so its warning fires on the transition into
+	// the degraded state instead of on every slow cycle — a permanently
+	// misrouted /health/live would otherwise repeat it every ~60s.
 	slow       *slowState
 	baseline   *metricsCounters
 	baselineAt time.Time
+	liveBroken bool
 }
 
 // New creates an adapter for the configured API base URL, reading the
@@ -153,8 +157,17 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	if a.slowExpired(now) {
 		st := &slowState{fetchedAt: now}
 		if live, err := a.fetchLive(ctx, header); err != nil {
-			a.log.Warn("hindsight liveness fetch failed; version and uptime unavailable", "error", err)
+			// The warning belongs to the transition into the degraded
+			// state, not to every slow cycle; staying broken keeps
+			// reporting at debug level only.
+			if a.liveBroken {
+				a.log.Debug("hindsight liveness fetch still failing; version and uptime unavailable", "error", err)
+			} else {
+				a.log.Warn("hindsight liveness fetch failed; version and uptime unavailable", "error", err)
+			}
+			a.liveBroken = true
 		} else {
+			a.liveBroken = false
 			st.version = live.Version
 			st.uptime = live.uptime
 		}

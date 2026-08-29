@@ -907,6 +907,73 @@ func TestRefreshToleratesBrokenLiveness(t *testing.T) {
 	}
 }
 
+// captureHandler records every record, so tests can assert on log output.
+type captureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+
+func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *captureHandler) warns() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, r := range h.records {
+		if r.Level == slog.LevelWarn {
+			n++
+		}
+	}
+	return n
+}
+
+// A permanently broken liveness endpoint must warn once per degraded
+// stretch, not on every slow cycle; only a recovery in between starts a
+// new stretch that warns again.
+func TestBrokenLivenessWarnsOncePerDegradedStretch(t *testing.T) {
+	const brokenLiveBody = "<!doctype html><html><body>control plane</body></html>"
+
+	srv := newHindsightServer()
+	srv.liveBody = brokenLiveBody
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	var handler captureHandler
+	clk := &fakeClock{t: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)}
+	a := New(server.URL, testAccount, nil, &http.Client{}, slog.New(&handler))
+	a.now = clk.now
+
+	mustRefresh(t, a) // first slow fetch: warn
+	clk.advance(5 * time.Second)
+	mustRefresh(t, a) // fast poll: no liveness request at all
+	clk.advance(61 * time.Second)
+	mustRefresh(t, a) // still broken: no second warn
+	if n := handler.warns(); n != 1 {
+		t.Fatalf("liveness warnings = %d, want 1 while the endpoint stays broken", n)
+	}
+
+	// A recovery ends the stretch; the next failure warns again.
+	srv.liveBody = liveBodyOK
+	clk.advance(61 * time.Second)
+	mustRefresh(t, a)
+	srv.liveBody = brokenLiveBody
+	clk.advance(61 * time.Second)
+	mustRefresh(t, a)
+	if n := handler.warns(); n != 2 {
+		t.Fatalf("liveness warnings = %d, want 2 after a recovery and a new failure", n)
+	}
+}
+
 // OTel-based deployments spell the token families with an extra _tokens
 // segment; both spellings must pass the family filter and feed the same
 // aggregate counters.
