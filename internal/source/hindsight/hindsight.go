@@ -167,7 +167,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	if slow != nil {
 		snap.Service.Version = slow.version
 		snap.Service.Uptime = slow.uptime
-		snap.Memory = domain.HindsightMemory{
+		snap.Memory = &domain.HindsightMemory{
 			Banks:          slow.banks.Count,
 			Facts:          slow.banks.Facts,
 			LastWriteAt:    slow.banks.LastWriteAt,
@@ -176,7 +176,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	} else if a.slow != nil {
 		snap.Service.Version = a.slow.version
 		snap.Service.Uptime = a.slow.uptime
-		snap.Memory = domain.HindsightMemory{
+		snap.Memory = &domain.HindsightMemory{
 			Banks:          a.slow.banks.Count,
 			Facts:          a.slow.banks.Facts,
 			LastWriteAt:    a.slow.banks.LastWriteAt,

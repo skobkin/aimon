@@ -863,3 +863,21 @@ func TestRefreshMalformedMetricsFailsWithoutCommitting(t *testing.T) {
 		t.Error("Test.MetricsErr = nil, want the malformed-exposition failure")
 	}
 }
+
+// A valid empty deployment (total 0) must land a populated Memory block —
+// nil memory means "slow data not fetched yet", not "no banks" — so the UI
+// can show the real zeros instead of waiting forever.
+func TestRefreshEmptyDeploymentLandsZeroMemory(t *testing.T) {
+	srv := newHindsightServer()
+	srv.banksBody = banksPage(0)
+	server := httptest.NewServer(srv.handler())
+	defer server.Close()
+
+	snap := mustRefresh(t, newAdapter(server.URL, nil, &fakeClock{}))
+	if snap.Memory == nil {
+		t.Fatal("Memory = nil, want a landed aggregate of an empty deployment")
+	}
+	if snap.Memory.Banks != 0 || snap.Memory.Facts != 0 {
+		t.Errorf("Memory = %+v, want Banks 0 Facts 0", snap.Memory)
+	}
+}

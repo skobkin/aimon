@@ -345,7 +345,7 @@ func (c *hindsightCtrl) States() map[domain.InstanceID]domain.Runtime {
 					Version:  "0.9.2",
 					Uptime:   2*24*time.Hour + 7*time.Hour,
 				},
-				Memory: domain.HindsightMemory{Banks: 27, Facts: 18400, LastWriteAt: &lastWrite},
+				Memory: &domain.HindsightMemory{Banks: 27, Facts: 18400, LastWriteAt: &lastWrite},
 				Activity: domain.HindsightActivity{
 					RecallPerMin:   f64ptr(18),
 					LLMCallsPerMin: f64ptr(4),

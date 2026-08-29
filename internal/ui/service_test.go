@@ -25,7 +25,7 @@ func hindsightSnap() domain.HindsightSnapshot {
 			DBAcquireMS:   f(0.4),
 			DBPoolWaiting: f(0),
 		},
-		Memory: domain.HindsightMemory{Banks: 27, Facts: 18400, LastWriteAt: &write, LastDocumentAt: &doc},
+		Memory: &domain.HindsightMemory{Banks: 27, Facts: 18400, LastWriteAt: &write, LastDocumentAt: &doc},
 		Activity: domain.HindsightActivity{
 			RetainPerMin:       f(2),
 			RecallPerMin:       f(18),
@@ -179,17 +179,30 @@ func TestBuildServiceVMConditional(t *testing.T) {
 	if vm.Runtime != nil {
 		t.Errorf("Runtime = %+v, want nil without gauges", vm.Runtime)
 	}
-	if len(vm.Memory) != 4 {
-		t.Fatalf("Memory rows = %+v, want the four aggregate rows", vm.Memory)
-	}
-	for _, label := range []string{"Last write", "Last document"} {
-		if row := findAgeRow(t, vm.Memory, label); row.Value != "—" || row.At != nil {
-			t.Errorf("%s = (%q, %v), want the unavailable dash", label, row.Value, row.At)
-		}
+	if vm.Memory != nil {
+		t.Errorf("Memory rows = %+v, want none before the slow data lands", vm.Memory)
 	}
 	for _, row := range vm.Activity {
 		if row.Value != "—" {
 			t.Errorf("first-sample %s = %q, want —", row.Label, row.Value)
+		}
+	}
+
+	// A landed aggregate of a valid empty deployment renders as real zeros,
+	// never as absence.
+	snap.Memory = &domain.HindsightMemory{}
+	vm = BuildServiceVM(snap, now)
+	if len(vm.Memory) != 4 {
+		t.Fatalf("Memory rows = %+v, want the four aggregate rows", vm.Memory)
+	}
+	for _, label := range []string{"Banks", "Facts"} {
+		if row := findAgeRow(t, vm.Memory, label); row.Value != "0" {
+			t.Errorf("%s = %q, want 0", label, row.Value)
+		}
+	}
+	for _, label := range []string{"Last write", "Last document"} {
+		if row := findAgeRow(t, vm.Memory, label); row.Value != "—" || row.At != nil {
+			t.Errorf("%s = (%q, %v), want the unavailable dash", label, row.Value, row.At)
 		}
 	}
 
@@ -286,6 +299,20 @@ func TestBuildServiceOverviewVMPriority(t *testing.T) {
 	}
 	if vm.Rows[0].Value != "—" || vm.Rows[1].Value != "—" {
 		t.Errorf("first-sample rates = %+v, want —", vm.Rows)
+	}
+
+	// A landed aggregate of a valid empty deployment shows the real zeros:
+	// availability is the landed pointer, not a non-zero count.
+	empty.Memory = &domain.HindsightMemory{}
+	vm = BuildServiceOverviewVM(empty)
+	if len(vm.Rows) != 4 {
+		t.Fatalf("Rows = %+v, want the memory pair in front of the rates", vm.Rows)
+	}
+	if vm.Rows[0].Label != "Banks" || vm.Rows[0].Value != "0" {
+		t.Errorf("row[0] = %+v, want Banks 0", vm.Rows[0])
+	}
+	if vm.Rows[1].Label != "Facts" || vm.Rows[1].Value != "0" {
+		t.Errorf("row[1] = %+v, want Facts 0", vm.Rows[1])
 	}
 }
 

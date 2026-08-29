@@ -12,8 +12,12 @@ import "time"
 type HindsightSnapshot struct {
 	CollectedAt time.Time
 
-	Service  HindsightService
-	Memory   HindsightMemory
+	Service HindsightService
+	// Memory is nil until the first slow refresh lands the bank aggregate.
+	// The pointer, not the zero value, marks availability: a valid empty
+	// deployment aggregates to Banks 0 / Facts 0, which must render as real
+	// counts, not as "no data yet".
+	Memory   *HindsightMemory
 	Activity HindsightActivity
 	Runtime  HindsightRuntime
 	// Queue is nil when the deployment exposed no backlog metric family at

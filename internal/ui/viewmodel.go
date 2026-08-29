@@ -849,8 +849,12 @@ func serviceStatusLevel(state string) MetricLevel {
 }
 
 // memoryRows builds the Memory section: aggregate counts and the two
-// relative timestamps that age in place.
-func memoryRows(m domain.HindsightMemory, now time.Time) []AgeRowVM {
+// relative timestamps that age in place. nil memory means the slow fetch
+// has not landed yet — no section at all, not a block of dashes.
+func memoryRows(m *domain.HindsightMemory, now time.Time) []AgeRowVM {
+	if m == nil {
+		return nil
+	}
 	rows := []AgeRowVM{
 		{Label: "Banks", Value: FormatCount(float64(m.Banks))},
 		{Label: "Facts", Value: FormatCount(float64(m.Facts))},
@@ -991,11 +995,9 @@ func BuildServiceOverviewVM(snap domain.HindsightSnapshot) ServiceOverviewVM {
 		vm.Summary += " · v" + snap.Service.Version
 	}
 
-	// Memory aggregates land with the first slow refresh; before that the
-	// counts are all zero, which is indistinguishable from an empty
-	// deployment, so the pair waits for real data instead of showing two
-	// fabricated zeros.
-	if snap.Memory.Banks != 0 || snap.Memory.Facts != 0 {
+	// Memory aggregates land with the first slow refresh (nil before that);
+	// once landed, a real empty deployment renders as Banks 0 / Facts 0.
+	if snap.Memory != nil {
 		vm.Rows = append(vm.Rows,
 			MetricRowVM{Label: "Banks", Value: FormatCount(float64(snap.Memory.Banks))},
 			MetricRowVM{Label: "Facts", Value: FormatCount(float64(snap.Memory.Facts))},
