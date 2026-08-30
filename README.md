@@ -5,10 +5,7 @@ subscription plans. It lives in the system tray and keeps an eye on your AMD
 GPU, your local model router, and the quotas and spending of the cloud plans
 you use — without ever opening a browser tab.
 
-<!-- Screenshots to add:
-![Monitor window](docs/screenshots/monitor.png)
-![Settings window](docs/screenshots/settings.png)
--->
+![Monitor window: Overview tab with local GPU, llama-swap and Hindsight, and remote Z.AI and Codex quotas](docs/images/overview.webp) ![Settings window: Add source dialog with the source type dropdown open](docs/images/settings_add_source.webp)
 
 ## Features
 
