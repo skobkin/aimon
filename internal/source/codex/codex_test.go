@@ -89,8 +89,55 @@ func TestDiscoverBareNameUsesEffectivePATH(t *testing.T) {
 	}
 }
 
-// --- snapshot normalization ---------------------------------------------
+// A relative PATH entry (".", "./", "bin") must not produce a bare or
+// relative name for the exec layer: Join's cleaning turns "./codex-fake"
+// into "codex-fake", which exec would look up again against the inherited
+// PATH instead of the effective one. The resolved path is absolute.
+func TestDiscoverRelativePATHEntryResolvesAbsolutely(t *testing.T) {
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "codex-fake")
+	writeExecutable(t, launcher, "#!/bin/sh\nexit 0\n")
+	t.Chdir(dir)
 
+	got := Discover(config.CodexSettings{
+		Executable: "codex-fake",
+		Env:        []config.EnvOverride{{Name: "PATH", Value: "."}},
+	})
+	if !got.OK() || got.Path != launcher {
+		t.Fatalf("discovery = %+v, want absolute %q", got, launcher)
+	}
+}
+
+// The full launch path for a relative PATH entry: the refresh must exec the
+// launcher discovery found (by absolute path) and never re-look the bare
+// name up against the inherited PATH, which does not contain it here.
+func TestRefreshResolvesBareNameThroughEffectivePATHOnly(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "codex-fake")
+	if err := os.Link(exe, launcher); err != nil {
+		t.Skipf("hardlink of the test binary: %v", err)
+	}
+	t.Chdir(dir)
+
+	settings := config.CodexSettings{
+		Executable: "codex-fake",
+		Env: []config.EnvOverride{
+			{Name: fakeChildEnv, Value: "ok"},
+			{Name: fakeDirEnv, Value: t.TempDir()},
+			{Name: "PATH", Value: "."},
+		},
+	}
+	adapter := New(settings, quietLoggerForTest(t), "v")
+	if _, err := adapter.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+}
+
+// --- snapshot normalization ---------------------------------------------
 func TestBuildSnapshotNormalization(t *testing.T) {
 	now := time.Unix(1756500000, 0)
 

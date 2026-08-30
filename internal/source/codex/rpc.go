@@ -134,12 +134,18 @@ func spawn(settings config.CodexSettings, log *slog.Logger) (*rpcConn, error) {
 		return nil, &spawnError{state: d.State}
 	}
 
-	// Launching a user-configured launcher is the entire point of this
-	// source: d.Path is our own resolution of the settings value, and the
-	// argv is fixed. No shell is involved.
-	cmd := exec.Command(d.Path, spawnArgv()...) //nolint:gosec // the configured launcher path is the integration boundary
-	cmd.Env = effectiveEnv(settings)
-	cmd.Dir = "" // inherit the application's working directory
+	// The launcher is exec'd exactly as discovery resolved it: cmd.Path is
+	// set directly (docs/S6_CODEX.md §Environment and executable
+	// resolution) so the exec layer never performs a second lookup of a
+	// bare name against the inherited PATH — discovery already searched the
+	// effective one. d.Path is our own resolution of the settings value and
+	// the argv is fixed; no shell is involved.
+	cmd := &exec.Cmd{
+		Path: d.Path,
+		Args: append([]string{d.Path}, spawnArgv()...),
+		Env:  effectiveEnv(settings),
+		Dir:  "", // inherit the application's working directory
+	}
 
 	attr := &syscall.SysProcAttr{}
 	setProcessGroup(attr)

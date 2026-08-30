@@ -68,9 +68,19 @@ func Discover(settings config.CodexSettings) Discovery {
 			continue
 		}
 		candidate := filepath.Join(dir, exe)
-		if checkExecutable(candidate) == DiscoveryFound {
-			return Discovery{State: DiscoveryFound, Path: candidate}
+		if checkExecutable(candidate) != DiscoveryFound {
+			continue
 		}
+		// The result must be absolute before it reaches the exec layer: a
+		// PATH entry like "." loses its prefix in Join's cleaning and would
+		// come back a bare name, which the exec layer would look up again —
+		// against the inherited PATH instead of the effective one.
+		abs, err := filepath.Abs(candidate)
+		if err != nil {
+			abs = candidate
+		}
+
+		return Discovery{State: DiscoveryFound, Path: abs}
 	}
 
 	return Discovery{State: DiscoveryNotFoundInPath}
