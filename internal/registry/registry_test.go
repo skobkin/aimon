@@ -677,8 +677,8 @@ func TestCodexPlanLabel(t *testing.T) {
 		"":      "",
 	}
 	for in, want := range cases {
-		if got := codexPlanLabel(in); got != want {
-			t.Errorf("codexPlanLabel(%q) = %q, want %q", in, got, want)
+		if got := CodexPlanLabel(in); got != want {
+			t.Errorf("CodexPlanLabel(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

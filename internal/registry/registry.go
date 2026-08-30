@@ -616,7 +616,7 @@ func codexTestReport(ctx context.Context, inst config.SourceInstance, deps Deps)
 		return TestReport{Lines: []string{"Codex CLI: OK", "ChatGPT: " + sanitizedReason(err)}}
 	}
 	chatgpt := "ChatGPT: OK"
-	if plan := codexPlanLabel(out.PlanType); plan != "" {
+	if plan := CodexPlanLabel(out.PlanType); plan != "" {
 		chatgpt += " · " + plan
 	}
 
@@ -626,10 +626,12 @@ func codexTestReport(ctx context.Context, inst config.SourceInstance, deps Deps)
 	}
 }
 
-// codexPlanLabel titles the provider's plan name where the known values are
+// CodexPlanLabel titles the provider's plan name where the known values are
 // concerned and passes anything else through trimmed-but-unchanged, so an
-// unknown future plan never renders as garbage or as a fake known one.
-func codexPlanLabel(plan string) string {
+// unknown future plan never renders as garbage or as a fake known one. The
+// UI reuses it so the overview subtitle and the detail Account row spell
+// the plan identically.
+func CodexPlanLabel(plan string) string {
 	switch strings.ToLower(strings.TrimSpace(plan)) {
 	case "plus":
 		return "Plus"

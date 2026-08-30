@@ -15,6 +15,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
@@ -83,9 +84,13 @@ type QuotaWindowVM struct {
 	Remaining float64
 }
 
-// QuotaVM carries the window rows of one quota snapshot.
+// QuotaVM carries the window rows of one quota snapshot. Account holds the
+// optional plan/credit metadata rows of a subscription kind (currently the
+// ChatGPT Codex detail card); it is nil for the API-quota kinds, whose
+// rendering stays untouched.
 type QuotaVM struct {
 	Windows []QuotaWindowVM
+	Account []MetricRowVM
 }
 
 // MoneyMetricVM is one labeled money row. Sensitive marks account-level
@@ -214,10 +219,13 @@ type OverviewDonutVM struct {
 	ResetAt *time.Time
 }
 
-// QuotaOverviewVM carries up to two headline quota donuts.
+// QuotaOverviewVM carries up to two headline quota donuts. Subtitle is an
+// optional plan line rendered above the grid (the ChatGPT Codex plan name);
+// empty means no line at all.
 type QuotaOverviewVM struct {
-	Windows []OverviewDonutVM // 0, 1, or 2
-	HasData bool
+	Subtitle string
+	Windows  []OverviewDonutVM // 0, 1, or 2
+	HasData  bool
 }
 
 // OverviewCardVM is one card in the Overview tab.
@@ -326,7 +334,7 @@ func cardKind(kind domain.SourceKind) CardKind {
 		return KindGPU
 	case domain.KindLlamaSwap:
 		return KindSwap
-	case domain.KindMiniMax, domain.KindZAI:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex:
 		return KindQuota
 	case domain.KindOpenRouter:
 		return KindSpend
@@ -344,7 +352,7 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 		return OverviewMetrics
 	case domain.KindLlamaSwap:
 		return OverviewRuntime
-	case domain.KindMiniMax, domain.KindZAI:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex:
 		return OverviewQuota
 	case domain.KindOpenRouter:
 		return OverviewSpend
@@ -374,6 +382,8 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, det
 		card.Swap = BuildSwapVM(snap, detail)
 	case domain.QuotaSnapshot:
 		card.Quota = BuildQuotaVM(snap, now, detail)
+	case domain.CodexSnapshot:
+		card.Quota = BuildCodexVM(snap, now, detail)
 	case domain.OpenRouterSnapshot:
 		card.Spend = BuildSpendVM(snap, detail)
 	case domain.HindsightSnapshot:
@@ -401,6 +411,8 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.T
 		card.Runtime = BuildRuntimeOverview(snap)
 	case domain.QuotaSnapshot:
 		card.Quota = BuildQuotaOverview(snap, now)
+	case domain.CodexSnapshot:
+		card.Quota = BuildCodexOverview(snap, now)
 	case domain.OpenRouterSnapshot:
 		card.Spend = BuildSpendOverview(snap)
 	case domain.HindsightSnapshot:
@@ -496,9 +508,28 @@ func shortLabel(w domain.QuotaWindow) string {
 		return "week"
 	case "mcp-monthly":
 		return "month"
-	default:
-		return w.Name
+	case "codex-primary", "codex-secondary":
+		if s := codexShortName(w.Name); s != "" {
+			return s
+		}
 	}
+
+	return w.Name
+}
+
+// codexShortName compacts the Codex window names for the donut; unknown
+// names keep their full form.
+func codexShortName(name string) string {
+	switch name {
+	case "5-hour":
+		return "5h"
+	case "1-hour":
+		return "1h"
+	case "Weekly":
+		return "week"
+	}
+
+	return ""
 }
 
 // selectHeadlineWindows picks at most 2 windows, preferring the 5-hour
@@ -506,9 +537,9 @@ func shortLabel(w domain.QuotaWindow) string {
 func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 	priority := func(id string) int {
 		switch id {
-		case "interval", "tokens-5h", "credits-5h":
+		case "interval", "tokens-5h", "credits-5h", "codex-primary":
 			return 0
-		case "weekly", "credits-weekly":
+		case "weekly", "credits-weekly", "codex-secondary":
 			return 1
 		default:
 			return 2
@@ -708,6 +739,66 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM
 		}
 		vm.Windows = append(vm.Windows, row)
 	}
+
+	return vm
+}
+
+// BuildCodexVM derives a ChatGPT Codex card from its snapshot: the shared
+// quota window rows plus, in detail view, an optional Account section
+// (plan, reset credits, rate-limit-reached). Absent optional fields are
+// omitted, never faked (docs/S6_UI_UX.md §Detail); no row is
+// money-sensitive, so the privacy setting never touches them.
+func BuildCodexVM(snap domain.CodexSnapshot, now time.Time, detail bool) QuotaVM {
+	vm := QuotaVM{Windows: make([]QuotaWindowVM, 0, len(snap.Windows))}
+	for _, w := range snap.Windows {
+		vm.Windows = append(vm.Windows, QuotaWindowVM{
+			Name:      w.Name,
+			UsedText:  FormatUsed(w.UsedFraction),
+			ResetText: FormatResetCountdown(w.ResetAt, now),
+			ResetAt:   w.ResetAt,
+			Used:      w.UsedFraction,
+			Remaining: w.RemainingFraction,
+		})
+	}
+	if !detail {
+		return vm
+	}
+	if plan := registry.CodexPlanLabel(snap.PlanType); plan != "" {
+		vm.Account = append(vm.Account, MetricRowVM{Label: "Plan", Value: plan})
+	}
+	if snap.ResetCreditsAvailable != nil {
+		vm.Account = append(vm.Account, MetricRowVM{
+			Label: "Reset credits",
+			Value: FormatCount(float64(*snap.ResetCreditsAvailable)),
+		})
+	}
+	if snap.RateLimitReachedType != "" {
+		vm.Account = append(vm.Account, MetricRowVM{
+			Label: "Rate limit",
+			Value: "Reached (" + snap.RateLimitReachedType + ")",
+			Level: MetricWarning,
+		})
+	}
+
+	return vm
+}
+
+// BuildCodexOverview derives the compact overview card: the optional plan
+// line above the shared headline donuts.
+func BuildCodexOverview(snap domain.CodexSnapshot, now time.Time) QuotaOverviewVM {
+	vm := QuotaOverviewVM{Subtitle: registry.CodexPlanLabel(snap.PlanType)}
+	headlines := selectHeadlineWindows(snap.Windows)
+	for _, w := range headlines {
+		vm.Windows = append(vm.Windows, OverviewDonutVM{
+			Label:     shortLabel(w),
+			PctText:   formatPctOnly(w.UsedFraction),
+			Used:      w.UsedFraction,
+			Remaining: w.RemainingFraction,
+			ResetText: FormatResetCountdown(w.ResetAt, now),
+			ResetAt:   w.ResetAt,
+		})
+	}
+	vm.HasData = len(vm.Windows) > 0
 
 	return vm
 }

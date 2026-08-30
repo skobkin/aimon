@@ -153,7 +153,9 @@ func (r *donutRenderer) Refresh() {
 // (one per window, full width for a single one); each donut is centered in
 // its column at its natural size — a stretched cell would squash the ring
 // into an ellipse — with its reset countdown centered directly beneath it.
-// Windows without a reliable reset time show no countdown line at all.
+// Windows without a reliable reset time show no countdown line at all. An
+// optional subtitle (the plan line of subscription kinds) is rendered once
+// above the grid.
 //
 // The second return re-renders the countdown lines for a new time; it is
 // nil when no window shows a countdown. Bodies are never rebuilt for time:
@@ -179,13 +181,21 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 		cells = append(cells, container.New(layout.NewCenterLayout(), col))
 	}
 	body := container.NewGridWithColumns(len(cells), cells...)
-	if len(ticks) == 0 {
-		return body, nil
-	}
-
-	return body, func(now time.Time) {
-		for _, tick := range ticks {
-			tick(now)
+	var tick func(now time.Time)
+	if len(ticks) > 0 {
+		tick = func(now time.Time) {
+			for _, t := range ticks {
+				t(now)
+			}
 		}
 	}
+	if vm.Subtitle == "" {
+		return body, tick
+	}
+
+	// The subtitle is set once at build time; like the donuts, it is never
+	// rebuilt for a time tick.
+	subtitle := widget.NewLabelWithStyle(vm.Subtitle, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+
+	return container.NewVBox(subtitle, body), tick
 }
