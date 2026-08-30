@@ -23,6 +23,17 @@ type Source interface {
 	Refresh(ctx context.Context) (domain.Snapshot, error)
 }
 
+// Closer is the optional disposal contract of a Source that owns resources
+// beyond one refresh — currently the Codex adapter's persistent app-server
+// process. It is matched by type assertion, so sources without long-lived
+// resources simply do not implement it. Close must be idempotent and bound
+// its own cleanup time (kill-and-reap, not a request timeout); a closed
+// source stays usable — its next Refresh starts its resources again, which
+// is what a disabled-then-re-enabled instance relies on.
+type Closer interface {
+	Close()
+}
+
 // Registration is the desired state of one configured source instance.
 // Kind is presentation/log metadata; the instance ID keying the
 // registration map is the identity.
@@ -50,8 +61,14 @@ type loop struct {
 // two refreshes of the same instance never overlap, and the last
 // successful snapshot survives later failures (DECISIONS D6).
 //
-// Threading: Apply cancel-and-waits on stopped loops, so it may block for
-// up to one in-flight request timeout and must not run on a UI thread.
+// Sources implementing Closer are closed deterministically when the manager
+// stops using them: on removal, disable, adapter replacement, and shutdown.
+// An interval-only reconfiguration keeps the source, so its long-lived
+// resources survive the loop restart.
+//
+// Threading: Apply cancel-and-waits on stopped loops (and closes their
+// sources), so it may block for up to one in-flight request timeout plus a
+// Closer's self-bounded cleanup and must not run on a UI thread.
 // Refresh/RefreshAll/States/Subscribe/Cancel are non-blocking and UI-safe.
 type Manager struct {
 	log *slog.Logger
@@ -63,6 +80,10 @@ type Manager struct {
 	mu       sync.Mutex
 	loops    map[domain.InstanceID]*loop
 	runtimes map[domain.InstanceID]*domain.Runtime
+
+	// closeOnce guards the shutdown-time close of surviving sources, so a
+	// second Wait (Stop followed by Wait) never closes them twice.
+	closeOnce sync.Once
 
 	subMu       sync.Mutex
 	subscribers map[int]func(domain.InstanceID)
@@ -93,13 +114,25 @@ func NewManager(log *slog.Logger) *Manager {
 // interval-only change restarts scheduling and keeps the last-good
 // snapshot. Rename/reorder never reach the manager at all. Stopped loops
 // are waited for before returning.
+//
+// A stopped loop's Source is closed when no registration of this Apply
+// keeps it enabled — removal, replacement, and disable all discard the
+// source this way (a disabled instance keeps its entry in regs with
+// Enabled false and has no loop, so a later Wait could no longer reach
+// it); an interval-only restart reuses the same enabled source and leaves
+// its long-lived resources running.
 func (m *Manager) Apply(regs map[domain.InstanceID]Registration) {
-	var stopped []*loop
+	type stoppedLoop struct {
+		l   *loop
+		src Source
+	}
+	var stopped []stoppedLoop
 
 	m.mu.Lock()
 	for id := range m.loops {
 		if _, wanted := regs[id]; !wanted {
-			stopped = append(stopped, m.detachLoopLocked(id))
+			l := m.detachLoopLocked(id)
+			stopped = append(stopped, stoppedLoop{l: l, src: l.source})
 			delete(m.runtimes, id)
 		}
 	}
@@ -118,7 +151,8 @@ func (m *Manager) Apply(regs map[domain.InstanceID]Registration) {
 			m.startLoopLocked(id, reg)
 		case running && !reg.Enabled:
 			m.log.Info("source disabled", "instance", string(id), "kind", string(reg.Kind))
-			stopped = append(stopped, m.detachLoopLocked(id))
+			l := m.detachLoopLocked(id)
+			stopped = append(stopped, stoppedLoop{l: l, src: l.source})
 			m.resetRuntimeLocked(id)
 		case running && reg.Enabled && (l.source != reg.Source || l.interval != reg.Interval):
 			m.log.Info("source reconfigured", "instance", string(id), "kind", string(reg.Kind), "interval", reg.Interval.String())
@@ -128,15 +162,35 @@ func (m *Manager) Apply(regs map[domain.InstanceID]Registration) {
 				// data from the new configuration.
 				m.resetRuntimeLocked(id)
 			}
-			stopped = append(stopped, m.detachLoopLocked(id))
+			l := m.detachLoopLocked(id)
+			stopped = append(stopped, stoppedLoop{l: l, src: l.source})
 			m.startLoopLocked(id, reg)
 		}
 	}
 	m.mu.Unlock()
 
-	for _, l := range stopped {
-		<-l.done
+	for _, s := range stopped {
+		<-s.l.done
+		// Only a Closer is disposed, and only when this Apply leaves no
+		// enabled registration using the same source pointer.
+		if closer, ok := s.src.(Closer); ok && !m.sourceKeptEnabled(regs, s.src) {
+			closer.Close()
+		}
 	}
+}
+
+// sourceKeptEnabled reports whether regs hold any enabled registration
+// using src. Pointer identity is the adapter's identity, so the same
+// instance re-registered (interval change) and another instance sharing
+// the adapter are both recognized as continued use.
+func (m *Manager) sourceKeptEnabled(regs map[domain.InstanceID]Registration, src Source) bool {
+	for _, reg := range regs {
+		if reg.Source == src && reg.Enabled {
+			return true
+		}
+	}
+
+	return false
 }
 
 // RefreshAll asks every running loop to refresh as soon as it is idle.
@@ -225,10 +279,28 @@ func (m *Manager) Cancel() {
 	m.rootCancel()
 }
 
-// Wait blocks until every loop goroutine has exited. Bounded by the
-// per-request timeouts because cancellation aborts in-flight requests.
+// Wait blocks until every loop goroutine has exited, then closes every
+// Closer source that still has a loop (the shutdown path for long-lived
+// resources). Bounded by the per-request timeouts because cancellation
+// aborts in-flight requests, plus each Closer's self-bounded cleanup. The
+// close phase runs once: a second Wait is a no-op. Apply must not be called
+// after Wait.
 func (m *Manager) Wait() {
 	m.wg.Wait()
+	m.closeOnce.Do(func() {
+		m.mu.Lock()
+		sources := make([]Source, 0, len(m.loops))
+		for _, l := range m.loops {
+			sources = append(sources, l.source)
+		}
+		m.mu.Unlock()
+
+		for _, src := range sources {
+			if closer, ok := src.(Closer); ok {
+				closer.Close()
+			}
+		}
+	})
 }
 
 // Stop cancels and waits. Convenience for tests and shutdown paths that
@@ -313,6 +385,13 @@ func (m *Manager) runLoop(l *loop) {
 // doubled notification rate merely doubled the UI rebuild work on every
 // poll.
 func (m *Manager) refreshOnce(l *loop) {
+	if l.ctx.Err() != nil {
+		// The loop was detached (removed, disabled, or replaced) before this
+		// first refresh started: Apply already cancelled the context and may
+		// have deleted the runtime, so there is nothing to update and the
+		// result would be discarded anyway.
+		return
+	}
 	now := time.Now()
 	m.mu.Lock()
 	rt := m.runtimes[l.id]

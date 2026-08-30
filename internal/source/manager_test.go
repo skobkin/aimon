@@ -537,3 +537,135 @@ func waitFor(t *testing.T, limit time.Duration, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// closerSource is a fakeSource that also implements Closer, counting Close
+// calls so tests can prove when the manager disposes a source.
+type closerSource struct {
+	*fakeSource
+	mu    sync.Mutex
+	calls int
+}
+
+func newCloserSource(kind domain.SourceKind) *closerSource {
+	return &closerSource{fakeSource: newFakeSource(kind, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(kind), nil
+	})}
+}
+
+func (c *closerSource) Close() {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+}
+
+func (c *closerSource) closeCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.calls
+}
+
+// plainSource is deliberately not a Closer: existing kinds must be untouched
+// by the disposal hook.
+type plainSource struct {
+	*fakeSource
+}
+
+func TestManagerClosesRemovedSource(t *testing.T) {
+	src := newCloserSource(domain.KindCodex)
+	m := NewManager(quietLogger())
+	m.Apply(reg("codex-1", src, true, 10*time.Millisecond))
+	if src.closeCalls() != 0 {
+		t.Fatal("applying a source must not close it")
+	}
+
+	m.Apply(map[domain.InstanceID]Registration{})
+
+	if got := src.closeCalls(); got != 1 {
+		t.Errorf("Close calls after removal = %d, want 1", got)
+	}
+}
+
+func TestManagerClosesDisabledSource(t *testing.T) {
+	const inst = domain.InstanceID("codex-1")
+	src := newCloserSource(domain.KindCodex)
+	m := NewManager(quietLogger())
+	m.Apply(reg(inst, src, true, 10*time.Millisecond))
+
+	// A disabled instance stays registered with Enabled false: the loop is
+	// gone and a later Wait can no longer reach the source, so the disable
+	// itself must dispose it.
+	m.Apply(reg(inst, src, false, 10*time.Millisecond))
+
+	if got := src.closeCalls(); got != 1 {
+		t.Errorf("Close calls after disable = %d, want 1", got)
+	}
+
+	// Re-enabling the same adapter restarts its resources lazily; the
+	// adapter contract allows a closed source to be used again.
+	m.Apply(reg(inst, src, true, 10*time.Millisecond))
+	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
+	if got := src.closeCalls(); got != 1 {
+		t.Errorf("Close calls after re-enable = %d, want still 1", got)
+	}
+}
+
+func TestManagerClosesReplacedSourceOnly(t *testing.T) {
+	const inst = domain.InstanceID("codex-1")
+	old := newCloserSource(domain.KindCodex)
+	replacement := newCloserSource(domain.KindCodex)
+	m := NewManager(quietLogger())
+	m.Apply(reg(inst, old, true, 10*time.Millisecond))
+
+	m.Apply(reg(inst, replacement, true, 10*time.Millisecond))
+
+	if got := old.closeCalls(); got != 1 {
+		t.Errorf("old adapter Close calls = %d, want 1", got)
+	}
+	if got := replacement.closeCalls(); got != 0 {
+		t.Errorf("replacement adapter Close calls = %d, want 0", got)
+	}
+}
+
+func TestManagerKeepsSourceOnIntervalChange(t *testing.T) {
+	const inst = domain.InstanceID("codex-1")
+	src := newCloserSource(domain.KindCodex)
+	m := NewManager(quietLogger())
+	m.Apply(reg(inst, src, true, 10*time.Millisecond))
+
+	// An interval-only restart reuses the same enabled adapter: its
+	// long-lived resources must survive the loop restart.
+	m.Apply(reg(inst, src, true, 20*time.Millisecond))
+
+	if got := src.closeCalls(); got != 0 {
+		t.Errorf("Close calls after interval change = %d, want 0", got)
+	}
+	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 2 })
+	if got := src.closeCalls(); got != 0 {
+		t.Errorf("Close calls after restart refreshes = %d, want 0", got)
+	}
+}
+
+func TestManagerWaitClosesSurvivorsOnce(t *testing.T) {
+	src := newCloserSource(domain.KindCodex)
+	plain := &plainSource{fakeSource: newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindMiniMax), nil
+	})}
+	m := NewManager(quietLogger())
+	m.Apply(reg("codex-1", src, true, 10*time.Millisecond))
+	m.Apply(reg("mm-1", plain, true, 10*time.Millisecond))
+	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
+
+	m.Cancel()
+	m.Wait()
+	m.Wait() // idempotent: the close phase must run exactly once
+
+	if got := src.closeCalls(); got != 1 {
+		t.Errorf("Close calls after Wait = %d, want exactly 1", got)
+	}
+	// A non-Closer source has nothing to dispose and no way to observe this;
+	// its loop must simply have stopped.
+	if got := plain.refreshes.Load(); got < 1 {
+		t.Errorf("plain source refreshes = %d, want at least 1 before shutdown", got)
+	}
+}
