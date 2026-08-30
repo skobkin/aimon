@@ -24,9 +24,13 @@ const (
 	CatRateLimited     Category = "rate-limited"
 	CatInvalidResponse Category = "invalid-response"
 	CatProvider        Category = "provider"
-	CatHTTP            Category = "http"
-	CatCredentials     Category = "credentials"
-	CatConfig          Category = "config"
+	// CatBackend is a rejection from a non-HTTP surface (currently a
+	// JSON-RPC error object): no HTTP status exists, so the HTTP-specific
+	// provider wording must not be used for it.
+	CatBackend     Category = "backend"
+	CatHTTP        Category = "http"
+	CatCredentials Category = "credentials"
+	CatConfig      Category = "config"
 )
 
 // Error is a classified refresh failure. Detail is internal context for
@@ -65,6 +69,8 @@ func (e *Error) UserMessage() string {
 		return "Invalid provider response"
 	case CatProvider:
 		return "Provider error (HTTP 5xx)"
+	case CatBackend:
+		return "Provider rejected the request"
 	case CatHTTP:
 		return fmt.Sprintf("Provider returned HTTP %d", e.StatusCode)
 	case CatCredentials, CatConfig:

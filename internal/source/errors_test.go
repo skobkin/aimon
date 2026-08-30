@@ -22,6 +22,7 @@ func TestUserMessages(t *testing.T) {
 		{&Error{Category: CatRateLimited}, "Rate limited"},
 		{&Error{Category: CatInvalidResponse}, "Invalid provider response"},
 		{&Error{Category: CatProvider}, "Provider error (HTTP 5xx)"},
+		{&Error{Category: CatBackend}, "Provider rejected the request"},
 		{&Error{Category: CatHTTP, StatusCode: 404}, "Provider returned HTTP 404"},
 		{&Error{Category: CatCredentials, Detail: "API key not set"}, "API key not set"},
 		{&Error{Category: CatConfig, Detail: "No GPUs discovered"}, "No GPUs discovered"},

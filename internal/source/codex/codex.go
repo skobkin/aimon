@@ -447,7 +447,10 @@ func classifyStageError(stage string, err error) error {
 		}
 
 		return &source.Error{
-			Category: source.CatProvider,
+			// CatBackend, not CatProvider: the fixed provider message names
+			// an HTTP 5xx that does not exist on a JSON-RPC surface. The
+			// detail stays code-only (see rpcError.Error).
+			Category: source.CatBackend,
 			Detail:   fmt.Sprintf("%s rejected (json-rpc error %d)", stage, rpcErr.Code),
 			Err:      err,
 		}

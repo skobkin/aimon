@@ -330,10 +330,15 @@ func TestClassifyStageError(t *testing.T) {
 			t.Fatalf("category = %q, want auth", se.Category)
 		}
 	})
-	t.Run("other rpc error is provider", func(t *testing.T) {
+	t.Run("other rpc error is a backend rejection", func(t *testing.T) {
 		se := classifyOf(t, classifyStageError("account/rateLimits/read", &rpcError{Code: -32000, Message: "backend exploded"}))
-		if se.Category != source.CatProvider {
-			t.Fatalf("category = %q, want provider", se.Category)
+		if se.Category != source.CatBackend {
+			t.Fatalf("category = %q, want backend", se.Category)
+		}
+		// The JSON-RPC surface has no HTTP status: the fixed message must
+		// not claim one.
+		if msg := se.UserMessage(); strings.Contains(msg, "HTTP") {
+			t.Fatalf("user message = %q, want HTTP-free wording", msg)
 		}
 	})
 	t.Run("method not found is a config problem and stays recognizable", func(t *testing.T) {
@@ -500,7 +505,7 @@ func TestRefreshProtocolFailures(t *testing.T) {
 	}{
 		{"init-error-32601", source.CatConfig, "does not support"},
 		{"read-error-auth", source.CatAuth, "authentication failed"},
-		{"read-error-provider", source.CatProvider, "rejected"},
+		{"read-error-provider", source.CatBackend, "rejected"},
 		{"malformed", source.CatInvalidResponse, "malformed"},
 		// A child that dies before answering the handshake is reported as
 		// the incompatible-CLI setup problem, not as a generic connection
