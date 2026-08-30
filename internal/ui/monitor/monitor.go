@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"git.skobk.in/skobkin/aimonitor/internal/buildinfo"
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/registry"
@@ -67,16 +68,21 @@ type Monitor struct {
 func NewMonitor(a fyne.App, ctrl MonitorController, done <-chan struct{}) *Monitor {
 	m := &Monitor{ctrl: ctrl, done: done}
 
+	// The window title leads with the build version so release builds are
+	// identifiable at a glance ("AI Monitor 0.7.0"; development builds
+	// read "AI Monitor dev").
+	windowTitle := buildinfo.AppName + " " + buildinfo.Version
+
 	var win fyne.Window
 	if d, ok := a.Driver().(desktop.Driver); ok {
 		win = d.CreateSplashWindow()
 	} else {
 		// No desktop driver (off-desktop run): a plain window still works.
-		win = a.NewWindow("AI Monitor")
+		win = a.NewWindow(windowTitle)
 	}
 	// Splash windows are created with an empty title (Fyne would show
 	// "Fyne Application"); give the window its name and icon explicitly.
-	win.SetTitle("AI Monitor")
+	win.SetTitle(windowTitle)
 	win.SetIcon(resources.Icon())
 	m.win = win
 
