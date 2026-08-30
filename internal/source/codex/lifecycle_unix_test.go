@@ -5,6 +5,8 @@ package codex
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -112,6 +114,40 @@ func TestManagerDisableReapsPersistentProcess(t *testing.T) {
 		inst: {Kind: domain.KindCodex, Source: adapter, Enabled: true, Interval: time.Minute},
 	})
 	h.awaitLines(t, "re-enabled refresh", 2)
+}
+
+// A launcher wrapper that exits right after spawning the real server must
+// not shield the grandchild from teardown: the leader's wait result is
+// already ready when stdin is closed, so the group kill that normally rides
+// the forced path has to happen on the graceful path too.
+func TestWrapperExitLeavesNoGrandchild(t *testing.T) {
+	h := newFakeHarness(t, "orphan-wrapper")
+	adapter := New(h.settings, quietLoggerForTest(t), "v")
+	if _, err := adapter.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	// The refresh was served by the grandchild, so both the wrapper and the
+	// grandchild recorded a spawn. Every one of them must be gone.
+	var pids []int
+	for _, line := range h.logLines() {
+		if !strings.HasPrefix(line, "spawn ") {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimPrefix(line, "spawn "))
+		if err != nil {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	if len(pids) < 2 {
+		t.Fatalf("spawn log records %v, want the wrapper and its grandchild", pids)
+	}
+	for _, pid := range pids {
+		if !waitUntil(func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH }) {
+			t.Fatalf("process %d outlived the shutdown", pid)
+		}
+	}
 }
 
 func TestReapedChildIsNotAZombie(t *testing.T) {

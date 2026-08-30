@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -71,6 +72,21 @@ func runFakeChild(script string) {
 		return
 	case "die":
 		os.Exit(3)
+	case "orphan-wrapper":
+		// A launcher wrapper: starts the real server as a child and exits
+		// immediately. The grandchild stays in the wrapper's process group,
+		// keeps holding the pipe write ends, and (as "hang-on-eof") ignores
+		// stdin EOF — only a group kill can reap it.
+		grandchild := exec.Command(os.Args[0]) //nolint:gosec // the harness re-executes this test binary
+		grandchild.Env = append(os.Environ(), fakeChildEnv+"=hang-on-eof")
+		grandchild.Stdin, grandchild.Stdout, grandchild.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := grandchild.Start(); err != nil {
+			fmt.Fprintln(os.Stderr, "grandchild:", err)
+			os.Exit(1)
+		}
+		_ = grandchild.Process.Release()
+
+		return
 	}
 
 	respond := func(res fakeResponse) {

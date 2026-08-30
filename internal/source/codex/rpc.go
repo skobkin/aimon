@@ -395,6 +395,13 @@ func (c *rpcConn) shutdown(kill bool) error {
 			c.kill()
 			first = <-c.waitErr
 		}
+		// The leader is reaped, but its group may not be empty: a launcher
+		// wrapper can exit right after spawning the real app-server, leaving
+		// the grandchild holding the pipes and ignoring stdin EOF. Signaling
+		// the group here makes "no codex process survives shutdown"
+		// unconditional (DECISION_LOG 8); on a group that already exited it
+		// is a harmless no-op.
+		c.kill()
 	})
 	// cmd.Wait may have returned while launcher-spawned grandchildren still
 	// hold the pipe write ends; closing our read ends ends the reader and
