@@ -46,6 +46,7 @@ type SourceInstance struct {
 	MiniMax    *MiniMaxSettings
 	ZAI        *ZAISettings
 	OpenRouter *OpenRouterSettings
+	Codex      *CodexSettings
 }
 
 // AMDGPUWebSettings are the amdgputop-web settings.
@@ -84,12 +85,69 @@ type ZAISettings struct {
 // there is nothing to configure beyond the common fields.
 type OpenRouterSettings struct{}
 
+// CodexMode selects how the Codex adapter owns its Codex CLI app-server
+// process (docs/S6_AGENT_RULES.md §6).
+type CodexMode string
+
+const (
+	// CodexModeOnDemand spawns, reads, and reaps an app-server per refresh.
+	// It is the default: no memory is used between refreshes.
+	CodexModeOnDemand CodexMode = "on-demand"
+	// CodexModePersistent keeps one private app-server running across
+	// refreshes, avoiding repeated startup work at the cost of its memory.
+	CodexModePersistent CodexMode = "persistent"
+)
+
+// DefaultCodexExecutable is the launcher AI Monitor runs when the user has
+// not named a specific executable or wrapper.
+const DefaultCodexExecutable = "codex"
+
+// EnvOverride is one literal environment variable passed to the Codex CLI
+// process on top of the inherited parent environment. Values are ordinary
+// non-secret configuration: never logged, and not the place for secrets.
+type EnvOverride struct {
+	Name  string
+	Value string
+}
+
+// CodexSettings are the ChatGPT Codex settings. There are no credential
+// slots: the Codex CLI owns the ChatGPT authentication, and AI Monitor never
+// reads or writes it. The executable may be a bare PATH name or an explicit
+// executable/wrapper path; AI Monitor always appends exactly
+// `app-server --stdio` as argv and never evaluates a shell command string.
+type CodexSettings struct {
+	Executable string
+	Mode       CodexMode
+	Env        []EnvOverride
+}
+
 func (AMDGPUWebSettings) providerSettings()  {}
 func (LlamaSwapSettings) providerSettings()  {}
 func (HindsightSettings) providerSettings()  {}
 func (MiniMaxSettings) providerSettings()    {}
 func (ZAISettings) providerSettings()        {}
 func (OpenRouterSettings) providerSettings() {}
+func (CodexSettings) providerSettings()      {}
+
+// EffectiveCodexExecutable returns the configured launcher, filling the
+// default for an empty value.
+func (s CodexSettings) EffectiveCodexExecutable() string {
+	if strings.TrimSpace(s.Executable) == "" {
+		return DefaultCodexExecutable
+	}
+
+	return strings.TrimSpace(s.Executable)
+}
+
+// EffectiveCodexMode returns the configured mode, filling the default for
+// an empty value.
+func (s CodexSettings) EffectiveCodexMode() CodexMode {
+	if s.Mode == "" {
+		return CodexModeOnDemand
+	}
+
+	return s.Mode
+}
 
 // Settings returns the provider settings value matching Kind. ok is false
 // when the pointer matching Kind is nil (a mismatch the pointer fields may
@@ -119,6 +177,10 @@ func (i SourceInstance) Settings() (ProviderSettings, bool) {
 	case domain.KindOpenRouter:
 		if i.OpenRouter != nil {
 			return *i.OpenRouter, true
+		}
+	case domain.KindCodex:
+		if i.Codex != nil {
+			return *i.Codex, true
 		}
 	}
 
@@ -188,9 +250,12 @@ func (i SourceInstance) Validate() []ValidationError {
 	if i.OpenRouter != nil {
 		set++
 	}
+	if i.Codex != nil {
+		set++
+	}
 
 	switch i.Kind {
-	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter:
+	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex:
 	default:
 		errs = append(errs, ValidationError{Source: label, Field: "Kind", Message: fmt.Sprintf("unknown source kind %q", string(i.Kind))})
 	}
@@ -236,6 +301,12 @@ func (i SourceInstance) Validate() []ValidationError {
 		if i.OpenRouter == nil {
 			errs = append(errs, mismatchSettings(label))
 		}
+	case domain.KindCodex:
+		if i.Codex == nil {
+			errs = append(errs, mismatchSettings(label))
+		} else {
+			errs = append(errs, validateCodexSettings(label, *i.Codex)...)
+		}
 	}
 
 	errs = append(errs, validateInterval(label, i.PollInterval, KindIntervals(i.Kind))...)
@@ -247,13 +318,37 @@ func mismatchSettings(label string) ValidationError {
 	return ValidationError{Source: label, Field: "Settings", Message: "provider settings do not match the source kind"}
 }
 
+// validateCodexSettings checks the persisted Codex launcher configuration.
+// A blank executable is valid — it means the default launcher — and
+// discovery (does the executable exist?) is deliberately absent: runtime
+// lookup depends on the effective environment and belongs to the editor's
+// status line and the adapter's errors, not to pure persisted-config
+// validation (docs/S6_IMPLEMENTATION_SPEC.md §1).
+func validateCodexSettings(label string, s CodexSettings) []ValidationError {
+	var errs []ValidationError
+	if s.Mode != "" && s.Mode != CodexModeOnDemand && s.Mode != CodexModePersistent {
+		errs = append(errs, ValidationError{
+			Source:  label,
+			Field:   "Mode",
+			Message: fmt.Sprintf("must be %s or %s", CodexModeOnDemand, CodexModePersistent),
+		})
+	}
+	errs = append(errs, ValidateEnvOverrides(label, s.Env)...)
+
+	return errs
+}
+
 // KindIntervals returns the offered poll interval presets for a kind. The
-// lists are per kind: Hindsight has its own shifted-up ladder and the
+// lists are per kind: Hindsight has its own shifted-up ladder, Codex its own
+// minute-and-up ladder (every on-demand refresh spawns a process), and the
 // remaining kinds follow their category (DECISIONS D8: local sources poll
 // faster than remote plans).
 func KindIntervals(kind domain.SourceKind) []time.Duration {
 	if kind == domain.KindHindsight {
 		return HindsightIntervals
+	}
+	if kind == domain.KindCodex {
+		return CodexIntervals
 	}
 	if kind.Category() == domain.CategoryLocal {
 		return LocalIntervals
@@ -340,6 +435,25 @@ func SameSettings(a, b ProviderSettings) bool {
 		_, ok := b.(OpenRouterSettings)
 
 		return ok
+	case CodexSettings:
+		bv, ok := b.(CodexSettings)
+		if !ok {
+			return false
+		}
+		// EnvOverride values are plain strings but the Env slice makes the
+		// struct non-comparable with ==, so the fields are compared
+		// explicitly. Overrides are stored in editor order and only an
+		// edited value changes them, so order is significant here.
+		if av.Executable != bv.Executable || av.Mode != bv.Mode || len(av.Env) != len(bv.Env) {
+			return false
+		}
+		for i := range av.Env {
+			if av.Env[i] != bv.Env[i] {
+				return false
+			}
+		}
+
+		return true
 	}
 
 	return false

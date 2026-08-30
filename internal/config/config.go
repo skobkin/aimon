@@ -33,9 +33,16 @@ var (
 	// only; the other local kinds keep LocalIntervals.
 	HindsightIntervals = []time.Duration{10 * time.Second, 15 * time.Second, 30 * time.Second, 1 * time.Minute, 5 * time.Minute}
 
+	// CodexIntervals is the Codex kind's own ladder: every on-demand refresh
+	// spawns a Codex app-server process (measurable local bookkeeping), so
+	// sub-minute polling is not offered; persistent users may still pick 1m
+	// (docs/S6_AGENT_RULES.md §15).
+	CodexIntervals = []time.Duration{1 * time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
+
 	DefaultLocalInterval     = 5 * time.Second
 	DefaultHindsightInterval = 10 * time.Second
 	DefaultRemoteInterval    = 60 * time.Second
+	DefaultCodexInterval     = 5 * time.Minute
 )
 
 // ValidationError describes one invalid field.
@@ -95,6 +102,55 @@ func intervalList(presets []time.Duration) string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// ValidateEnvOverrides checks a Codex instance's environment override list:
+// portable variable names, no duplicates, no NUL bytes in names or values,
+// and no blank entries. Values are literal — no shell or ${...} expansion
+// ever happens — and are stored as ordinary non-secret configuration, which
+// is why users are told not to put secrets here (docs/S6_AGENT_RULES.md §5).
+func ValidateEnvOverrides(source string, envs []EnvOverride) []ValidationError {
+	var errs []ValidationError
+	seen := make(map[string]bool, len(envs))
+	for i, env := range envs {
+		field := fmt.Sprintf("Environment override %d", i+1)
+		bad := func(message string) {
+			errs = append(errs, ValidationError{Source: source, Field: field, Message: message})
+		}
+		switch {
+		case env.Name == "":
+			bad("variable name must not be empty")
+		case !validEnvName(env.Name):
+			bad(fmt.Sprintf("%q is not a portable variable name", env.Name))
+		case seen[env.Name]:
+			bad(fmt.Sprintf("variable %s is set more than once", env.Name))
+		case strings.ContainsRune(env.Value, 0):
+			bad(fmt.Sprintf("value of %s must not contain NUL", env.Name))
+		}
+		seen[env.Name] = true
+	}
+
+	return errs
+}
+
+// validEnvName reports whether name is a portable environment variable name
+// ([A-Za-z_][A-Za-z0-9_]*). Checked by hand: the rule is one small character
+// class, and a regexp would be heavier than the rule.
+func validEnvName(name string) bool {
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
+		case c >= '0' && c <= '9':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+
+	return len(name) > 0
 }
 
 // IntervalLabel renders a polling interval for display ("5s" … "60s",

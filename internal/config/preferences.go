@@ -74,6 +74,7 @@ type sourceRecord struct {
 	MiniMax    *miniMaxRecord    `json:"minimax,omitempty"`
 	ZAI        *zaiRecord        `json:"zai,omitempty"`
 	OpenRouter *openRouterRecord `json:"openrouter,omitempty"`
+	Codex      *codexRecord      `json:"codex,omitempty"`
 }
 
 type amdGPUWebRecord struct {
@@ -97,6 +98,21 @@ type zaiRecord struct {
 }
 
 type openRouterRecord struct{}
+
+// codexRecord persists the Codex launcher configuration. Executable and Mode
+// stay empty when they carry the default, and environment values are stored
+// verbatim as ordinary non-secret configuration — they are never logged and
+// never a substitute for a secret store.
+type codexRecord struct {
+	Executable string      `json:"executable,omitempty"`
+	Mode       string      `json:"mode,omitempty"`
+	Env        []envRecord `json:"env,omitempty"`
+}
+
+type envRecord struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
 
 // LoadInstances reads the dynamic source document. A missing document is
 // the valid zero-source state (nil, nil) — the expected first S3 startup,
@@ -218,6 +234,14 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 		if rec.OpenRouter != nil {
 			inst.OpenRouter = &OpenRouterSettings{}
 		}
+	case domain.KindCodex:
+		if rec.Codex != nil {
+			envs := make([]EnvOverride, 0, len(rec.Codex.Env))
+			for _, env := range rec.Codex.Env {
+				envs = append(envs, EnvOverride{Name: env.Name, Value: env.Value})
+			}
+			inst.Codex = &CodexSettings{Executable: rec.Codex.Executable, Mode: CodexMode(rec.Codex.Mode), Env: envs}
+		}
 	default:
 		return SourceInstance{}, fmt.Errorf("unknown source kind %q", rec.Kind)
 	}
@@ -257,6 +281,14 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 	case domain.KindOpenRouter:
 		if inst.OpenRouter != nil {
 			rec.OpenRouter = &openRouterRecord{}
+		}
+	case domain.KindCodex:
+		if inst.Codex != nil {
+			r := &codexRecord{Executable: inst.Codex.Executable, Mode: string(inst.Codex.Mode)}
+			for _, env := range inst.Codex.Env {
+				r.Env = append(r.Env, envRecord{Name: env.Name, Value: env.Value})
+			}
+			rec.Codex = r
 		}
 	}
 

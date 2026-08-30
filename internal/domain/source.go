@@ -27,17 +27,24 @@ const (
 	KindMiniMax    SourceKind = "minimax"
 	KindZAI        SourceKind = "zai"
 	KindOpenRouter SourceKind = "openrouter"
+	KindCodex      SourceKind = "codex"
 )
 
 // Category reports where the source runs. Source kinds are compile-time
 // constants in this application; any other value groups with remote.
 // Hindsight is a product-level Local grouping: user-controlled local
 // infrastructure even when the configured URL is not on this machine
-// (docs/S5_AGENT_RULES.md §1).
+// (docs/S5_AGENT_RULES.md §1). Codex is Remote: the monitored resource is an
+// OpenAI/ChatGPT subscription quota, even though its transport is a local
+// Codex CLI subprocess (docs/S6_AGENT_RULES.md §1) — every compiled kind is
+// listed explicitly and the default branch stays a fallback for unknown
+// values only.
 func (kind SourceKind) Category() Category {
 	switch kind {
 	case KindAMDGPUWeb, KindLlamaSwap, KindHindsight:
 		return CategoryLocal
+	case KindMiniMax, KindZAI, KindOpenRouter, KindCodex:
+		return CategoryRemote
 	default:
 		return CategoryRemote
 	}
