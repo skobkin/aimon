@@ -100,6 +100,7 @@ func runFakeChild(script string) {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 64*1024), lineLimit)
 	readsServed := 0
+	lateReads := 0
 	for scanner.Scan() {
 		var req struct {
 			ID     json.RawMessage `json:"id"`
@@ -159,6 +160,16 @@ func runFakeChild(script string) {
 				return
 			case "silent":
 				// No reply, ever; the caller should hit its own timeout.
+			case "late":
+				// The first read is never answered — a caller cancellation
+				// abandons it while the stream stays healthy. A later read
+				// on the same stream is served normally, proving the
+				// connection was reused rather than restarted.
+				if lateReads == 0 {
+					lateReads++
+				} else {
+					respond(fakeResponse{ID: req.ID, Result: json.RawMessage(fakeResultJSON(script, readsServed))})
+				}
 			default:
 				respond(fakeResponse{ID: req.ID, Result: json.RawMessage(fakeResultJSON(script, readsServed))})
 				readsServed++

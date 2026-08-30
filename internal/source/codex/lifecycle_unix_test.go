@@ -56,6 +56,39 @@ func TestCancelDuringReadKillsProcess(t *testing.T) {
 	assertReaped(t, h)
 }
 
+func TestPersistentChildSurvivesCancelledRefresh(t *testing.T) {
+	// The manager cancels a loop's in-flight request on every
+	// reconfiguration, a pure interval change included. The owned
+	// app-server must survive that: a cancellation comes from the caller,
+	// not from the stream (DECISION_LOG 2 — a persistent app-server
+	// survives a schedule change).
+	h := newFakeHarness(t, "late")
+	h.settings.Mode = config.CodexModePersistent
+	adapter := New(h.settings, quietLoggerForTest(t), "v")
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := adapter.Refresh(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	pid := h.pid(t)
+	if syscall.Kill(pid, 0) != nil {
+		t.Fatalf("persistent child %d did not survive the cancelled refresh", pid)
+	}
+
+	// The next refresh serves its read on the same process.
+	if _, err := adapter.Refresh(context.Background()); err != nil {
+		t.Fatalf("refresh after cancellation: %v", err)
+	}
+	h.awaitLines(t, "read after cancellation", 2)
+	if got := h.countLines("spawn"); got != 1 {
+		t.Fatalf("spawn count = %d, want 1 (the child must be reused)", got)
+	}
+	adapter.Close()
+}
+
 func TestPersistentCloseReapsAndStaysUsable(t *testing.T) {
 	h := newFakeHarness(t, "ok")
 	h.settings.Mode = config.CodexModePersistent

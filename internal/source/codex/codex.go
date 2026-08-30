@@ -146,9 +146,18 @@ func (a *Adapter) refreshPersistent(ctx context.Context) (domain.Snapshot, error
 	}
 	snap, err := a.readRates(ctx, a.conn)
 	if err != nil {
-		// A timed-out request could still deliver its late response into a
-		// reused stream and corrupt id correlation; the stream is never
-		// reused after any failure. The next refresh starts clean.
+		// A cancelled caller's context says nothing about stream health: the
+		// manager detaches the loop on any reconfiguration (an interval-only
+		// change among them), and the owned app-server must survive that —
+		// only a schedule changed. A late reply to the abandoned request is
+		// skipped by id correlation on the next call. A timeout, by
+		// contrast, leaves the request's outcome unknown, and a transport or
+		// protocol failure means the stream itself is gone: both tear the
+		// connection down and the next refresh starts clean
+		// (docs/S6_CODEX.md §Persistent lifecycle).
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		a.teardownLocked(true)
 
 		return nil, err
