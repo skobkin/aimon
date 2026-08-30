@@ -404,6 +404,18 @@ func (a *App) SaveInstances(list []config.SourceInstance) error {
 	return nil
 }
 
+// appVersion reports the running application version for source adapters
+// that identify themselves to their provider (the Codex CLI JSON-RPC
+// clientInfo). An unavailable version degrades to an empty string rather
+// than blocking adapter construction.
+func (a *App) appVersion() string {
+	if a.fyneApp == nil {
+		return ""
+	}
+
+	return a.fyneApp.Metadata().Version
+}
+
 // applyInstances reconfigures the manager for the given list, keyed by
 // instance ID. An adapter is rebuilt only when its provider settings
 // changed (settings equality); rename, reorder and enable/disable reuse
@@ -416,7 +428,7 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 
 	regs := make(map[domain.InstanceID]source.Registration, len(list))
 	live := make(map[domain.InstanceID]adapterEntry, len(list))
-	deps := registry.Deps{Creds: a.creds, Client: a.client, Log: a.log}
+	deps := registry.Deps{Creds: a.creds, Client: a.client, Log: a.log, AppVersion: a.appVersion()}
 	for _, inst := range list {
 		def, ok := registry.Get(inst.Kind)
 		if !ok {
@@ -502,7 +514,7 @@ func (a *App) testConnection(ctx context.Context, inst config.SourceInstance, ty
 		}
 		overrides[account] = secret
 	}
-	deps := registry.Deps{Creds: a.testerStore(overrides), Client: a.client, Log: a.log}
+	deps := registry.Deps{Creds: a.testerStore(overrides), Client: a.client, Log: a.log, AppVersion: a.appVersion()}
 
 	return def.Test(ctx, inst, deps)
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
@@ -18,6 +19,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
+	"git.skobk.in/skobkin/aimonitor/internal/source/codex"
 	"git.skobk.in/skobkin/aimonitor/internal/source/hindsight"
 	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
 	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
@@ -40,6 +42,10 @@ type Deps struct {
 	Creds  credentials.Store
 	Client *http.Client
 	Log    *slog.Logger
+	// AppVersion is the running application version, reported by source
+	// adapters that identify themselves to their provider (currently the
+	// Codex CLI JSON-RPC clientInfo).
+	AppVersion string
 }
 
 // Definition is the compiled metadata and construction recipe for one
@@ -385,6 +391,31 @@ var definitions = []Definition{
 			return OpenRouterActivityURL, true
 		},
 	},
+	{
+		// Remote despite the local transport: the quota being monitored is
+		// the ChatGPT subscription's, reached only through the user's own
+		// Codex CLI (docs/S6_CODEX.md).
+		Kind:            domain.KindCodex,
+		Category:        domain.CategoryRemote,
+		DefaultName:     "ChatGPT Codex",
+		DefaultInterval: config.DefaultCodexInterval,
+		Intervals:       config.CodexIntervals,
+		// No credential slots: the CLI owns the ChatGPT login, and AI
+		// Monitor never sees a token.
+		DefaultSettings: func() config.ProviderSettings {
+			return config.CodexSettings{}
+		},
+		Build: func(inst config.SourceInstance, deps Deps) (source.Source, error) {
+			s := inst.Codex
+			if s == nil {
+				return nil, missingSettings(inst)
+			}
+
+			return codex.New(*s, deps.Log, deps.AppVersion), nil
+		},
+		Test:   codexTestReport,
+		WebURL: noWebURL,
+	},
 }
 
 // openRouterAccounts resolves the two instance-scoped keychain accounts of
@@ -540,6 +571,77 @@ func hindsightTestReport(ctx context.Context, inst config.SourceInstance, deps D
 		Lines: []string{health, liveness, metrics, banks},
 		OK:    out.OK(),
 	}
+}
+
+// noWebURL is the WebURL of kinds without a provider web UI; the Codex
+// subscription has no quota dashboard AI Monitor could point at
+// (docs/S6_UI_UX.md).
+func noWebURL(config.SourceInstance) (string, bool) {
+	return "", false
+}
+
+// codexTestReport renders the Codex connection test as one line per stage,
+// so the deepest stage that broke is the one named (docs/S6_UI_UX.md):
+//
+//	Codex CLI: OK
+//	ChatGPT: OK · Plus
+//	Rate limits: OK · 2 windows
+//
+// The probe itself is the adapter's throwaway one-shot; it never persists a
+// process and never shows account email, ID or token.
+func codexTestReport(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
+	s := inst.Codex
+	if s == nil {
+		return failedTestReport(missingSettings(inst))
+	}
+	out, err := codex.New(*s, deps.Log, deps.AppVersion).Test(ctx)
+	if err != nil {
+		if out.CLIIncompatible {
+			return TestReport{Lines: []string{
+				"Codex CLI: incompatible",
+				"This version does not support account/rateLimits/read.",
+			}}
+		}
+		switch out.CLIState {
+		case codex.DiscoveryNotFoundInPath:
+			return TestReport{Lines: []string{
+				"Codex CLI: not found in PATH",
+				"Install Codex CLI or choose its executable/wrapper.",
+			}}
+		case codex.DiscoveryExplicitMissing, codex.DiscoveryNotExecutable:
+			return TestReport{Lines: []string{"Codex CLI: not found or not executable"}}
+		}
+
+		// The launcher resolved; the exchange with ChatGPT is what broke.
+		return TestReport{Lines: []string{"Codex CLI: OK", "ChatGPT: " + sanitizedReason(err)}}
+	}
+	chatgpt := "ChatGPT: OK"
+	if plan := codexPlanLabel(out.PlanType); plan != "" {
+		chatgpt += " · " + plan
+	}
+
+	return TestReport{
+		Lines: []string{"Codex CLI: OK", chatgpt, fmt.Sprintf("Rate limits: OK · %d windows", out.Windows)},
+		OK:    true,
+	}
+}
+
+// codexPlanLabel titles the provider's plan name where the known values are
+// concerned and passes anything else through trimmed-but-unchanged, so an
+// unknown future plan never renders as garbage or as a fake known one.
+func codexPlanLabel(plan string) string {
+	switch strings.ToLower(strings.TrimSpace(plan)) {
+	case "plus":
+		return "Plus"
+	case "pro":
+		return "Pro"
+	case "go":
+		return "Go"
+	case "free":
+		return "Free"
+	}
+
+	return strings.TrimSpace(plan)
 }
 
 // singleTestReport wraps a kind whose whole test is one operation,

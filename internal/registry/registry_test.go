@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -19,8 +23,8 @@ import (
 
 func TestAllRegistersEveryKindOnce(t *testing.T) {
 	all := All()
-	if len(all) != 6 {
-		t.Fatalf("registered %d kinds, want 6", len(all))
+	if len(all) != 7 {
+		t.Fatalf("registered %d kinds, want 7", len(all))
 	}
 	seen := map[domain.SourceKind]bool{}
 	for _, d := range all {
@@ -29,7 +33,7 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 		}
 		seen[d.Kind] = true
 	}
-	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter} {
+	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex} {
 		if !seen[kind] {
 			t.Errorf("kind %q missing from the registry", kind)
 		}
@@ -55,6 +59,7 @@ func TestDefinitionMetadata(t *testing.T) {
 		{domain.KindMiniMax, domain.CategoryRemote, "MiniMax", []credentials.Slot{credentials.SlotAPIKey}},
 		{domain.KindZAI, domain.CategoryRemote, "Z.AI / GLM", []credentials.Slot{credentials.SlotAPIKey}},
 		{domain.KindOpenRouter, domain.CategoryRemote, "OpenRouter", []credentials.Slot{credentials.SlotAPIKey, credentials.SlotManagementKey}},
+		{domain.KindCodex, domain.CategoryRemote, "ChatGPT Codex", nil},
 	}
 	for _, c := range cases {
 		def, ok := Get(c.kind)
@@ -137,6 +142,14 @@ func TestDefaultSettings(t *testing.T) {
 	if !ok || hs.BaseURL != config.DefaultHindsightURL || hs.WebUIURL != "" {
 		t.Errorf("hindsight default settings = %#v", def.DefaultSettings())
 	}
+	def, _ = Get(domain.KindCodex)
+	cs, ok := def.DefaultSettings().(config.CodexSettings)
+	if !ok {
+		t.Fatalf("codex default settings type = %T", def.DefaultSettings())
+	}
+	if cs.EffectiveCodexExecutable() != config.DefaultCodexExecutable || cs.EffectiveCodexMode() != config.CodexModeOnDemand {
+		t.Errorf("codex default settings = %#v, want a bare codex launcher in on-demand mode", cs)
+	}
 }
 
 func inst(id, name string, kind domain.SourceKind, settings config.ProviderSettings) config.SourceInstance {
@@ -159,6 +172,8 @@ func inst(id, name string, kind domain.SourceKind, settings config.ProviderSetti
 		i.ZAI = &s
 	case config.OpenRouterSettings:
 		i.OpenRouter = &s
+	case config.CodexSettings:
+		i.Codex = &s
 	}
 
 	return i
@@ -505,5 +520,173 @@ func TestOpenRouterTestWithoutCredentialsSkipsEverythingLocally(t *testing.T) {
 	}
 	if n := tr.count(); n != 0 {
 		t.Errorf("%d HTTP request(s) were attempted without any credential", n)
+	}
+}
+
+// --- Codex ---------------------------------------------------------------
+
+// codexSettings returns Codex settings whose launcher is a scripted fake
+// app-server. The script answers the JSON-RPC handshake and one
+// account/rateLimits/read by echoing each request's id, so the registry's
+// report rendering is exercised end to end without the ChatGPT backend.
+func codexSettings(t *testing.T, body string) config.CodexSettings {
+	t.Helper()
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "codex-fake")
+	if err := os.WriteFile(launcher, []byte(body), 0o755); err != nil {
+		t.Fatalf("write launcher: %v", err)
+	}
+
+	return config.CodexSettings{Executable: launcher}
+}
+
+// codexOKScript serves initialize and a two-window rate-limits read with a
+// plus plan. Note the closing-quote spelling: "initialized" must never be
+// mistaken for "initialize".
+const codexOKScript = `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"account/rateLimits/read"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"rateLimits":{"primary":{"usedPercent":42.5,"windowDurationMins":300,"resetsAt":1893456000}},"rateLimitsByLimitId":{"codex":{"planType":"plus","primary":{"usedPercent":42.5,"windowDurationMins":300,"resetsAt":1893456000},"secondary":{"usedPercent":7.25,"windowDurationMins":60}}}},"rateLimitResetCredits":{"availableCount":2}}\n' "$id" ;;
+    *'"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+`
+
+// codexIncompatibleScript rejects the handshake the way an old CLI does.
+const codexIncompatibleScript = `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id" ;;
+  esac
+done
+`
+
+func quietDeps() Deps {
+	return Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), AppVersion: "test"}
+}
+
+func TestCodexDefinitionHasNoWebUIAndNoCredentials(t *testing.T) {
+	def, ok := Get(domain.KindCodex)
+	if !ok {
+		t.Fatal("codex is not registered")
+	}
+	instance := inst("codx1", "ChatGPT Codex", domain.KindCodex, config.CodexSettings{})
+	if def.WebLabel != "" {
+		t.Errorf("codex web label = %q, want none", def.WebLabel)
+	}
+	if url, has := def.WebURL(instance); has || url != "" {
+		t.Errorf("codex web url = %q/%v, want none: the subscription has no dashboard to link", url, has)
+	}
+	src, err := def.Build(instance, quietDeps())
+	if err != nil {
+		t.Fatalf("build with an empty settings block: %v", err)
+	}
+	if src.Kind() != domain.KindCodex {
+		t.Fatalf("built adapter kind = %s", src.Kind())
+	}
+}
+
+func TestCodexTestReportSuccess(t *testing.T) {
+	def, _ := Get(domain.KindCodex)
+	report := def.Test(context.Background(), inst("codx2", "ChatGPT Codex", domain.KindCodex, codexSettings(t, codexOKScript)), quietDeps())
+	want := []string{
+		"Codex CLI: OK",
+		"ChatGPT: OK · Plus",
+		"Rate limits: OK · 2 windows",
+	}
+	if !report.OK {
+		t.Fatalf("report not OK: %v", report.Lines)
+	}
+	if len(report.Lines) != len(want) {
+		t.Fatalf("lines = %v, want %v", report.Lines, want)
+	}
+	for i := range want {
+		if report.Lines[i] != want[i] {
+			t.Errorf("line[%d] = %q, want %q", i, report.Lines[i], want[i])
+		}
+	}
+}
+
+func TestCodexTestReportIncompatibleCLI(t *testing.T) {
+	def, _ := Get(domain.KindCodex)
+	report := def.Test(context.Background(), inst("codx3", "ChatGPT Codex", domain.KindCodex, codexSettings(t, codexIncompatibleScript)), quietDeps())
+	want := []string{
+		"Codex CLI: incompatible",
+		"This version does not support account/rateLimits/read.",
+	}
+	if report.OK || len(report.Lines) != len(want) {
+		t.Fatalf("report = %v (ok=%v)", report.Lines, report.OK)
+	}
+	for i := range want {
+		if report.Lines[i] != want[i] {
+			t.Errorf("line[%d] = %q, want %q", i, report.Lines[i], want[i])
+		}
+	}
+}
+
+func TestCodexTestReportMissingCLI(t *testing.T) {
+	def, _ := Get(domain.KindCodex)
+
+	t.Run("not in PATH", func(t *testing.T) {
+		settings := config.CodexSettings{}
+		settings.Env = []config.EnvOverride{{Name: "PATH", Value: t.TempDir()}}
+		report := def.Test(context.Background(), inst("codx4", "ChatGPT Codex", domain.KindCodex, settings), quietDeps())
+		want := []string{
+			"Codex CLI: not found in PATH",
+			"Install Codex CLI or choose its executable/wrapper.",
+		}
+		if report.OK || len(report.Lines) != len(want) {
+			t.Fatalf("report = %v (ok=%v)", report.Lines, report.OK)
+		}
+		for i := range want {
+			if report.Lines[i] != want[i] {
+				t.Errorf("line[%d] = %q, want %q", i, report.Lines[i], want[i])
+			}
+		}
+	})
+
+	t.Run("explicit path missing", func(t *testing.T) {
+		settings := config.CodexSettings{Executable: filepath.Join(t.TempDir(), "no-such-codex")}
+		report := def.Test(context.Background(), inst("codx5", "ChatGPT Codex", domain.KindCodex, settings), quietDeps())
+		if report.OK || len(report.Lines) != 1 || report.Lines[0] != "Codex CLI: not found or not executable" {
+			t.Fatalf("report = %v (ok=%v)", report.Lines, report.OK)
+		}
+	})
+
+	t.Run("missing settings block", func(t *testing.T) {
+		report := def.Test(context.Background(), inst("codx6", "ChatGPT Codex", domain.KindCodex, nil), quietDeps())
+		if report.OK || len(report.Lines) != 1 || !strings.HasPrefix(report.Lines[0], "Failed: ") {
+			t.Fatalf("report = %v (ok=%v)", report.Lines, report.OK)
+		}
+	})
+}
+
+func TestCodexPlanLabel(t *testing.T) {
+	cases := map[string]string{
+		"plus":  "Plus",
+		" PLUS": "Plus",
+		"pro":   "Pro",
+		"go":    "Go",
+		"free":  "Free",
+		"team":  "team",
+		"":      "",
+	}
+	for in, want := range cases {
+		if got := codexPlanLabel(in); got != want {
+			t.Errorf("codexPlanLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCodexBuildRequiresSettingsBlock(t *testing.T) {
+	def, _ := Get(domain.KindCodex)
+	instance := inst("codx7", "ChatGPT Codex", domain.KindCodex, nil)
+	if _, err := def.Build(instance, quietDeps()); err == nil {
+		t.Fatal("build without a settings block must fail")
 	}
 }
