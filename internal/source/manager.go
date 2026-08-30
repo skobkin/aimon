@@ -169,13 +169,18 @@ func (m *Manager) Apply(regs map[domain.InstanceID]Registration) {
 	}
 	m.mu.Unlock()
 
+	closed := map[Source]bool{}
 	for _, s := range stopped {
 		<-s.l.done
 		// Only a Closer is disposed, and only when this Apply leaves no
-		// enabled registration using the same source pointer.
-		if closer, ok := s.src.(Closer); ok && !m.sourceKeptEnabled(regs, s.src) {
-			closer.Close()
+		// enabled registration using the same source pointer. Two stopped
+		// instances may share one adapter pointer; it is disposed once.
+		closer, ok := s.src.(Closer)
+		if !ok || closed[s.src] || m.sourceKeptEnabled(regs, s.src) {
+			continue
 		}
+		closed[s.src] = true
+		closer.Close()
 	}
 }
 
@@ -289,8 +294,13 @@ func (m *Manager) Wait() {
 	m.wg.Wait()
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
+		seen := map[Source]bool{}
 		sources := make([]Source, 0, len(m.loops))
 		for _, l := range m.loops {
+			if seen[l.source] {
+				continue // one adapter shared by two instances is closed once
+			}
+			seen[l.source] = true
 			sources = append(sources, l.source)
 		}
 		m.mu.Unlock()

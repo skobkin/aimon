@@ -648,6 +648,41 @@ func TestManagerKeepsSourceOnIntervalChange(t *testing.T) {
 	}
 }
 
+func TestManagerClosesSharedSourceOnce(t *testing.T) {
+	// One adapter pointer registered under two instance IDs: removing both
+	// in a single Apply must dispose it exactly once.
+	src := newCloserSource()
+	m := NewManager(quietLogger())
+	m.Apply(map[domain.InstanceID]Registration{
+		"codex-1": {Kind: domain.KindCodex, Source: src, Enabled: true, Interval: 10 * time.Millisecond},
+		"codex-2": {Kind: domain.KindCodex, Source: src, Enabled: true, Interval: 10 * time.Millisecond},
+	})
+	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
+
+	m.Apply(map[domain.InstanceID]Registration{})
+
+	if got := src.closeCalls(); got != 1 {
+		t.Errorf("Close calls after shared removal = %d, want 1", got)
+	}
+}
+
+func TestManagerWaitClosesSharedSourceOnce(t *testing.T) {
+	src := newCloserSource()
+	m := NewManager(quietLogger())
+	m.Apply(map[domain.InstanceID]Registration{
+		"codex-1": {Kind: domain.KindCodex, Source: src, Enabled: true, Interval: 10 * time.Millisecond},
+		"codex-2": {Kind: domain.KindCodex, Source: src, Enabled: true, Interval: 10 * time.Millisecond},
+	})
+	waitFor(t, 500*time.Millisecond, func() bool { return src.refreshes.Load() >= 1 })
+
+	m.Cancel()
+	m.Wait()
+
+	if got := src.closeCalls(); got != 1 {
+		t.Errorf("Close calls after Wait = %d, want exactly 1", got)
+	}
+}
+
 func TestManagerWaitClosesSurvivorsOnce(t *testing.T) {
 	src := newCloserSource()
 	plain := &plainSource{fakeSource: newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
