@@ -120,7 +120,7 @@ func ValidateEnvOverrides(source string, envs []EnvOverride) []ValidationError {
 		switch {
 		case env.Name == "":
 			bad("variable name must not be empty")
-		case !validEnvName(env.Name):
+		case !ValidEnvName(env.Name):
 			bad(fmt.Sprintf("%q is not a portable variable name", env.Name))
 		case seen[env.Name]:
 			bad(fmt.Sprintf("variable %s is set more than once", env.Name))
@@ -133,10 +133,11 @@ func ValidateEnvOverrides(source string, envs []EnvOverride) []ValidationError {
 	return errs
 }
 
-// validEnvName reports whether name is a portable environment variable name
+// ValidEnvName reports whether name is a portable environment variable name
 // ([A-Za-z_][A-Za-z0-9_]*). Checked by hand: the rule is one small character
-// class, and a regexp would be heavier than the rule.
-func validEnvName(name string) bool {
+// class, and a regexp would be heavier than the rule. The settings editor
+// reuses it for live per-row validation.
+func ValidEnvName(name string) bool {
 	for i := 0; i < len(name); i++ {
 		c := name[i]
 		switch {

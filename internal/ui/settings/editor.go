@@ -47,6 +47,14 @@ type editor struct {
 	creds  []*credRow // one per credential slot, definition order
 	hasURL bool
 
+	// Codex-only widgets, nil for every other kind: the execution mode, the
+	// launcher with its live discovery status, and the env override rows.
+	mode   *widget.Select
+	exe    *widget.Entry
+	cli    *widget.Label
+	envBox *fyne.Container
+	env    []*envRow
+
 	testLabel *widget.Label
 	saveBtn   *widget.Button
 	cancelBtn *widget.Button
@@ -114,7 +122,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	// MiniMax and OpenRouter use fixed endpoints.
 	settings, _ := inst.Settings()
 	switch settings.(type) {
-	case config.MiniMaxSettings, config.OpenRouterSettings:
+	case config.MiniMaxSettings, config.OpenRouterSettings, config.CodexSettings:
 		e.hasURL = false
 	default:
 		e.hasURL = true
@@ -158,6 +166,9 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		e.gpu = widget.NewSelect(nil, nil)
 		e.setGPUOptions(nil, inst.AMDGPUWeb.SelectedGPUID, "")
 		items = append(items, widget.NewFormItem("GPU", e.gpu))
+	}
+	if inst.Kind == domain.KindCodex {
+		e.buildCodexFields(&items, settings.(config.CodexSettings))
 	}
 	for _, slot := range def.CredentialSlots {
 		account, err := credentials.AccountForInstance(inst.ID, slot)
@@ -328,6 +339,9 @@ func (e *editor) collect() (config.SourceInstance, error) {
 		// tray entry only appear when one is configured.
 		s.WebUIURL = strings.TrimSpace(e.webURL.Text)
 		inst.Hindsight = &s
+	case domain.KindCodex:
+		s := e.draftCodexSettings()
+		inst.Codex = &s
 	}
 
 	if errs := inst.Validate(); len(errs) > 0 {
@@ -350,9 +364,16 @@ func (e *editor) onTest() {
 	for _, row := range e.creds {
 		typed[row.slot] = row.entry.Text
 	}
+	// One Codex probe spans spawn + initialize + read + reap, so the caller
+	// (not the adapter) owns the longer Codex-specific budget; every other
+	// kind keeps the shared test timeout.
+	timeout := testTimeout
+	if inst.Kind == domain.KindCodex {
+		timeout = codexTestTimeout
+	}
 	e.testLabel.SetText("Testing…")
 	go func() {
-		ctx, cancel := context.WithTimeout(e.s.ctx, testTimeout)
+		ctx, cancel := context.WithTimeout(e.s.ctx, timeout)
 		defer cancel()
 
 		if inst.Kind == domain.KindAMDGPUWeb {

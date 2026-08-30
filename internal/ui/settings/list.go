@@ -44,6 +44,8 @@ func newDraft(kind domain.SourceKind) (config.SourceInstance, bool) {
 		inst.OpenRouter = &s
 	case config.HindsightSettings:
 		inst.Hindsight = &s
+	case config.CodexSettings:
+		inst.Codex = &s
 	}
 
 	return inst, true

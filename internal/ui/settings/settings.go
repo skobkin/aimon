@@ -30,6 +30,14 @@ import (
 // cleanup.
 const testTimeout = 10 * time.Second
 
+// codexTestTimeout is the longer Settings-side budget for one Codex
+// connection test: a probe spans a process spawn, the JSON-RPC initialize,
+// a live read, and the reap, so the shared 10s budget cannot cover it. The
+// adapter's internal stage timeouts only shorten this; nothing may extend a
+// context beyond the deadline chosen here (docs/S6_UI_UX.md §Test
+// Connection).
+const codexTestTimeout = 35 * time.Second
+
 // Deps is everything Settings needs from the app.
 type Deps struct {
 	// LoadInstances returns the authoritative configured instance list.

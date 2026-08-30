@@ -3,6 +3,8 @@ package settings
 import (
 	"context"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -407,4 +409,240 @@ func TestEditorSeparatesOpenRouterSlotsInTestPayload(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("TestConnection was never invoked")
 	}
+}
+
+// --- Codex editor ---------------------------------------------------------
+
+// codexEditorScan locates the Codex-specific widgets of an open editor by
+// their stable placeholders, options and label prefixes.
+type codexEditorScan struct {
+	mode    *widget.Select // the select offering On demand/Persistent
+	exe     *widget.Entry  // launcher entry (placeholder "codex")
+	status  *widget.Label  // live discovery status
+	help    *widget.Label  // launcher help
+	warning *widget.Label  // no-secrets warning
+	addEnv  *widget.Button // Add override
+	envName []*widget.Entry
+	envVal  []*widget.Entry
+}
+
+func scanCodexEditor(t *testing.T, s *Settings) codexEditorScan {
+	t.Helper()
+	var scan codexEditorScan
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			switch w := o.(type) {
+			case *widget.Select:
+				for _, opt := range w.Options {
+					if opt == "On demand" || opt == "Persistent" {
+						scan.mode = w
+					}
+				}
+			case *widget.Entry:
+				switch w.PlaceHolder {
+				case config.DefaultCodexExecutable:
+					scan.exe = w
+				case "VARIABLE_NAME":
+					scan.envName = append(scan.envName, w)
+				case "value (literal, no expansion)":
+					scan.envVal = append(scan.envVal, w)
+				}
+			case *widget.Label:
+				switch {
+				case strings.HasPrefix(w.Text, "Codex CLI "),
+					strings.HasPrefix(w.Text, "Executable "):
+					scan.status = w
+				case strings.Contains(w.Text, "app-server --stdio"):
+					scan.help = w
+				case strings.Contains(w.Text, "Do not put secrets here"):
+					scan.warning = w
+				}
+			case *widget.Button:
+				if w.Text == "Add override" {
+					scan.addEnv = w
+				}
+			}
+		})
+	}
+
+	return scan
+}
+
+// The Codex editor shows the mode select, the launcher entry with its
+// discovery status visible immediately, the launcher and mode help, and the
+// override rows' controls — and no URL and no credential row at all.
+func TestEditorCodexFields(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindCodex)
+
+	scan := scanCodexEditor(t, s)
+	if scan.mode == nil || scan.exe == nil || scan.status == nil {
+		t.Fatalf("missing codex widgets: mode=%v exe=%v status=%v", scan.mode, scan.exe, scan.status)
+	}
+	if len(scan.mode.Options) != 2 {
+		t.Fatalf("mode options = %v, want On demand and Persistent", scan.mode.Options)
+	}
+	if scan.mode.Selected != "On demand" {
+		t.Errorf("default mode = %q, want \"On demand\"", scan.mode.Selected)
+	}
+	if scan.help == nil || scan.warning == nil || scan.addEnv == nil {
+		t.Fatalf("missing codex help/warning/override controls: help=%v warning=%v add=%v", scan.help, scan.warning, scan.addEnv)
+	}
+	if len(scan.envName) != 0 || len(scan.envVal) != 0 {
+		t.Errorf("a fresh draft starts with %d override row(s), want none", len(scan.envName))
+	}
+	if scan.status.Text == "" {
+		t.Error("the discovery status must be visible before any connection test")
+	}
+
+	// A draft has no URL field and no credential row: the CLI owns the login.
+	full := scanEditor(t, s)
+	if full.passwords != 0 || full.buttons["Remove"] != 0 {
+		t.Errorf("codex editor built credential widgets: %d passwords, %d removes", full.passwords, full.buttons["Remove"])
+	}
+}
+
+// The discovery status follows the typed launcher: an explicit existing
+// executable reports "Executable found", an explicit missing one reports
+// the not-executable message, and with the override rows driving the
+// effective PATH a bare name resolves (or not) through them.
+func TestEditorCodexDiscoveryStatus(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindCodex)
+	scan := scanCodexEditor(t, s)
+	if scan.exe == nil || scan.status == nil {
+		t.Fatal("codex editor widgets missing")
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	scan.exe.SetText(exe)
+	if scan.status.Text != "Executable found" {
+		t.Errorf("status = %q, want \"Executable found\"", scan.status.Text)
+	}
+
+	scan.exe.SetText(filepath.Join(t.TempDir(), "no-such-codex"))
+	if scan.status.Text != "Executable not found or not executable." {
+		t.Errorf("status = %q, want the explicit-path failure", scan.status.Text)
+	}
+
+	// A bare name resolves only through the effective PATH, which the
+	// override rows can replace entirely.
+	scan.exe.SetText("codex-fake")
+	if !strings.HasPrefix(scan.status.Text, "Codex CLI not found in PATH") {
+		t.Errorf("status = %q, want the not-in-PATH message", scan.status.Text)
+	}
+	bin := t.TempDir()
+	writeScript(t, filepath.Join(bin, "codex-fake"), "#!/bin/sh\nexit 0\n")
+	scan.addEnv.OnTapped()
+	scan.addEnv.OnTapped() // one empty row remains, one is filled below
+	scan = scanCodexEditor(t, s)
+	if len(scan.envName) != 2 || len(scan.envVal) != 2 {
+		t.Fatalf("override rows = %d/%d, want 2/2", len(scan.envName), len(scan.envVal))
+	}
+	scan.envName[0].SetText("PATH")
+	scan.envVal[0].SetText(bin)
+	scan = scanCodexEditor(t, s)
+	if !strings.HasPrefix(scan.status.Text, "Codex CLI found: ") {
+		t.Errorf("status = %q, want the resolved PATH hit", scan.status.Text)
+	}
+	if !strings.Contains(scan.status.Text, filepath.Join(bin, "codex-fake")) {
+		t.Errorf("status = %q, want the launcher path inside %q", scan.status.Text, bin)
+	}
+}
+
+// writeScript creates an executable file for discovery assertions.
+func writeScript(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// The collected Codex instance carries the mode, the trimmed launcher and
+// the literal override rows; a value containing '=' survives intact, an
+// untouched empty row is dropped, and a name-less row is refused locally.
+func TestEditorCodexCollect(t *testing.T) {
+	delivered := make(chan config.SourceInstance, 1)
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	stub.TestConnection = func(ctx context.Context, inst config.SourceInstance,
+		typed map[credentials.Slot]string) registry.TestReport {
+		delivered <- inst
+
+		return registry.TestReport{Lines: []string{"x"}, OK: true}
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindCodex)
+	scan := scanCodexEditor(t, s)
+	if scan.mode == nil || scan.exe == nil || scan.addEnv == nil {
+		t.Fatal("codex editor widgets missing")
+	}
+
+	scan.mode.SetSelected("Persistent")
+	scan.exe.SetText("  /opt/codex-wrapper  ")
+	scan.addEnv.OnTapped()
+	scan.addEnv.OnTapped()
+	scan.addEnv.OnTapped()
+	scan = scanCodexEditor(t, s)
+	scan.envName[0].SetText("HTTPS_PROXY")
+	scan.envVal[0].SetText("socks5h://user=pass@proxy.lan:1080")
+	scan.envName[1].SetText("EMPTY_BUT_SET") // value stays empty: valid
+	// row 3 stays completely empty and must be dropped
+	scan = scanCodexEditor(t, s)
+	findTestButton(t, s).OnTapped()
+
+	select {
+	case got := <-delivered:
+		if got.Codex == nil {
+			t.Fatal("collected instance lost its codex settings")
+		}
+		if got.Codex.Executable != "/opt/codex-wrapper" || got.Codex.Mode != config.CodexModePersistent {
+			t.Errorf("collected = %+v, want the wrapper path in persistent mode", *got.Codex)
+		}
+		if len(got.Codex.Env) != 2 {
+			t.Fatalf("env overrides = %+v, want two", got.Codex.Env)
+		}
+		if got.Codex.Env[0].Name != "HTTPS_PROXY" || got.Codex.Env[0].Value != "socks5h://user=pass@proxy.lan:1080" {
+			t.Errorf("override[0] = %+v, want the literal value with '=' intact", got.Codex.Env[0])
+		}
+		if got.Codex.Env[1].Name != "EMPTY_BUT_SET" || got.Codex.Env[1].Value != "" {
+			t.Errorf("override[1] = %+v, want the empty-valued override kept", got.Codex.Env[1])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("TestConnection was never invoked")
+	}
+
+	// A name-less override is refused before any test runs.
+	scan = scanCodexEditor(t, s)
+	scan.envName[0].SetText("1ST_BAD_NAME")
+	findTestButton(t, s).OnTapped()
+	select {
+	case got := <-delivered:
+		t.Fatalf("an invalid override name still reached TestConnection: %+v", got.Codex.Env)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func findTestButton(t *testing.T, s *Settings) *widget.Button {
+	t.Helper()
+	var found *widget.Button
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			if b, ok := o.(*widget.Button); ok && b.Text == "Test connection" {
+				found = b
+			}
+		})
+	}
+	if found == nil {
+		t.Fatal("Test connection button not found")
+	}
+
+	return found
 }
