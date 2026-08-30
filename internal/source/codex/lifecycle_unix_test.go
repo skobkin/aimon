@@ -21,7 +21,7 @@ import (
 func assertReaped(t *testing.T, h *fakeHarness) {
 	t.Helper()
 	pid := h.pid(t)
-	if !waitUntil(5*time.Second, func() bool {
+	if !waitUntil(func() bool {
 		return syscall.Kill(pid, 0) == syscall.ESRCH
 	}) {
 		t.Fatalf("child process %d is still alive", pid)
@@ -98,7 +98,7 @@ func TestManagerDisableReapsPersistentProcess(t *testing.T) {
 	m.Apply(map[domain.InstanceID]source.Registration{
 		inst: {Kind: domain.KindCodex, Source: adapter, Enabled: true, Interval: time.Minute},
 	})
-	h.awaitLines(t, "loop refresh", "method "+methodRateLimits, 1)
+	h.awaitLines(t, "loop refresh", 1)
 
 	// Disable keeps the instance registered but drops its loop; the manager
 	// must dispose of the process before Apply returns.
@@ -111,7 +111,7 @@ func TestManagerDisableReapsPersistentProcess(t *testing.T) {
 	m.Apply(map[domain.InstanceID]source.Registration{
 		inst: {Kind: domain.KindCodex, Source: adapter, Enabled: true, Interval: time.Minute},
 	})
-	h.awaitLines(t, "re-enabled refresh", "method "+methodRateLimits, 2)
+	h.awaitLines(t, "re-enabled refresh", 2)
 }
 
 func TestReapedChildIsNotAZombie(t *testing.T) {

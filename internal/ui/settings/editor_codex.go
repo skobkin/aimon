@@ -149,6 +149,7 @@ func (e *editor) removeEnvRow(row *envRow) {
 			continue
 		}
 		e.env = append(e.env[:i], e.env[i+1:]...)
+
 		break
 	}
 	e.envBox.Remove(row.box)

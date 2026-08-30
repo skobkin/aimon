@@ -238,7 +238,7 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 		if rec.Codex != nil {
 			envs := make([]EnvOverride, 0, len(rec.Codex.Env))
 			for _, env := range rec.Codex.Env {
-				envs = append(envs, EnvOverride{Name: env.Name, Value: env.Value})
+				envs = append(envs, EnvOverride(env))
 			}
 			inst.Codex = &CodexSettings{Executable: rec.Codex.Executable, Mode: CodexMode(rec.Codex.Mode), Env: envs}
 		}
@@ -286,7 +286,7 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 		if inst.Codex != nil {
 			r := &codexRecord{Executable: inst.Codex.Executable, Mode: string(inst.Codex.Mode)}
 			for _, env := range inst.Codex.Env {
-				r.Env = append(r.Env, envRecord{Name: env.Name, Value: env.Value})
+				r.Env = append(r.Env, envRecord(env))
 			}
 			rec.Codex = r
 		}

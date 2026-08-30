@@ -560,7 +560,7 @@ func TestEditorCodexDiscoveryStatus(t *testing.T) {
 // writeScript creates an executable file for discovery assertions.
 func writeScript(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil { //nolint:gosec // a launcher script must be executable
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

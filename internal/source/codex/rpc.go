@@ -134,7 +134,10 @@ func spawn(settings config.CodexSettings, log *slog.Logger) (*rpcConn, error) {
 		return nil, &spawnError{state: d.State}
 	}
 
-	cmd := exec.Command(d.Path, spawnArgv()...)
+	// Launching a user-configured launcher is the entire point of this
+	// source: d.Path is our own resolution of the settings value, and the
+	// argv is fixed. No shell is involved.
+	cmd := exec.Command(d.Path, spawnArgv()...) //nolint:gosec // the configured launcher path is the integration boundary
 	cmd.Env = effectiveEnv(settings)
 	cmd.Dir = "" // inherit the application's working directory
 
@@ -149,12 +152,14 @@ func spawn(settings config.CodexSettings, log *slog.Logger) (*rpcConn, error) {
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		closePipe(stdinR, stdinW)
+
 		return nil, &spawnError{err: fmt.Errorf("stdout pipe: %w", err)}
 	}
 	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
 		closePipe(stdinR, stdinW)
 		closePipe(stdoutR, stdoutW)
+
 		return nil, &spawnError{err: fmt.Errorf("stderr pipe: %w", err)}
 	}
 

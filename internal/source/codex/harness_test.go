@@ -31,6 +31,10 @@ const (
 	logName = "fake.log"
 	pidName = "fake.pid"
 
+	// harnessWait bounds every polling wait in the harness: long enough
+	// for a spawned fake child to answer a refresh many times over.
+	harnessWait = 5 * time.Second
+
 	// stderrMarker is what the "stderr-blast" script writes on stderr; the
 	// privacy test asserts it never reaches AI Monitor's log or errors.
 	stderrMarker = "STDERR-MARKER-child-noise"
@@ -54,7 +58,7 @@ func runFakeChild(script string) {
 	appendLine(filepath.Join(dir, logName), "args "+strings.Join(os.Args[1:], " "))
 	// Proves the parent's env overrides reached the child verbatim.
 	appendLine(filepath.Join(dir, logName), "env CODEX_EXTRA="+os.Getenv("CODEX_EXTRA"))
-	_ = os.WriteFile(filepath.Join(dir, pidName), []byte(strconv.Itoa(os.Getpid())), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, pidName), []byte(strconv.Itoa(os.Getpid())), 0o600) //nolint:gosec // dir comes from our own harness env, pidName is a fixed name
 
 	if script == "stderr-blast" {
 		// Noise on stderr that AI Monitor must drain without surfacing.
@@ -142,8 +146,7 @@ func runFakeChild(script string) {
 		}
 	}
 
-	switch script {
-	case "hang-on-eof":
+	if script == "hang-on-eof" {
 		// Ignores the clean-exit signal: only a forced kill can reap it.
 		time.Sleep(60 * time.Second)
 	}
@@ -210,7 +213,7 @@ func float64Ptr(f float64) *float64 { return &f }
 func int64Ptr(i int64) *int64       { return &i }
 
 func appendLine(path, line string) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // test log inside the harness temp dir
 	if err != nil {
 		return
 	}
@@ -278,11 +281,13 @@ func (h *fakeHarness) countLines(prefix string) int {
 	return n
 }
 
-// awaitLines polls until the child has recorded n lines with prefix, which
-// must happen without test-side sleeps for any refresh that came back.
-func (h *fakeHarness) awaitLines(t *testing.T, what, prefix string, n int) {
+// awaitLines polls until the child has recorded n rate-limits requests,
+// which must happen without test-side sleeps for any refresh that came
+// back.
+func (h *fakeHarness) awaitLines(t *testing.T, what string, n int) {
 	t.Helper()
-	if !waitUntil(5*time.Second, func() bool { return h.countLines(prefix) >= n }) {
+	prefix := "method " + methodRateLimits
+	if !waitUntil(func() bool { return h.countLines(prefix) >= n }) {
 		t.Fatalf("timed out waiting for %s (%d lines with prefix %q, log: %v)", what, h.countLines(prefix), prefix, h.logLines())
 	}
 }
@@ -293,7 +298,7 @@ func (h *fakeHarness) awaitLines(t *testing.T, what, prefix string, n int) {
 func (h *fakeHarness) pid(t *testing.T) int {
 	t.Helper()
 	var pid int
-	ok := waitUntil(5*time.Second, func() bool {
+	ok := waitUntil(func() bool {
 		data, err := os.ReadFile(filepath.Join(h.dir, pidName))
 		if err != nil {
 			return false
@@ -309,8 +314,10 @@ func (h *fakeHarness) pid(t *testing.T) int {
 	return pid
 }
 
-func waitUntil(limit time.Duration, cond func() bool) bool {
-	deadline := time.Now().Add(limit)
+// waitUntil polls cond for up to harnessWait, long enough for a spawned
+// fake child to answer a refresh many times over.
+func waitUntil(cond func() bool) bool {
+	deadline := time.Now().Add(harnessWait)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return true
@@ -332,7 +339,7 @@ func quietLogger() (*slog.Logger, *bytes.Buffer) {
 // writeExecutable creates an executable script file for discovery tests.
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil { //nolint:gosec // a launcher script must be executable
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

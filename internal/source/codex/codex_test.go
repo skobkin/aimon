@@ -325,14 +325,14 @@ func TestClassifyStageError(t *testing.T) {
 
 // refreshOnce spawns the harness adapter and performs one refresh,
 // returning the snapshot/error pair and the harness for assertions.
-func refreshOnce(t *testing.T, script string, extra ...config.EnvOverride) (domain.Snapshot, error, *fakeHarness) {
+func refreshOnce(t *testing.T, script string, extra ...config.EnvOverride) (domain.Snapshot, *fakeHarness, error) {
 	t.Helper()
 	h := newFakeHarness(t, script, extra...)
 	log, _ := quietLogger()
 	adapter := New(h.settings, log, "test-version")
 	snap, err := adapter.Refresh(context.Background())
 
-	return snap, err, h
+	return snap, h, err
 }
 
 func classifyOf(t *testing.T, err error) *source.Error {
@@ -345,7 +345,7 @@ func classifyOf(t *testing.T, err error) *source.Error {
 	return se
 }
 
-func wantRefreshError(t *testing.T, err error, want source.Category, detailPart string) *source.Error {
+func wantRefreshError(t *testing.T, err error, want source.Category, detailPart string) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("refresh succeeded, want error")
@@ -357,8 +357,6 @@ func wantRefreshError(t *testing.T, err error, want source.Category, detailPart 
 	if detailPart != "" && !strings.Contains(se.Detail, detailPart) {
 		t.Fatalf("detail = %q, want it to contain %q", se.Detail, detailPart)
 	}
-
-	return se
 }
 
 func TestAdapterKindAndTimeout(t *testing.T) {
@@ -374,7 +372,7 @@ func TestAdapterKindAndTimeout(t *testing.T) {
 func TestRefreshOnDemandHappyPath(t *testing.T) {
 	for _, script := range []string{"ok", "notify", "stale-id", "string-id"} {
 		t.Run(script, func(t *testing.T) {
-			snap, err, h := refreshOnce(t, script)
+			snap, h, err := refreshOnce(t, script)
 			if err != nil {
 				t.Fatalf("refresh: %v", err)
 			}
@@ -394,7 +392,7 @@ func TestRefreshOnDemandHappyPath(t *testing.T) {
 
 			// The child saw exactly the protocol AI Monitor is allowed to
 			// speak, in order, with the fixed argv and the env overrides.
-			h.awaitLines(t, "read", "method "+methodRateLimits, 1)
+			h.awaitLines(t, "read", 1)
 			methods := prefixed(h.logLines(), "method ")
 			want := []string{"method " + methodInitialize, "method " + methodInitialized, "method " + methodRateLimits}
 			if len(methods) != len(want) {
@@ -421,7 +419,7 @@ func TestRefreshOnDemandHappyPath(t *testing.T) {
 }
 
 func TestRefreshSingleWindow(t *testing.T) {
-	snap, err, _ := refreshOnce(t, "ok-single")
+	snap, _, err := refreshOnce(t, "ok-single")
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -456,7 +454,7 @@ func TestRefreshProtocolFailures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.script, func(t *testing.T) {
-			_, err, _ := refreshOnce(t, tc.script)
+			_, _, err := refreshOnce(t, tc.script)
 			wantRefreshError(t, err, tc.category, tc.detail)
 		})
 	}
@@ -500,7 +498,7 @@ func TestPersistentModeReusesConnection(t *testing.T) {
 			t.Fatalf("refresh %d: %v", i+1, err)
 		}
 	}
-	h.awaitLines(t, "second read", "method "+methodRateLimits, 2)
+	h.awaitLines(t, "second read", 2)
 	if got := h.countLines("spawn"); got != 1 {
 		t.Fatalf("spawn count = %d, want exactly 1", got)
 	}
@@ -522,7 +520,7 @@ func TestPersistentModeRestartsAfterBrokenStream(t *testing.T) {
 	if _, err := adapter.Refresh(context.Background()); err != nil {
 		t.Fatalf("third refresh after teardown: %v", err)
 	}
-	if !waitUntil(5*time.Second, func() bool { return h.countLines("spawn") == 2 }) {
+	if !waitUntil(func() bool { return h.countLines("spawn") == 2 }) {
 		t.Fatalf("spawn count = %d, want 2", h.countLines("spawn"))
 	}
 }

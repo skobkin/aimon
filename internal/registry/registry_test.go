@@ -533,7 +533,7 @@ func codexSettings(t *testing.T, body string) config.CodexSettings {
 	t.Helper()
 	dir := t.TempDir()
 	launcher := filepath.Join(dir, "codex-fake")
-	if err := os.WriteFile(launcher, []byte(body), 0o755); err != nil {
+	if err := os.WriteFile(launcher, []byte(body), 0o755); err != nil { //nolint:gosec // a launcher script must be executable
 		t.Fatalf("write launcher: %v", err)
 	}
 
@@ -667,18 +667,22 @@ func TestCodexTestReportMissingCLI(t *testing.T) {
 }
 
 func TestCodexPlanLabel(t *testing.T) {
-	cases := map[string]string{
-		"plus":  "Plus",
-		" PLUS": "Plus",
-		"pro":   "Pro",
-		"go":    "Go",
-		"free":  "Free",
-		"team":  "team",
-		"":      "",
+	// cases is a slice, not a map: the padded input is deliberate (labels
+	// arrive trimmed) and a key with whitespace reads as a typo.
+	cases := []struct {
+		in, want string
+	}{
+		{in: "plus", want: "Plus"},
+		{in: " PLUS", want: "Plus"},
+		{in: "pro", want: "Pro"},
+		{in: "go", want: "Go"},
+		{in: "free", want: "Free"},
+		{in: "team", want: "team"},
+		{in: "", want: ""},
 	}
-	for in, want := range cases {
-		if got := CodexPlanLabel(in); got != want {
-			t.Errorf("CodexPlanLabel(%q) = %q, want %q", in, got, want)
+	for _, c := range cases {
+		if got := CodexPlanLabel(c.in); got != c.want {
+			t.Errorf("CodexPlanLabel(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

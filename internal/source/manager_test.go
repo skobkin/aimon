@@ -546,9 +546,11 @@ type closerSource struct {
 	calls int
 }
 
-func newCloserSource(kind domain.SourceKind) *closerSource {
-	return &closerSource{fakeSource: newFakeSource(kind, func(ctx context.Context) (domain.Snapshot, error) {
-		return snapOf(kind), nil
+func newCloserSource() *closerSource {
+	// Every Closer test uses the codex kind: it is the only compiled kind
+	// whose adapter actually implements the interface.
+	return &closerSource{fakeSource: newFakeSource(domain.KindCodex, func(ctx context.Context) (domain.Snapshot, error) {
+		return snapOf(domain.KindCodex), nil
 	})}
 }
 
@@ -572,7 +574,7 @@ type plainSource struct {
 }
 
 func TestManagerClosesRemovedSource(t *testing.T) {
-	src := newCloserSource(domain.KindCodex)
+	src := newCloserSource()
 	m := NewManager(quietLogger())
 	m.Apply(reg("codex-1", src, true, 10*time.Millisecond))
 	if src.closeCalls() != 0 {
@@ -588,7 +590,7 @@ func TestManagerClosesRemovedSource(t *testing.T) {
 
 func TestManagerClosesDisabledSource(t *testing.T) {
 	const inst = domain.InstanceID("codex-1")
-	src := newCloserSource(domain.KindCodex)
+	src := newCloserSource()
 	m := NewManager(quietLogger())
 	m.Apply(reg(inst, src, true, 10*time.Millisecond))
 
@@ -612,8 +614,8 @@ func TestManagerClosesDisabledSource(t *testing.T) {
 
 func TestManagerClosesReplacedSourceOnly(t *testing.T) {
 	const inst = domain.InstanceID("codex-1")
-	old := newCloserSource(domain.KindCodex)
-	replacement := newCloserSource(domain.KindCodex)
+	old := newCloserSource()
+	replacement := newCloserSource()
 	m := NewManager(quietLogger())
 	m.Apply(reg(inst, old, true, 10*time.Millisecond))
 
@@ -629,7 +631,7 @@ func TestManagerClosesReplacedSourceOnly(t *testing.T) {
 
 func TestManagerKeepsSourceOnIntervalChange(t *testing.T) {
 	const inst = domain.InstanceID("codex-1")
-	src := newCloserSource(domain.KindCodex)
+	src := newCloserSource()
 	m := NewManager(quietLogger())
 	m.Apply(reg(inst, src, true, 10*time.Millisecond))
 
@@ -647,7 +649,7 @@ func TestManagerKeepsSourceOnIntervalChange(t *testing.T) {
 }
 
 func TestManagerWaitClosesSurvivorsOnce(t *testing.T) {
-	src := newCloserSource(domain.KindCodex)
+	src := newCloserSource()
 	plain := &plainSource{fakeSource: newFakeSource(domain.KindMiniMax, func(ctx context.Context) (domain.Snapshot, error) {
 		return snapOf(domain.KindMiniMax), nil
 	})}
