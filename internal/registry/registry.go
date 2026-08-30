@@ -629,7 +629,7 @@ func codexTestReport(ctx context.Context, inst config.SourceInstance, deps Deps)
 // CodexPlanLabel titles the provider's plan name where the known values are
 // concerned and passes anything else through trimmed-but-unchanged, so an
 // unknown future plan never renders as garbage or as a fake known one. The
-// UI reuses it so the overview subtitle and the detail Account row spell
+// UI reuses it so the overview title suffix and the detail Account row spell
 // the plan identically.
 func CodexPlanLabel(plan string) string {
 	switch strings.ToLower(strings.TrimSpace(plan)) {

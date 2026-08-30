@@ -189,13 +189,6 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 			}
 		}
 	}
-	if vm.Subtitle == "" {
-		return body, tick
-	}
 
-	// The subtitle is set once at build time; like the donuts, it is never
-	// rebuilt for a time tick.
-	subtitle := widget.NewLabelWithStyle(vm.Subtitle, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-
-	return container.NewVBox(subtitle, body), tick
+	return body, tick
 }

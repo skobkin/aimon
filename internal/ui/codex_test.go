@@ -27,8 +27,8 @@ func codexSnap() domain.CodexSnapshot {
 	}
 }
 
-func codexInstance(id string) config.SourceInstance {
-	i := inst(id, "ChatGPT Codex", domain.KindCodex, true)
+func codexInstance() config.SourceInstance {
+	i := inst("codx1", "ChatGPT Codex", domain.KindCodex, true)
 	i.Codex = &config.CodexSettings{}
 
 	return i
@@ -99,9 +99,6 @@ func TestBuildCodexOverview(t *testing.T) {
 	if !vm.HasData || len(vm.Windows) != 2 {
 		t.Fatalf("overview = %+v, want two donuts", vm)
 	}
-	if vm.Subtitle != "Plus" {
-		t.Errorf("subtitle = %q, want \"Plus\"", vm.Subtitle)
-	}
 	if vm.Windows[0].Label != "5h" || vm.Windows[0].PctText != "30%" {
 		t.Errorf("first donut = %+v", vm.Windows[0])
 	}
@@ -116,16 +113,15 @@ func TestBuildCodexOverview(t *testing.T) {
 	// One usable window renders alone, without a fake second donut.
 	single := codexSnap()
 	single.Windows = single.Windows[:1]
-	single.PlanType = ""
 	vm = BuildCodexOverview(single, now)
-	if len(vm.Windows) != 1 || vm.Subtitle != "" {
+	if len(vm.Windows) != 1 {
 		t.Fatalf("single-window overview = %+v", vm)
 	}
 }
 
 func TestBuildCodexCardsDispatch(t *testing.T) {
 	rt := domain.Runtime{Enabled: true, LastSuccessAt: now, Snapshot: codexSnap()}
-	card := BuildCard(codexInstance("codx1"), rt, now, true)
+	card := BuildCard(codexInstance(), rt, now, true)
 	if card.Kind != KindQuota {
 		t.Fatalf("card kind = %q, want %q", card.Kind, KindQuota)
 	}
@@ -133,12 +129,47 @@ func TestBuildCodexCardsDispatch(t *testing.T) {
 		t.Fatalf("detail card = %+v", card.Quota)
 	}
 
-	overview := BuildOverviewCard(codexInstance("codx1"), rt, now)
+	overview := BuildOverviewCard(codexInstance(), rt, now)
 	if overview.Kind != OverviewQuota {
 		t.Fatalf("overview kind = %q, want %q", overview.Kind, OverviewQuota)
 	}
-	if overview.Quota.Subtitle != "Plus" || len(overview.Quota.Windows) != 2 {
+	if overview.Title != "ChatGPT Codex (Plus)" {
+		t.Errorf("overview title = %q, want the plan joined to the source name", overview.Title)
+	}
+	if len(overview.Quota.Windows) != 2 {
 		t.Fatalf("overview card = %+v", overview.Quota)
+	}
+}
+
+// The plan name lives in the overview card title, never as a line of its
+// own: it is appended once a snapshot lands, and an absent or unknown plan
+// leaves the title untouched.
+func TestCodexOverviewTitleCarriesPlan(t *testing.T) {
+	build := func(snap domain.CodexSnapshot) OverviewCardVM {
+		return BuildOverviewCard(codexInstance(),
+			domain.Runtime{Enabled: true, LastSuccessAt: now, Snapshot: snap}, now)
+	}
+
+	if got := build(codexSnap()).Title; got != "ChatGPT Codex (Plus)" {
+		t.Errorf("title = %q, want \"ChatGPT Codex (Plus)\"", got)
+	}
+
+	noPlan := codexSnap()
+	noPlan.PlanType = ""
+	if got := build(noPlan).Title; got != "ChatGPT Codex" {
+		t.Errorf("title with no plan = %q, want the bare source name", got)
+	}
+
+	unknown := codexSnap()
+	unknown.PlanType = "team"
+	if got := build(unknown).Title; got != "ChatGPT Codex (team)" {
+		t.Errorf("title with unknown plan = %q, want the raw plan name appended", got)
+	}
+
+	// Before the first snapshot there is no plan to show.
+	if got := BuildOverviewCard(codexInstance(),
+		domain.Runtime{Enabled: true, LastSuccessAt: now}, now).Title; got != "ChatGPT Codex" {
+		t.Errorf("title before first snapshot = %q, want the bare source name", got)
 	}
 }
 
@@ -172,7 +203,7 @@ func TestCodexShortLabelMapping(t *testing.T) {
 }
 
 // The MiniMax and Z.AI quota rendering must be byte-for-byte unaffected by
-// the codex extension: no Account rows, no subtitle.
+// the codex extension: no Account rows.
 func TestQuotaKindsStayUntouched(t *testing.T) {
 	snap := domain.QuotaSnapshot{
 		Kind: domain.KindMiniMax,
@@ -183,9 +214,5 @@ func TestQuotaKindsStayUntouched(t *testing.T) {
 	vm := BuildQuotaVM(snap, now, true)
 	if len(vm.Account) != 0 {
 		t.Fatalf("minimax account rows = %+v", vm.Account)
-	}
-	ov := BuildQuotaOverview(snap, now)
-	if ov.Subtitle != "" {
-		t.Fatalf("minimax subtitle = %q", ov.Subtitle)
 	}
 }

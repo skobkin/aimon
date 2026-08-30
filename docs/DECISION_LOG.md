@@ -9,6 +9,24 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-30 — The Codex plan name joins the overview card title; the plan line is gone
+
+First real use of the S6 overview card showed the plan line ("Plus" above
+the donuts) breaking the shape every other usage-based provider shares:
+one titled card with nothing between the title and its gauges. The plan
+name now joins the card title — "ChatGPT Codex (Plus)" — and the line is
+removed. This supersedes the `QuotaOverviewVM.Subtitle` half of item 5 of
+the same-day S6 entry, from this date onward:
+
+1. `QuotaOverviewVM.Subtitle` is removed, together with its renderer
+   branch; the overview body is again only the headline donuts, identical
+   in shape for MiniMax, Z.AI and Codex.
+2. `BuildOverviewCard` appends the plan in parentheses to the card title
+   when the landed snapshot carries one (labeled by `CodexPlanLabel` as
+   before, unknown names included verbatim, absent plan or no snapshot yet
+   leaves the title bare). The detail tab is unchanged: its title stays
+   the source name and the Account section keeps the Plan row.
+
 ## 2026-08-30 — Short Codex editor labels; the editor dialog is sized to the window
 
 First real use of the S6 editor showed the form's label column eating the

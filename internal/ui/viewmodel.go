@@ -219,13 +219,10 @@ type OverviewDonutVM struct {
 	ResetAt *time.Time
 }
 
-// QuotaOverviewVM carries up to two headline quota donuts. Subtitle is an
-// optional plan line rendered above the grid (the ChatGPT Codex plan name);
-// empty means no line at all.
+// QuotaOverviewVM carries up to two headline quota donuts.
 type QuotaOverviewVM struct {
-	Subtitle string
-	Windows  []OverviewDonutVM // 0, 1, or 2
-	HasData  bool
+	Windows []OverviewDonutVM // 0, 1, or 2
+	HasData bool
 }
 
 // OverviewCardVM is one card in the Overview tab.
@@ -413,6 +410,12 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.T
 		card.Quota = BuildQuotaOverview(snap, now)
 	case domain.CodexSnapshot:
 		card.Quota = BuildCodexOverview(snap, now)
+		// The plan name joins the card title ("ChatGPT Codex (Plus)") instead
+		// of taking a line of its own, matching the other usage-based
+		// providers' single-title cards. Only a landed snapshot knows it.
+		if plan := registry.CodexPlanLabel(snap.PlanType); plan != "" {
+			card.Title += " (" + plan + ")"
+		}
 	case domain.OpenRouterSnapshot:
 		card.Spend = BuildSpendOverview(snap)
 	case domain.HindsightSnapshot:
@@ -783,10 +786,10 @@ func BuildCodexVM(snap domain.CodexSnapshot, now time.Time, detail bool) QuotaVM
 	return vm
 }
 
-// BuildCodexOverview derives the compact overview card: the optional plan
-// line above the shared headline donuts.
+// BuildCodexOverview derives the compact overview card: the shared headline
+// donuts. The plan name is not part of the body — the card title carries it.
 func BuildCodexOverview(snap domain.CodexSnapshot, now time.Time) QuotaOverviewVM {
-	vm := QuotaOverviewVM{Subtitle: registry.CodexPlanLabel(snap.PlanType)}
+	vm := QuotaOverviewVM{}
 	headlines := selectHeadlineWindows(snap.Windows)
 	for _, w := range headlines {
 		vm.Windows = append(vm.Windows, OverviewDonutVM{
