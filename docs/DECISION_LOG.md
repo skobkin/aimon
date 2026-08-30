@@ -9,6 +9,59 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-30 — S6 review hardening: launcher exec, teardown, and error surfaces
+
+Post-implementation review of the Codex integration surfaced seven defects;
+all were confirmed and fixed. These choices amend decisions 2 and 8 of the
+same date.
+
+1. **The launcher is exec'd exactly as resolved.** A PATH override entry
+   like `.` loses its prefix in `filepath.Join`'s cleaning, leaving a bare
+   name that `exec.Command` would look up a second time — against the
+   inherited PATH instead of the effective one discovery just searched.
+   Discovery returns an absolute path for bare-name resolutions and
+   `spawn` builds the `exec.Cmd` with `Path`/`Args` set directly, as
+   `docs/S6_CODEX.md` §Environment already prescribed.
+
+2. **JSON-RPC error messages are never rendered.** `rpcError.Error()` is
+   code-only ("json-rpc error -32000"); the provider's message drives the
+   auth classification alone and can carry account data into neither the
+   manager's log line nor a UI string. An unsupported id spelling is
+   reported without echoing the raw bytes.
+
+3. **The process group is signaled after a graceful reap too.** A launcher
+   wrapper that exits right after spawning the app-server leaves the
+   leader already reaped when stdin is closed, so the graceful path never
+   signaled the group and a grandchild ignoring stdin EOF survived.
+   `shutdown` signals the group unconditionally once the wait completes
+   (a no-op on an empty group), making the teardown guarantee
+   unconditional (amends decision 8).
+
+4. **A caller cancellation preserves the persistent child.** The manager
+   detaches the loop on every reconfiguration and cancels the in-flight
+   request with it, an interval-only change included; treating that
+   cancellation as a broken stream killed and respawned a healthy child on
+   a pure schedule change. The adapter now tears the connection down on
+   timeouts, transport and protocol failures only (amends decision 2 in
+   spirit — the schedule-change guarantee now holds at process level).
+
+5. **A pre-initialize exit is incompatible setup.** A CLI that exits
+   before answering the handshake (an old release without the app-server
+   command) produced "Codex CLI: OK" plus a connection error; a
+   transport-shaped failure during initialize now yields the same authored
+   incompatible-CLI message as a method-not-found rejection. Read-stage
+   failures keep the connection classification.
+
+6. **`source.CatBackend` for non-HTTP rejections.** A JSON-RPC error is
+   not an HTTP 5xx, but `CatProvider`'s fixed message says exactly that.
+   The new category renders "Provider rejected the request"; `CatProvider`
+   keeps the HTTP wording for the HTTP-based kinds.
+
+7. **Shared adapters are disposed once.** One `Closer` pointer registered
+   under two instance IDs was closed once per stopped entry (and collected
+   twice by `Wait`). Both close phases deduplicate by pointer; Close
+   remains contractually idempotent.
+
 ## 2026-08-30 — S6: ChatGPT Codex source, implementation-time decisions
 
 Implementation of S6 / v0.6.0 per `docs/S6_CODEX.md`, `docs/S6_AGENT_RULES.md`,
