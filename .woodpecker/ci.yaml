@@ -12,6 +12,9 @@ clone:
 steps:
   fmt:
     image: golang:1.26-alpine
+    # The tag is rolling; without this the runner keeps a stale cached
+    # image (it served go1.26.1 while the tag had moved on).
+    pull: true
     depends_on: []
     commands:
       - |
@@ -25,6 +28,7 @@ steps:
 
   lint:
     image: golangci/golangci-lint:v2.13-alpine
+    pull: true
     depends_on: []
     commands:
       - export CACHE_ROOT="$PWD/.ci-cache"
@@ -34,11 +38,16 @@ steps:
       - export GOLANGCI_LINT_CACHE="$CACHE_ROOT/golangci-lint"
       - export XDG_CACHE_HOME="$CACHE_ROOT/xdg"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" "$GOLANGCI_LINT_CACHE" "$XDG_CACHE_HOME"
-      - apk add --no-cache git build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      # wayland-dev + libxkbcommon-dev: go-gl/glfw includes wl_platform.h
+      # unconditionally, which needs the Wayland and xkbcommon headers.
+      - apk add --no-cache git build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
       - golangci-lint run ./...
 
   vet:
     image: golang:1.26-alpine
+    # The tag is rolling; without this the runner keeps a stale cached
+    # image (it served go1.26.1 while the tag had moved on).
+    pull: true
     depends_on: []
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
@@ -47,11 +56,14 @@ steps:
       - export GOCACHE="$CACHE_ROOT/gobuild"
       - export GOPATH="$CACHE_ROOT/gopath"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin"
-      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
       - go vet ./...
 
   test:
     image: golang:1.26-alpine
+    # The tag is rolling; without this the runner keeps a stale cached
+    # image (it served go1.26.1 while the tag had moved on).
+    pull: true
     depends_on: []
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
@@ -60,11 +72,14 @@ steps:
       - export GOCACHE="$CACHE_ROOT/gobuild"
       - export GOPATH="$CACHE_ROOT/gopath"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin"
-      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
       - go test ./...
 
   build:
     image: golang:1.26-alpine
+    # The tag is rolling; without this the runner keeps a stale cached
+    # image (it served go1.26.1 while the tag had moved on).
+    pull: true
     depends_on: []
     when:
       - event: push
@@ -76,11 +91,12 @@ steps:
       - export GOCACHE="$CACHE_ROOT/gobuild"
       - export GOPATH="$CACHE_ROOT/gopath"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" dist
-      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
       - go build -trimpath -o dist/aimon ./cmd/aimon
 
   release:
     image: goreleaser/goreleaser-cross:v1.26
+    pull: true
     depends_on:
       - fmt
       - lint
@@ -94,7 +110,9 @@ steps:
       - test -n "$FORGE_API_URL" || export FORGE_API_URL="$CI_FORGE_URL/api/v1"
       - test -n "$FORGE_DOWNLOAD_URL" || export FORGE_DOWNLOAD_URL="$CI_FORGE_URL"
       - apt-get update
-      - apt-get install --no-install-recommends -y pkg-config libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxxf86vm-dev
+      # libwayland-dev + libxkbcommon-dev: go-gl/glfw includes wl_platform.h
+      # unconditionally, which needs the Wayland and xkbcommon headers.
+      - apt-get install --no-install-recommends -y pkg-config libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxxf86vm-dev libwayland-dev libxkbcommon-dev
       - rm -rf "$PWD/.ci-cache"
       - goreleaser release --clean
     when:
