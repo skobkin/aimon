@@ -52,8 +52,8 @@ func appMetadata() fyne.AppMetadata {
 	return fyne.AppMetadata{
 		ID:         appID,
 		Name:       "AI Monitor",
-		Version:    "0.5.0",
-		Build:      5,
+		Version:    "0.6.0",
+		Build:      6,
 		Migrations: map[string]bool{"fyneDo": true},
 	}
 }

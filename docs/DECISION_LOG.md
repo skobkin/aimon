@@ -9,6 +9,78 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-30 — S6: ChatGPT Codex source, implementation-time decisions
+
+Implementation of S6 / v0.6.0 per `docs/S6_CODEX.md`, `docs/S6_AGENT_RULES.md`,
+`docs/S6_UI_UX.md`, and `docs/S6_IMPLEMENTATION_SPEC.md`. The following
+choices were made while coding and extend the documents from this date.
+
+1. **Request timeout 30s with a 2s reap grace.** One Codex refresh spans a
+   process spawn, the JSON-RPC initialize, the live
+   `account/rateLimits/read`, and the reap of the process, budgeted as
+   10s initialize + 15s read + 2s grace + margin. The remote convention of
+   10s cannot cover it, so `KindCodex` carries its own `RequestTimeout`.
+   Consequently `source.Manager` documentation now states that `Apply` may
+   block for up to one in-flight request timeout plus a `Closer`'s
+   self-bounded cleanup; per-request timeouts are per-kind values, and
+   Codex is the first kind that both spawns a subprocess and can own a
+   long-lived child.
+
+2. **`source.Closer` lifecycle.** A stopped loop's source is closed when no
+   registration of the same `Apply` keeps that pointer enabled — removal,
+   adapter replacement, and disable all discard the source (a disabled
+   instance stays registered with `Enabled: false` and has no loop, so a
+   later shutdown could no longer reach it). An interval-only restart keeps
+   the source, so a persistent app-server survives a schedule change. Close
+   is idempotent, bounded, and restartable: the next `Refresh` lazily starts
+   a fresh process, which is what disable-then-re-enable relies on.
+   `Cancel` stays non-blocking; `Wait` closes surviving sources after the
+   loops join, guarded by a `sync.Once`; Apply-after-Wait is unsupported.
+
+3. **The Settings caller owns the Codex test budget (~35s).** A child
+   context can never outlive its parent's deadline, so the editor's Codex
+   branch derives its test context with `codexTestTimeout` (35s) instead of
+   the shared 10s `testTimeout`; `codex.Test` fully honors the context it
+   receives and its internal stage timeouts only shorten it. The shared 10s
+   budget is unchanged for every other kind.
+
+4. **`Deps.AppVersion`.** The registry hands the running application
+   version to `Build`/`Test`; the Codex adapter reports it as the JSON-RPC
+   `clientInfo.version` during initialize. Other kinds ignore it.
+
+5. **Generic, optional quota-view extensions.** `QuotaVM.Account`
+   ([]MetricRowVM) and `QuotaOverviewVM.Subtitle` extend the shared quota
+   presentation for the Codex Account section (Plan, Reset credits, an
+   optional reached-limit warning) and the overview plan line. Both stay
+   empty for MiniMax/Z.AI, whose rendering is unchanged (regression-tested).
+   Codex window IDs (`codex-primary`/`codex-secondary`) join the short-label
+   and headline-priority tables; plan names render Plus/Pro/Go/Free where
+   known via `registry.CodexPlanLabel`, with unknown names passed through
+   unchanged. None of it is affected by the money-privacy setting.
+
+6. **No web UI for Codex.** The definition carries an explicit
+   `noWebURL` (the registry never leaves `WebURL` nil) and no `WebLabel`:
+   the ChatGPT subscription has no quota dashboard AI Monitor could link.
+
+7. **Environment overrides replace, not append.** `effectiveEnv` replaces
+   every inherited entry of the same name instead of appending the
+   override: environment readers take the first match, so an appended
+   override would silently lose to the inherited value — including the
+   `PATH` that bare launcher names resolve against.
+
+8. **Process teardown details.** The child is spawned in its own process
+   group (`Setpgid`); force-kill signals the group, so a wrapper's
+   grandchild cannot outlive a disable or quit. Raw `os.Pipe` triples
+   replace `StdoutPipe`/`StdinPipe`: `cmd.Wait` is called exactly once, by
+   a single reaper goroutine started at spawn, and the parent's pipe ends
+   are closed after the wait so a launcher grandchild holding the write end
+   cannot wedge the reader. The child's stderr is drained to EOF for its
+   whole lifetime (a stalled reader would fill the pipe and deadlock the
+   child), and only its byte count is ever logged — content, environment
+   values, and account payloads never reach errors or logs.
+
+
+
 
 ## 2026-08-29 — S5: a rate row renders only for a counter family the deployment has exported
 
