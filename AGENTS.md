@@ -130,6 +130,8 @@ If a linter configuration is added, run it too.
 ## Repository hygiene
 
 - Do not commit secrets or local runtime data.
-- Keep README intentionally minimal unless the user explicitly asks to expand it.
+- README.md is the user-facing product page. When a monitored source or a
+  user-visible feature is added, changed, or removed, update README.md in the
+  same change.
 - Keep architecture/design docs implementation-independent where practical.
 - Do not rewrite the specs to match an implementation shortcut. Fix the implementation instead.
