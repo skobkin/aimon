@@ -9,6 +9,37 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-30 — Version identity from buildinfo; FyneApp.toml removed
+
+The application version is now link-time build information instead of a
+hand-edited pair of files. `internal/buildinfo` declares `AppName`,
+`Version` (default `"dev"`) and `BuildDate`; GoReleaser stamps
+`Version = {{ .Version }}` and `BuildDate = {{ .Date }}` via `-X`
+ldflags on tagged releases, exactly like the author's other Go
+applications. `appMetadata()` reads those values, so the startup log,
+the systray title source and the Codex `clientInfo.version` all report
+the tag on release builds and `"dev"` otherwise. `BuildDate` also joins
+the startup log line (empty for development builds).
+
+`FyneApp.toml` is deleted. Nothing in this repository's build or
+runtime path consumed it: Fyne only reads the toml when the app is
+created without an ID and the file sits next to the executable, while
+AI Monitor uses `NewWithID(appID)` and then overwrites the metadata
+with `SetMetadata` in every run mode; the `fyne` packaging tool is not
+part of the build (GoReleaser produces plain binaries; the desktop
+entry and icon are installed manually per `packaging/README.md`). The
+`Build` integer leaves `appMetadata()` with it: fyne 2.8 never reads
+`AppMetadata.Build` at runtime, and its only consumer would have been
+the unused packaging tool.
+
+This supersedes the 2026-08-23 entry "App metadata set at startup"
+from this date onward: the metadata is still set at startup, but the
+mirroring of `FyneApp.toml` and its guard test are gone, and a release
+no longer needs a version-bump commit — tagging
+(`git tag 0.7.0 && git push --tags`) is the whole release step. A test
+now guards the opposite direction: `appMetadata()` must carry
+`buildinfo`'s name and version rather than hardcode them.
+
 ## 2026-08-30 — The Codex plan name joins the overview card title; the plan line is gone
 
 First real use of the S6 overview card showed the plan line ("Plus" above

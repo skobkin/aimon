@@ -22,8 +22,8 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -buildid=
-      - -X git.skobk.in/skobkin/aimonitor/internal/app.Version={{ .Version }}
-      - -X git.skobk.in/skobkin/aimonitor/internal/app.BuildDate={{ .Date }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.Version={{ .Version }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.BuildDate={{ .Date }}
 
   - id: aimon-windows
     main: ./cmd/aimon
@@ -40,8 +40,8 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -H=windowsgui -buildid=
-      - -X git.skobk.in/skobkin/aimonitor/internal/app.Version={{ .Version }}
-      - -X git.skobk.in/skobkin/aimonitor/internal/app.BuildDate={{ .Date }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.Version={{ .Version }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.BuildDate={{ .Date }}
 
 archives:
   - formats:

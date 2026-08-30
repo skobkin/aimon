@@ -1,9 +1,0 @@
-[Details]
-  Icon = "internal/resources/icon.svg"
-  Name = "AI Monitor"
-  ID = "com.skobkin.aimonitor"
-  Version = "0.6.0"
-  Build = 6
-
-[Migrations]
-  fyneDo = true

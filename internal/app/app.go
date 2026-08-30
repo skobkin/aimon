@@ -25,6 +25,7 @@ import (
 	"fyne.io/systray"
 	"github.com/go-gl/glfw/v3.4/glfw"
 
+	"git.skobk.in/skobkin/aimonitor/internal/buildinfo"
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
@@ -36,8 +37,8 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/ui/settings"
 )
 
-// appID is the single application identity, identical to FyneApp.toml
-// (preferences path, tray, packaging all key off it).
+// appID is the single application identity (preferences path, tray,
+// packaging all key off it).
 const appID = "com.skobkin.aimonitor"
 
 // keyringProbeTimeout bounds the startup keychain availability probe: the
@@ -45,15 +46,14 @@ const appID = "com.skobkin.aimonitor"
 // log line, never the event loop.
 const keyringProbeTimeout = 5 * time.Second
 
-// appMetadata mirrors FyneApp.toml for runs without packaged metadata
-// (see New). Keep the values in sync with the toml; a test guards the
-// duplication.
+// appMetadata is the runtime application identity. Nothing injects it from
+// outside the binary — the version and name come from buildinfo, stamped
+// at link time for tagged releases (see New).
 func appMetadata() fyne.AppMetadata {
 	return fyne.AppMetadata{
 		ID:         appID,
-		Name:       "AI Monitor",
-		Version:    "0.6.0",
-		Build:      6,
+		Name:       buildinfo.AppName,
+		Version:    buildinfo.Version,
 		Migrations: map[string]bool{"fyneDo": true},
 	}
 }
@@ -126,10 +126,9 @@ func New() (*App, error) {
 	}))
 
 	fa := fyneapp.NewWithID(appID)
-	// Packaged builds get their metadata injected by the fyne tool; every
-	// other run (go run, an installed binary) finds no FyneApp.toml next
-	// to the executable, so the fyne.Do migration flag and the version
-	// would be missing and every start would log the not-migrated warning.
+	// Nothing injects the metadata from outside, so it is set here: without
+	// it the fyne.Do migration flag and the version would be missing and
+	// every start would log the not-migrated warning.
 	fyneapp.SetMetadata(appMetadata())
 	fa.SetIcon(resources.Icon())
 
@@ -200,7 +199,7 @@ func New() (*App, error) {
 // Run starts the configured sources and the event loop, then joins the
 // source goroutines after the loop returns.
 func (a *App) Run() {
-	a.log.Info("starting", "app", appID, "version", a.fyneApp.Metadata().Version)
+	a.log.Info("starting", "app", appID, "version", a.fyneApp.Metadata().Version, "build_date", buildinfo.BuildDate)
 
 	// Fyne's own SIGINT/SIGTERM handling quits only the event loop; with
 	// no window ever focused it also skips unregistering the tray icon,
