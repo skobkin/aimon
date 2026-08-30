@@ -97,9 +97,12 @@ func (e *editor) buildCodexFields(items *[]*widget.FormItem, s config.CodexSetti
 	*items = append(*items,
 		widget.NewFormItem("Mode", e.mode),
 		widget.NewFormItem("", modeHelp),
-		widget.NewFormItem("Codex executable", container.NewVBox(e.exe, e.cli)),
+		widget.NewFormItem("Executable", container.NewVBox(e.exe, e.cli)),
 		widget.NewFormItem("", launcherHelp),
-		widget.NewFormItem("Environment overrides (advanced)", container.NewVBox(e.envBox, addEnv)),
+		// Labels stay short: a form item's label widens the form's label
+		// column for every row, stealing width from the fields and the
+		// help text.
+		widget.NewFormItem("ENV", container.NewVBox(e.envBox, addEnv)),
 		widget.NewFormItem("", envWarning),
 	)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
@@ -90,6 +91,90 @@ func keys(m map[string]*widget.Button) []string {
 	return out
 }
 
+// The dialog sizes itself to its content's minimum — a thin strip once the
+// labels are short and the help text wraps. It must take most of the
+// Settings window instead, never below the editor's minimum width.
+func TestEditorDialogTakesMostOfSettingsWindow(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindCodex)
+
+	var popup *widget.PopUp
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			if p, ok := o.(*widget.PopUp); ok {
+				popup = p
+			}
+		})
+	}
+	if popup == nil {
+		t.Fatal("editor dialog popup not found in the overlay")
+	}
+	if popup.Size().IsZero() {
+		t.Fatal("the dialog was never laid out")
+	}
+	canvas := s.win.Canvas().Size()
+	want := fyne.Max(canvas.Width*0.9, editorMinWidth)
+	if w := popup.Size().Width; w < want-0.5 {
+		t.Errorf("dialog width = %.0f, want at least %.0f (90%% of the %.0f-wide window, min %.0f)",
+			w, want, canvas.Width, editorMinWidth)
+	}
+}
+
+// The dialog is bounded by the Settings window, so a kind whose editor is
+// taller than it (the Codex one with its help text) scrolls its form: the
+// dialog must fit the parent without resizing, the form must actually
+// scroll (so Test connection, its last row, is reachable), and the pinned
+// Save/Cancel row must stay inside the dialog without scrolling.
+func TestEditorDialogScrollsTallForms(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindCodex)
+
+	var popup *widget.PopUp
+	var scroller *container.Scroll
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			switch w := o.(type) {
+			case *widget.PopUp:
+				popup = w
+			case *container.Scroll:
+				scroller = w
+			}
+		})
+	}
+	if popup == nil {
+		t.Fatal("editor dialog popup not found in the overlay")
+	}
+	if canvas := s.win.Canvas().Size().Height; canvas < popup.Size().Height {
+		t.Errorf("dialog height %.0f exceeds the %.0f window; it must fit without resizing",
+			popup.Size().Height, canvas)
+	}
+	if scroller == nil {
+		t.Fatal("the editor form is not wrapped in a scroll container")
+	}
+	if scroller.Content == nil || scroller.Content.MinSize().Height <= scroller.Size().Height {
+		t.Errorf("form content %v does not scroll inside the %v viewport; Test connection would be unreachable",
+			scroller.Content.MinSize(), scroller.Size())
+	}
+
+	buttons := map[string]*widget.Button{}
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		findButtons(t, overlay, buttons)
+	}
+	save := buttons["Save"]
+	if save == nil || save.Size().IsZero() {
+		t.Fatal("Save was never laid out")
+	}
+	dialogBottom := popup.Position().Y + popup.Size().Height
+	if saveBottom := save.Position().Y + save.Size().Height; saveBottom > dialogBottom+0.5 {
+		t.Errorf("Save bottom %.0f lies below the dialog bottom %.0f; the action row must stay pinned",
+			saveBottom, dialogBottom)
+	}
+}
+
 // blockedStore parks the keychain-status probe forever. In production the
 // probe's results hop back through fyne.Do onto the UI thread; the headless
 // test driver runs that callback inline on the probe goroutine, which would
@@ -156,6 +241,16 @@ func walkCanvas(t *testing.T, obj fyne.CanvasObject, visit func(fyne.CanvasObjec
 		visit(o)
 	case *widget.Select:
 		visit(o)
+	case *widget.PopUp:
+		visit(o)
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			walkCanvas(t, child, visit)
+		}
+	case *container.Scroll:
+		visit(o)
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			walkCanvas(t, child, visit)
+		}
 	case fyne.Widget:
 		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
 			walkCanvas(t, child, visit)

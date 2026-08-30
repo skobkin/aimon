@@ -94,6 +94,11 @@ func slotDisplayName(slot credentials.Slot) string {
 	return "API key"
 }
 
+// editorMinWidth is the editor dialog's smallest usable width. The dialog
+// normally takes 90% of the Settings window, but a small parent must never
+// shrink it below this — the form's fields and help text stay readable.
+const editorMinWidth = float32(480)
+
 // openEditorFor builds and shows the editor dialog.
 func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	def, ok := registry.Get(inst.Kind)
@@ -197,14 +202,26 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	if !isNew {
 		title = "Edit source"
 	}
-	e.dlg = dialog.NewCustomWithoutButtons(title, container.NewVBox(
-		form,
-		widget.NewSeparator(),
-		// A grid row stretches the two buttons across the full content
-		// width. An HBox shrinks them to their minimum, and an HScroll
-		// wrapper collapses the whole row to the scrollbar strip.
-		container.NewGridWithColumns(2, e.cancelBtn, e.saveBtn),
+	e.dlg = dialog.NewCustomWithoutButtons(title, container.NewBorder(nil,
+		// The form scrolls; the separator and action row are pinned below
+		// it, so a kind whose editor is taller than the dialog (the Codex
+		// one with its help text) keeps Test connection/Save reachable. A
+		// grid row stretches the two buttons across the full content width;
+		// an HBox shrinks them to their minimum.
+		container.NewVBox(widget.NewSeparator(),
+			container.NewGridWithColumns(2, e.cancelBtn, e.saveBtn)),
+		nil, nil,
+		container.NewVScroll(form),
 	), s.win)
+	// The dialog would otherwise size itself to its content's minimum — a
+	// thin strip once the labels are short and the help text wraps. Take
+	// most of the Settings window instead (Resize is clamped to the
+	// dialog's own minimum, and Show applies the desired size).
+	canvas := s.win.Canvas().Size()
+	e.dlg.Resize(fyne.NewSize(
+		fyne.Max(canvas.Width*0.9, editorMinWidth),
+		canvas.Height*0.9,
+	))
 	e.dlg.Show()
 	s.probeEditorKeychain(e)
 }

@@ -9,6 +9,35 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-30 — Short Codex editor labels; the editor dialog is sized to the window
+
+First real use of the S6 editor showed the form's label column eating the
+dialog: a Fyne form sizes its label column to the widest label, and the
+modal dialog sizes itself to its content's minimum, so "Environment
+overrides (advanced)" and "Codex executable" starved the field column and
+wrapped the help paragraphs into a tall narrow strip. Two changes, from
+this date onward:
+
+1. The labels are shortened ("Executable", "ENV"), narrowing the label
+   column for every row. Only these two labels differ from the
+   `docs/S6_UI_UX.md` §Settings wireframe; behavior is unchanged.
+2. The editor dialog is explicitly resized to 90% of the Settings
+   window's size (never below a 480pt width on a small parent) instead of
+   taking its content's minimum — with short labels that minimum
+   collapses to a thin strip. Flooring the *form's* width inside a
+   natural-size dialog was tried first and rejected: the widened dialog
+   simply filled the whole window anyway, so the size is now chosen
+   deliberately at the dialog level. `dialog.Resize` clamps to the
+   dialog's own minimum, so tall kinds still grow beyond their 90%
+   allotment when their content needs it.
+3. The form scrolls inside the dialog (`container.NewVScroll(form)`),
+   with the separator and the Save/Cancel row pinned below it: the Codex
+   editor is taller than the 90% allotment, and its Test connection row —
+   the form's last one — was out of reach without resizing the parent.
+   The scroll viewport takes the dialog's whole remaining height (a
+   Border layout pins the action row); Test connection is reached by
+   scrolling the form, like any other row.
+
 ## 2026-08-30 — S6 review hardening: launcher exec, teardown, and error surfaces
 
 Post-implementation review of the Codex integration surfaced seven defects;
