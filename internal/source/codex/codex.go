@@ -300,7 +300,7 @@ func (a *Adapter) Test(ctx context.Context) (TestOutcome, error) {
 		probe.log.Debug("codex app-server test exit", "error", closeErr)
 	}
 	if readErr != nil {
-		if isMethodNotFound(readErr) {
+		if isIncompatibleCLI(readErr) {
 			out.CLIIncompatible = true
 		}
 		out.Err = readErr
@@ -352,6 +352,43 @@ func isMethodNotFound(err error) bool {
 	return errors.As(err, &rpcErr) && rpcErr.Code == rpcMethodNotFound
 }
 
+// incompatibleCLIMessage is the authored setup guidance for a CLI that
+// cannot serve the app-server interface — whether it said so with a
+// method-not-found rejection or simply exited before answering the
+// handshake (docs/S6_CODEX.md §Errors and timeouts).
+const incompatibleCLIMessage = "This Codex CLI does not support the app-server rate-limit interface. Update Codex CLI or choose a compatible executable."
+
+// errIncompatibleCLI marks the incompatible-CLI condition on the wrapped
+// chain so callers can recognize either of its shapes.
+var errIncompatibleCLI = errors.New("codex app-server interface unavailable")
+
+// incompatibleCLIError wraps cause into the classified setup error.
+func incompatibleCLIError(cause error) *source.Error {
+	return &source.Error{
+		Category: source.CatConfig,
+		Detail:   incompatibleCLIMessage,
+		Err:      fmt.Errorf("%w: %w", errIncompatibleCLI, cause),
+	}
+}
+
+// isIncompatibleCLI reports whether err is any shape of the
+// incompatible-CLI condition: an explicit method-not-found rejection or an
+// exit before the handshake completed.
+func isIncompatibleCLI(err error) bool {
+	return errors.Is(err, errIncompatibleCLI) || isMethodNotFound(err)
+}
+
+// isTransportFailure reports whether err is a stream-level death (EOF,
+// read or write failure) rather than a classified protocol outcome or a
+// caller-context cancellation/timeout.
+func isTransportFailure(err error) bool {
+	var rpcErr *rpcError
+	var malformed malformedJSONError
+
+	return !errors.As(err, &rpcErr) && !errors.As(err, &malformed) &&
+		!errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled)
+}
+
 // classifySpawnError maps launcher resolution/start failures onto the
 // authored setup messages. The details are user-facing on purpose: they
 // must tell the user what to fix, and they never contain environment
@@ -383,7 +420,16 @@ func classifySpawnError(err error) error {
 // death is a connection failure, protocol garbage is an invalid response, a
 // JSON-RPC error from the backend is auth/provider-shaped, and an
 // unsupported method is the authored incompatible-CLI setup message.
+//
+// A transport-shaped failure during the initialize stage is reported as
+// that same setup message: a CLI that exits before answering the handshake
+// is one without app-server support in the overwhelmingly common case, and
+// "Codex CLI: OK" followed by a connection error would send the user in
+// the wrong direction (docs/S6_CODEX.md §Errors and timeouts).
 func classifyStageError(stage string, err error) error {
+	if stage == methodInitialize && isTransportFailure(err) {
+		return incompatibleCLIError(err)
+	}
 	var rpcErr *rpcError
 	var malformed malformedJSONError
 	var write writeError
@@ -392,7 +438,7 @@ func classifyStageError(stage string, err error) error {
 		if rpcErr.Code == rpcMethodNotFound {
 			return &source.Error{
 				Category: source.CatConfig,
-				Detail:   "This Codex CLI does not support the app-server rate-limit interface. Update Codex CLI or choose a compatible executable.",
+				Detail:   incompatibleCLIMessage,
 				Err:      err,
 			}
 		}

@@ -629,6 +629,27 @@ func TestCodexTestReportIncompatibleCLI(t *testing.T) {
 	}
 }
 
+// A CLI that resolves but exits before answering the handshake (an old
+// release without the app-server command, most commonly) must be reported
+// as an incompatible CLI, not as "Codex CLI: OK" plus a ChatGPT error.
+func TestCodexTestReportExitsBeforeHandshake(t *testing.T) {
+	def, _ := Get(domain.KindCodex)
+	report := def.Test(context.Background(),
+		inst("codx8", "ChatGPT Codex", domain.KindCodex, codexSettings(t, "#!/bin/sh\nexit 3\n")), quietDeps())
+	want := []string{
+		"Codex CLI: incompatible",
+		"This version does not support account/rateLimits/read.",
+	}
+	if report.OK || len(report.Lines) != len(want) {
+		t.Fatalf("report = %v (ok=%v)", report.Lines, report.OK)
+	}
+	for i := range want {
+		if report.Lines[i] != want[i] {
+			t.Errorf("line[%d] = %q, want %q", i, report.Lines[i], want[i])
+		}
+	}
+}
+
 func TestCodexTestReportMissingCLI(t *testing.T) {
 	def, _ := Get(domain.KindCodex)
 

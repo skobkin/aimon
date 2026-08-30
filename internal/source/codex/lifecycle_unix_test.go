@@ -186,16 +186,15 @@ func TestWrapperExitLeavesNoGrandchild(t *testing.T) {
 func TestReapedChildIsNotAZombie(t *testing.T) {
 	// The explicit variant of the reaping rule: after the graceful path the
 	// wait result must already be collected, so a refresh that ends in a
-	// child crash reports a connection error and leaves nothing behind.
+	// child crash reports a classified error and leaves nothing behind. A
+	// child that dies during the handshake is indistinguishable from a CLI
+	// without app-server support, so it carries the setup guidance.
 	h := newFakeHarness(t, "eof")
 	adapter := New(h.settings, quietLoggerForTest(t), "v")
 	_, err := adapter.Refresh(context.Background())
 	if err == nil {
 		t.Fatal("refresh succeeded on a child that died instantly")
 	}
-	var se *source.Error
-	if !errors.As(err, &se) || se.Category == source.CatConfig {
-		t.Fatalf("unexpected classification: %v", err)
-	}
+	wantRefreshError(t, err, source.CatConfig, "does not support")
 	assertReaped(t, h)
 }

@@ -350,17 +350,22 @@ func TestClassifyStageError(t *testing.T) {
 	t.Run("deadlines, cancellation, malformed and broken streams", func(t *testing.T) {
 		cases := []struct {
 			name     string
+			stage    string
 			err      error
 			category source.Category
 		}{
-			{"deadline", context.DeadlineExceeded, source.CatTimeout},
-			{"cancelled", context.Canceled, source.CatConnection},
-			{"malformed", malformedJSON(errors.New("unexpected token")), source.CatInvalidResponse},
-			{"write", writeError{err: errors.New("broken pipe")}, source.CatConnection},
-			{"eof", errors.New("EOF"), source.CatConnection},
+			{"deadline", methodRateLimits, context.DeadlineExceeded, source.CatTimeout},
+			{"cancelled", methodRateLimits, context.Canceled, source.CatConnection},
+			{"malformed", methodInitialize, malformedJSON(errors.New("unexpected token")), source.CatInvalidResponse},
+			{"write", methodRateLimits, writeError{err: errors.New("broken pipe")}, source.CatConnection},
+			{"eof during read", methodRateLimits, errors.New("EOF"), source.CatConnection},
+			// A stream that dies during the handshake never came up: the
+			// incompatible-CLI setup message replaces the generic one.
+			{"eof during initialize", methodInitialize, errors.New("EOF"), source.CatConfig},
+			{"write during initialize", methodInitialize, writeError{err: errors.New("broken pipe")}, source.CatConfig},
 		}
 		for _, tc := range cases {
-			se := classifyOf(t, classifyStageError("initialize", tc.err))
+			se := classifyOf(t, classifyStageError(tc.stage, tc.err))
 			if se.Category != tc.category {
 				t.Fatalf("%s: category = %q, want %q", tc.name, se.Category, tc.category)
 			}
@@ -497,7 +502,10 @@ func TestRefreshProtocolFailures(t *testing.T) {
 		{"read-error-auth", source.CatAuth, "authentication failed"},
 		{"read-error-provider", source.CatProvider, "rejected"},
 		{"malformed", source.CatInvalidResponse, "malformed"},
-		{"eof", source.CatConnection, "stopped responding"},
+		// A child that dies before answering the handshake is reported as
+		// the incompatible-CLI setup problem, not as a generic connection
+		// failure.
+		{"eof", source.CatConfig, "does not support"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.script, func(t *testing.T) {
@@ -620,6 +628,22 @@ func TestAdapterTestOutcomeIncompatibleCLI(t *testing.T) {
 	}
 	if !out.CLIIncompatible || out.ChatGPTOK {
 		t.Fatalf("outcome = %+v", out)
+	}
+	wantRefreshError(t, err, source.CatConfig, "does not support")
+}
+
+// An older CLI that resolves fine but exits before answering the handshake
+// must produce the incompatible-CLI outcome — "Codex CLI: OK" followed by a
+// connection error would hide the actual problem from the user.
+func TestAdapterTestOutcomePreInitializeExit(t *testing.T) {
+	h := newFakeHarness(t, "eof")
+	adapter := New(h.settings, quietLoggerForTest(t), "v")
+	out, err := adapter.Test(context.Background())
+	if err == nil {
+		t.Fatal("test succeeded on a child that died before the handshake")
+	}
+	if !out.CLIIncompatible || out.ChatGPTOK || out.CLIState != DiscoveryFound {
+		t.Fatalf("outcome = %+v, want the incompatible-CLI outcome", out)
 	}
 	wantRefreshError(t, err, source.CatConfig, "does not support")
 }
