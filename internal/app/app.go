@@ -265,6 +265,20 @@ func (a *App) setupTray() {
 	}
 	a.deskApp = desk
 
+	// Left-click on the tray icon toggles the splash monitor window
+	// (show if hidden, hide if shown).
+	//
+	// This must be registered before the tray is published. systray
+	// snapshots ItemIsMenu from the tapped callbacks while exporting its
+	// DBus properties, concurrently with the onReady callback below, and
+	// never updates the snapshot. Registering here instead of in onReady
+	// makes ItemIsMenu deterministically false; losing that race used to
+	// register the item as menu-only, which makes Plasma open the context
+	// menu on left-click instead of calling Activate.
+	systray.SetOnTapped(func() {
+		fyne.Do(a.monitor.ToggleVisible)
+	})
+
 	start, end := systray.RunWithExternalLoop(func() {
 		// SetSystemTrayIcon handles SVG→PNG conversion and calls
 		// systray.SetIcon internally.
@@ -277,12 +291,6 @@ func (a *App) setupTray() {
 			title = a.fyneApp.UniqueID()
 		}
 		systray.SetTitle(title)
-
-		// Left-click on the tray icon toggles the splash monitor window
-		// (show if hidden, hide if shown).
-		systray.SetOnTapped(func() {
-			fyne.Do(a.monitor.ToggleVisible)
-		})
 
 		a.rebuildTrayMenu()
 	}, func() {
