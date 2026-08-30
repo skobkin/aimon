@@ -72,6 +72,12 @@ func runFakeChild(script string) {
 		return
 	case "die":
 		os.Exit(3)
+	case "close-stdout":
+		// Stream death without an exit: the parent reads EOF while the
+		// process is still running, so no exit status is observable, and
+		// stdin EOF is ignored like a wedged app-server would ignore it.
+		_ = os.Stdout.Close()
+		time.Sleep(60 * time.Second)
 	case "orphan-wrapper":
 		// A launcher wrapper: starts the real server as a child and exits
 		// immediately. The grandchild stays in the wrapper's process group,

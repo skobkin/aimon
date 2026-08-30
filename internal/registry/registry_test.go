@@ -629,16 +629,17 @@ func TestCodexTestReportIncompatibleCLI(t *testing.T) {
 	}
 }
 
-// A CLI that resolves but exits before answering the handshake (an old
-// release without the app-server command, most commonly) must be reported
-// as an incompatible CLI, not as "Codex CLI: OK" plus a ChatGPT error.
+// A CLI that resolves but exits before answering the handshake (a wrapper
+// script whose own tool is missing, most commonly) must be reported as a
+// failed startup carrying its exit status, not as an incompatible CLI and
+// not as "Codex CLI: OK" plus a ChatGPT error.
 func TestCodexTestReportExitsBeforeHandshake(t *testing.T) {
 	def, _ := Get(domain.KindCodex)
 	report := def.Test(context.Background(),
 		inst("codx8", "ChatGPT Codex", domain.KindCodex, codexSettings(t, "#!/bin/sh\nexit 3\n")), quietDeps())
 	want := []string{
-		"Codex CLI: incompatible",
-		"This version does not support account/rateLimits/read.",
+		"Codex CLI: failed to start",
+		"The Codex CLI exited during startup (exit status 3). Its executable may lack app-server support, or a wrapper script failed to start its tools.",
 	}
 	if report.OK || len(report.Lines) != len(want) {
 		t.Fatalf("report = %v (ok=%v)", report.Lines, report.OK)
@@ -654,6 +655,9 @@ func TestCodexTestReportMissingCLI(t *testing.T) {
 	def, _ := Get(domain.KindCodex)
 
 	t.Run("not in PATH", func(t *testing.T) {
+		// HOME points at an empty directory: the user bin fallback must not
+		// answer for the default name from a developer's real ~/.local/bin.
+		t.Setenv("HOME", t.TempDir())
 		settings := config.CodexSettings{}
 		settings.Env = []config.EnvOverride{{Name: "PATH", Value: t.TempDir()}}
 		report := def.Test(context.Background(), inst("codx4", "ChatGPT Codex", domain.KindCodex, settings), quietDeps())

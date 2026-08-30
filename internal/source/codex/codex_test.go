@@ -54,6 +54,10 @@ func TestDiscoverExplicitPaths(t *testing.T) {
 }
 
 func TestDiscoverBareNameUsesEffectivePATH(t *testing.T) {
+	// HOME points at an empty directory: the user bin fallback must not be
+	// what answers here, and a developer's real ~/.local/bin must not be
+	// able to answer either.
+	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	launcher := filepath.Join(bin, "codex-fake")
 	writeExecutable(t, launcher, "#!/bin/sh\nexit 0\n")
@@ -86,6 +90,81 @@ func TestDiscoverBareNameUsesEffectivePATH(t *testing.T) {
 	})
 	if two.Path != launcher {
 		t.Fatalf("path = %q, want the first override dir %q", two.Path, launcher)
+	}
+}
+
+// A desktop session starts applications with a PATH that leaves out the
+// per-user bin directories, while the same user's shell PATH has them. A
+// bare configured launcher must still resolve from the app, so the user bin
+// directories are searched after the effective PATH.
+func TestDiscoverBareNameFallsBackToUserBinDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A GUI-like PATH: system directories only, nothing per-user.
+	t.Setenv("PATH", strings.Join([]string{"/usr/local/bin", "/usr/bin"}, string(filepath.ListSeparator)))
+
+	local := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(local, 0o750); err != nil {
+		t.Fatalf("mkdir %s: %v", local, err)
+	}
+	launcher := filepath.Join(local, "codex-fake")
+	writeExecutable(t, launcher, "#!/bin/sh\nexit 0\n")
+
+	got := Discover(config.CodexSettings{Executable: "codex-fake"})
+	if !got.OK() || got.Path != launcher {
+		t.Fatalf("discovery = %+v, want %q", got, launcher)
+	}
+
+	// ~/bin is the second fallback and is tried after ~/.local/bin.
+	home2 := t.TempDir()
+	t.Setenv("HOME", home2)
+	if err := os.MkdirAll(filepath.Join(home2, "bin"), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	homeBin := filepath.Join(home2, "bin", "codex-fake")
+	writeExecutable(t, homeBin, "#!/bin/sh\nexit 0\n")
+	if got := Discover(config.CodexSettings{Executable: "codex-fake"}); got.Path != homeBin {
+		t.Fatalf("discovery = %+v, want %q", got, homeBin)
+	}
+
+	// ~/.local/bin shadows ~/bin when both hold the name.
+	both := t.TempDir()
+	t.Setenv("HOME", both)
+	for _, dir := range []string{filepath.Join(both, ".local", "bin"), filepath.Join(both, "bin")} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		writeExecutable(t, filepath.Join(dir, "codex-fake"), "#!/bin/sh\nexit 0\n")
+	}
+	first := filepath.Join(both, ".local", "bin", "codex-fake")
+	if got := Discover(config.CodexSettings{Executable: "codex-fake"}); got.Path != first {
+		t.Fatalf("discovery = %+v, want %q", got, first)
+	}
+
+	// A PATH entry still wins over both fallback directories: HOME holds the
+	// name too, and the PATH hit is the one that must come back.
+	pathDir, fallbackHome := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", fallbackHome)
+	for _, dir := range []string{filepath.Join(fallbackHome, ".local", "bin")} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		writeExecutable(t, filepath.Join(dir, "codex-fake"), "#!/bin/sh\nexit 0\n")
+	}
+	onPath := filepath.Join(pathDir, "codex-fake")
+	writeExecutable(t, onPath, "#!/bin/sh\nexit 0\n")
+	override := Discover(config.CodexSettings{
+		Executable: "codex-fake",
+		Env:        []config.EnvOverride{{Name: "PATH", Value: pathDir}},
+	})
+	if override.Path != onPath {
+		t.Fatalf("discovery = %+v, want the PATH hit %q", override, onPath)
+	}
+
+	// Nowhere at all stays a clean not-found.
+	t.Setenv("HOME", t.TempDir())
+	if got := Discover(config.CodexSettings{Executable: "codex-fake"}); got.State != DiscoveryNotFoundInPath {
+		t.Fatalf("state = %q, want %q", got.State, DiscoveryNotFoundInPath)
 	}
 }
 
@@ -283,7 +362,7 @@ func TestClassifySpawnError(t *testing.T) {
 			name:     "not found in path",
 			err:      &spawnError{state: DiscoveryNotFoundInPath},
 			category: source.CatConfig,
-			detail:   "Codex CLI not found in PATH. Install Codex CLI or choose its executable/wrapper.",
+			detail:   "Codex CLI not found in PATH or the user bin directories (~/.local/bin, ~/bin). Install Codex CLI or choose its executable/wrapper.",
 		},
 		{
 			name:     "explicit missing",
@@ -325,13 +404,13 @@ func TestClassifySpawnError(t *testing.T) {
 
 func TestClassifyStageError(t *testing.T) {
 	t.Run("auth-shaped rpc error", func(t *testing.T) {
-		se := classifyOf(t, classifyStageError("account/rateLimits/read", &rpcError{Code: -32000, Message: "unauthorized: log in again"}))
+		se := classifyOf(t, classifyStageError("account/rateLimits/read", &rpcError{Code: -32000, Message: "unauthorized: log in again"}, exitStatus{}))
 		if se.Category != source.CatAuth {
 			t.Fatalf("category = %q, want auth", se.Category)
 		}
 	})
 	t.Run("other rpc error is a backend rejection", func(t *testing.T) {
-		se := classifyOf(t, classifyStageError("account/rateLimits/read", &rpcError{Code: -32000, Message: "backend exploded"}))
+		se := classifyOf(t, classifyStageError("account/rateLimits/read", &rpcError{Code: -32000, Message: "backend exploded"}, exitStatus{}))
 		if se.Category != source.CatBackend {
 			t.Fatalf("category = %q, want backend", se.Category)
 		}
@@ -343,7 +422,7 @@ func TestClassifyStageError(t *testing.T) {
 	})
 	t.Run("method not found is a config problem and stays recognizable", func(t *testing.T) {
 		orig := &rpcError{Code: rpcMethodNotFound, Message: "method not found"}
-		classified := classifyStageError("initialize", orig)
+		classified := classifyStageError("initialize", orig, exitStatus{})
 		se := classifyOf(t, classified)
 		if se.Category != source.CatConfig {
 			t.Fatalf("category = %q, want config", se.Category)
@@ -364,16 +443,49 @@ func TestClassifyStageError(t *testing.T) {
 			{"malformed", methodInitialize, malformedJSON(errors.New("unexpected token")), source.CatInvalidResponse},
 			{"write", methodRateLimits, writeError{err: errors.New("broken pipe")}, source.CatConnection},
 			{"eof during read", methodRateLimits, errors.New("EOF"), source.CatConnection},
-			// A stream that dies during the handshake never came up: the
-			// incompatible-CLI setup message replaces the generic one.
+			// A stream that dies during the handshake with no exit status to
+			// learn from — the process was still running — keeps the
+			// incompatible-CLI setup message instead of the generic one.
 			{"eof during initialize", methodInitialize, errors.New("EOF"), source.CatConfig},
 			{"write during initialize", methodInitialize, writeError{err: errors.New("broken pipe")}, source.CatConfig},
 		}
 		for _, tc := range cases {
-			se := classifyOf(t, classifyStageError(tc.stage, tc.err))
+			se := classifyOf(t, classifyStageError(tc.stage, tc.err, exitStatus{}))
 			if se.Category != tc.category {
 				t.Fatalf("%s: category = %q, want %q", tc.name, se.Category, tc.category)
 			}
+			if transport := methodInitialize == tc.stage && isTransportFailure(tc.err); transport &&
+				!isIncompatibleCLI(classifyStageError(tc.stage, tc.err, exitStatus{})) {
+				t.Fatalf("%s: unknown-status handshake death must classify as the incompatible-CLI outcome", tc.name)
+			}
+		}
+	})
+
+	// An exit status the process chose itself is environment evidence, not a
+	// feature statement: a wrapper whose own tool is missing (missing
+	// graftcp under a desktop PATH exits 127) must not be sold as a CLI
+	// without app-server support.
+	t.Run("observed exit during initialize is reported honestly", func(t *testing.T) {
+		cause := errors.New("EOF")
+		classified := classifyStageError(methodInitialize, cause, exitStatus{code: 127, known: true})
+		se := classifyOf(t, classified)
+		if se.Category != source.CatConfig {
+			t.Fatalf("category = %q, want config", se.Category)
+		}
+		if !IsExitedDuringStartup(classified) {
+			t.Fatal("classified error lost the exited-during-startup marker")
+		}
+		if isIncompatibleCLI(classified) {
+			t.Fatal("an observed exit must not classify as an incompatible CLI")
+		}
+		if !strings.Contains(se.Detail, "127") || !strings.Contains(se.Detail, "wrapper") {
+			t.Fatalf("detail = %q, want the exit status and both plausible causes", se.Detail)
+		}
+		// A clean exit 0 carries its status too: the process ended without
+		// ever answering, which is the same kind of news.
+		zero := classifyOf(t, classifyStageError(methodInitialize, cause, exitStatus{code: 0, known: true}))
+		if !IsExitedDuringStartup(zero) || !strings.Contains(zero.Detail, "exit status 0") {
+			t.Fatalf("detail = %q, want the exited-during-startup wording", zero.Detail)
 		}
 	})
 }
@@ -507,15 +619,24 @@ func TestRefreshProtocolFailures(t *testing.T) {
 		{"read-error-auth", source.CatAuth, "authentication failed"},
 		{"read-error-provider", source.CatBackend, "rejected"},
 		{"malformed", source.CatInvalidResponse, "malformed"},
-		// A child that dies before answering the handshake is reported as
-		// the incompatible-CLI setup problem, not as a generic connection
-		// failure.
-		{"eof", source.CatConfig, "does not support"},
+		// A child that died on its own before answering the handshake is
+		// reported with the status it exited with and both of its plausible
+		// causes, never as a verdict about the CLI's feature set.
+		{"eof", source.CatConfig, "exited during startup"},
+		{"die", source.CatConfig, "exit status 3"},
+		// A stream that died under a still-running process has no status to
+		// report, so the authored incompatible-CLI message stands.
+		{"close-stdout", source.CatConfig, "does not support"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.script, func(t *testing.T) {
 			_, _, err := refreshOnce(t, tc.script)
 			wantRefreshError(t, err, tc.category, tc.detail)
+			// The exited-during-startup outcome is its own condition: it must
+			// never ride along on the incompatible-CLI marker.
+			if IsExitedDuringStartup(err) && isIncompatibleCLI(err) {
+				t.Fatal("an observed startup exit must not also be an incompatible-CLI error")
+			}
 		})
 	}
 }
@@ -638,17 +759,46 @@ func TestAdapterTestOutcomeIncompatibleCLI(t *testing.T) {
 }
 
 // An older CLI that resolves fine but exits before answering the handshake
-// must produce the incompatible-CLI outcome — "Codex CLI: OK" followed by a
-// connection error would hide the actual problem from the user.
-func TestAdapterTestOutcomePreInitializeExit(t *testing.T) {
-	h := newFakeHarness(t, "eof")
+// still fails the test, but with its own exit status in the message and
+// without a verdict on its feature set: the exit is equally the signature of
+// a wrapper script whose own tools did not start.
+func TestAdapterTestOutcomeStartupExit(t *testing.T) {
+	h := newFakeHarness(t, "die")
 	adapter := New(h.settings, quietLoggerForTest(t), "v")
 	out, err := adapter.Test(context.Background())
 	if err == nil {
 		t.Fatal("test succeeded on a child that died before the handshake")
 	}
+	if out.CLIIncompatible || out.ChatGPTOK || out.CLIState != DiscoveryFound {
+		t.Fatalf("outcome = %+v, want the exited-during-startup outcome", out)
+	}
+	if !IsExitedDuringStartup(err) {
+		t.Fatalf("err = %v, want the exited-during-startup marker", err)
+	}
+	wantRefreshError(t, err, source.CatConfig, "exit status 3")
+}
+
+// A stream that dies while the process is still running leaves no exit
+// status to learn from, so that handshake death keeps today's authored
+// incompatible-CLI outcome.
+func TestAdapterTestOutcomeStreamDeathWithoutExit(t *testing.T) {
+	// The graceful window the test's shutdown waits through before killing
+	// the process that holds the dead stream.
+	restore := shutdownGrace
+	shutdownGrace = 200 * time.Millisecond
+	t.Cleanup(func() { shutdownGrace = restore })
+
+	h := newFakeHarness(t, "close-stdout")
+	adapter := New(h.settings, quietLoggerForTest(t), "v")
+	out, err := adapter.Test(context.Background())
+	if err == nil {
+		t.Fatal("test succeeded on a stream that died during the handshake")
+	}
 	if !out.CLIIncompatible || out.ChatGPTOK || out.CLIState != DiscoveryFound {
 		t.Fatalf("outcome = %+v, want the incompatible-CLI outcome", out)
+	}
+	if IsExitedDuringStartup(err) {
+		t.Fatalf("err = %v, want no exited-during-startup marker", err)
 	}
 	wantRefreshError(t, err, source.CatConfig, "does not support")
 }

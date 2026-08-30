@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -185,26 +186,36 @@ func (a *Adapter) start(ctx context.Context) (*rpcConn, error) {
 		return nil, classifySpawnError(err)
 	}
 	if err := a.handshake(ctx, conn); err != nil {
-		_ = conn.shutdown(true)
+		// The reap doubles as the observation: a child that already ended on
+		// its own reports its own exit status, while one AI Monitor had to
+		// kill reports a signal and therefore no status at all. Classifying
+		// from the stream death alone would guess, and the guess used to
+		// blame a missing graftcp on the CLI's feature set.
+		waitErr := conn.shutdown(true)
+		if waitErr != nil {
+			// An *exec.ExitError's text is "exit status N"/"signal: killed";
+			// the child's stderr never joins it (rpc.go drains it separately).
+			a.log.Debug("codex app-server startup wait", "error", waitErr)
+		}
 
-		return nil, err
+		return nil, classifyStageError(methodInitialize, err, exitStatusOf(waitErr))
 	}
 
 	return conn, nil
 }
 
-// handshake performs the initialize/initialized exchange.
+// handshake performs the initialize/initialized exchange. Its error is the
+// raw protocol failure, deliberately unclassified: the caller reaps the
+// process first, and the classification is only as honest as the exit
+// observation that reap produces (see classifyStageError).
 func (a *Adapter) handshake(ctx context.Context, conn *rpcConn) error {
 	initCtx, cancel := context.WithTimeout(ctx, a.initTimeout)
 	defer cancel()
 	if err := conn.call(initCtx, methodInitialize, newInitializeParams(a.appVersion), new(initializeResult)); err != nil {
-		return classifyStageError("initialize", err)
-	}
-	if err := conn.notify(methodInitialized, nil); err != nil {
-		return classifyStageError("initialize", err)
+		return err
 	}
 
-	return nil
+	return conn.notify(methodInitialized, nil)
 }
 
 // readRates performs the single permitted account read and normalizes it.
@@ -214,7 +225,10 @@ func (a *Adapter) readRates(ctx context.Context, conn *rpcConn) (domain.Snapshot
 
 	var result rateLimitsReadResult
 	if err := conn.call(readCtx, methodRateLimits, nil, &result); err != nil {
-		return nil, classifyStageError(methodRateLimits, err)
+		// No exit observation here on purpose: only a startup death says
+		// something about the executable, a read-stage death stays a
+		// connection failure whatever the process went on to do.
+		return nil, classifyStageError(methodRateLimits, err, exitStatus{})
 	}
 	snap, err := buildSnapshot(&result, a.now())
 	if err != nil {
@@ -253,8 +267,9 @@ type TestOutcome struct {
 	// CLIState is the launcher discovery state (set when the probe failed
 	// to start the CLI at all).
 	CLIState DiscoveryState
-	// CLIIncompatible marks a CLI that answered but rejected the app-server
-	// interface.
+	// CLIIncompatible marks the authored incompatible-CLI outcome: a CLI
+	// that answered and rejected the app-server interface, or one whose
+	// handshake died with no exit status to learn from.
 	CLIIncompatible bool
 	// ChatGPTOK marks a CLI that completed the handshake and answered the
 	// rate-limits read successfully.
@@ -296,10 +311,18 @@ func (a *Adapter) Test(ctx context.Context) (TestOutcome, error) {
 	out.CLIState = DiscoveryFound
 	readErr := probe.probe(ctx, conn)
 	kill := ctx.Err() != nil
-	if closeErr := conn.shutdown(kill); closeErr != nil {
+	closeErr := conn.shutdown(kill)
+	if closeErr != nil {
 		probe.log.Debug("codex app-server test exit", "error", closeErr)
 	}
 	if readErr != nil {
+		// The probe's handshake failure arrives unclassified and is
+		// classified only here, so the reap above — the same observation
+		// start() classifies from — can say whether the CLI ever started.
+		var init unclassifiedInitError
+		if errors.As(readErr, &init) {
+			readErr = classifyStageError(methodInitialize, init.err, exitStatusOf(closeErr))
+		}
 		if isIncompatibleCLI(readErr) {
 			out.CLIIncompatible = true
 		}
@@ -315,10 +338,13 @@ func (a *Adapter) Test(ctx context.Context) (TestOutcome, error) {
 }
 
 // probe runs Test's one-shot pipeline (handshake + read) against an already
-// spawned connection, stashing the presentation summary on the way.
+// spawned connection, stashing the presentation summary on the way. Only its
+// handshake failure is wrapped — a read failure comes back already
+// classified, and the read stage is exactly the one that never reinterprets
+// an exit status.
 func (a *Adapter) probe(ctx context.Context, conn *rpcConn) error {
 	if err := a.handshake(ctx, conn); err != nil {
-		return err
+		return unclassifiedInitError{err: err}
 	}
 	snap, err := a.readRates(ctx, conn)
 	if err != nil {
@@ -333,6 +359,17 @@ func (a *Adapter) probe(ctx context.Context, conn *rpcConn) error {
 
 	return nil
 }
+
+// unclassifiedInitError carries the initialize stage's raw failure to Test,
+// which classifies it after the process has been reaped. start() classifies
+// the same failure in place and never lets this type escape the package.
+type unclassifiedInitError struct{ err error }
+
+func (e unclassifiedInitError) Error() string { return e.err.Error() }
+
+// Unwrap keeps the transport cause reachable for the classifier and for the
+// errors.Is checks the transport failure itself supports.
+func (e unclassifiedInitError) Unwrap() error { return e.err }
 
 func spawnErrorState(err error) DiscoveryState {
 	var se *spawnError
@@ -353,14 +390,18 @@ func isMethodNotFound(err error) bool {
 }
 
 // incompatibleCLIMessage is the authored setup guidance for a CLI that
-// cannot serve the app-server interface — whether it said so with a
-// method-not-found rejection or simply exited before answering the
-// handshake (docs/S6_CODEX.md §Errors and timeouts).
+// cannot serve the app-server interface: it said so itself, with a
+// method-not-found rejection (docs/S6_CODEX.md §Errors and timeouts).
 const incompatibleCLIMessage = "This Codex CLI does not support the app-server rate-limit interface. Update Codex CLI or choose a compatible executable."
 
 // errIncompatibleCLI marks the incompatible-CLI condition on the wrapped
-// chain so callers can recognize either of its shapes.
+// chain so callers can recognize that shape.
 var errIncompatibleCLI = errors.New("codex app-server interface unavailable")
+
+// errExitedDuringStartup marks the observed-exit condition on the wrapped
+// chain: the CLI process ended on its own before the handshake completed,
+// which is not evidence about its feature set.
+var errExitedDuringStartup = errors.New("codex CLI exited during startup")
 
 // incompatibleCLIError wraps cause into the classified setup error.
 func incompatibleCLIError(cause error) *source.Error {
@@ -371,11 +412,59 @@ func incompatibleCLIError(cause error) *source.Error {
 	}
 }
 
-// isIncompatibleCLI reports whether err is any shape of the
-// incompatible-CLI condition: an explicit method-not-found rejection or an
-// exit before the handshake completed.
+// exitedStartupFormat is the honest startup guidance for a CLI process that
+// was observed to end before the handshake completed. Both causes are named
+// because a non-zero exit is exactly what a wrapper whose own tools are
+// missing produces (`exec graftcp …` under a PATH without graftcp exits
+// 127) and also what an executable without app-server support produces.
+const exitedStartupFormat = "The Codex CLI exited during startup (exit status %d). Its executable may lack app-server support, or a wrapper script failed to start its tools."
+
+// exitedDuringStartupError builds that classified setup error around an exit
+// status AI Monitor observed rather than guessed.
+func exitedDuringStartupError(status int) *source.Error {
+	return &source.Error{
+		Category: source.CatConfig,
+		Detail:   fmt.Sprintf(exitedStartupFormat, status),
+		Err:      fmt.Errorf("%w (exit status %d)", errExitedDuringStartup, status),
+	}
+}
+
+// IsExitedDuringStartup reports whether err is the classified failure of a
+// CLI process that ended on its own before the handshake completed. The
+// settings test report uses it to name the launcher stage: this CLI never
+// answered anything, so "incompatible" and "OK" would both be wrong.
+func IsExitedDuringStartup(err error) bool {
+	return errors.Is(err, errExitedDuringStartup)
+}
+
+// isIncompatibleCLI reports whether err is the incompatible-CLI condition:
+// an explicit method-not-found rejection, or a handshake whose stream died
+// while the process was still running and whose exit status is therefore
+// unknown.
 func isIncompatibleCLI(err error) bool {
 	return errors.Is(err, errIncompatibleCLI) || isMethodNotFound(err)
+}
+
+// exitStatus is what the reap of the CLI process said about how it ended.
+type exitStatus struct {
+	code  int
+	known bool
+}
+
+// exitStatusOf reads a reap result. Wait reports a clean exit as a nil
+// error and a non-zero exit as an *exec.ExitError that exited; a signal —
+// our own teardown kill, not the CLI's doing — must read as unknown, so a
+// timeout can never be misreported as a CLI that quit by itself.
+func exitStatusOf(waitErr error) exitStatus {
+	if waitErr == nil {
+		return exitStatus{code: 0, known: true}
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) && exitErr.Exited() {
+		return exitStatus{code: exitErr.ExitCode(), known: true}
+	}
+
+	return exitStatus{}
 }
 
 // isTransportFailure reports whether err is a stream-level death (EOF,
@@ -402,7 +491,7 @@ func classifySpawnError(err error) error {
 	case DiscoveryNotFoundInPath:
 		return &source.Error{
 			Category: source.CatConfig,
-			Detail:   "Codex CLI not found in PATH. Install Codex CLI or choose its executable/wrapper.",
+			Detail:   "Codex CLI not found in PATH or the user bin directories (~/.local/bin, ~/bin). Install Codex CLI or choose its executable/wrapper.",
 		}
 	case DiscoveryExplicitMissing, DiscoveryNotExecutable:
 		return &source.Error{
@@ -421,13 +510,21 @@ func classifySpawnError(err error) error {
 // JSON-RPC error from the backend is auth/provider-shaped, and an
 // unsupported method is the authored incompatible-CLI setup message.
 //
-// A transport-shaped failure during the initialize stage is reported as
-// that same setup message: a CLI that exits before answering the handshake
-// is one without app-server support in the overwhelmingly common case, and
-// "Codex CLI: OK" followed by a connection error would send the user in
-// the wrong direction (docs/S6_CODEX.md §Errors and timeouts).
-func classifyStageError(stage string, err error) error {
+// A transport-shaped failure during the initialize stage is a CLI that
+// never came up, and what it means depends on what the process did:
+// a status it exited with itself is reported as that status with both of
+// its plausible causes — an executable without app-server support, or a
+// wrapper script whose own tools did not start — while a stream that died
+// under a still-running process (no status known) keeps the authored
+// incompatible-CLI message, because "Codex CLI: OK" followed by a
+// connection error would send the user in the wrong direction
+// (docs/S6_CODEX.md §Errors and timeouts, DECISION_LOG 2026-08-30).
+func classifyStageError(stage string, err error, exit exitStatus) error {
 	if stage == methodInitialize && isTransportFailure(err) {
+		if exit.known {
+			return exitedDuringStartupError(exit.code)
+		}
+
 		return incompatibleCLIError(err)
 	}
 	var rpcErr *rpcError

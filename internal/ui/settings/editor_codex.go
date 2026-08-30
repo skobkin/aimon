@@ -75,7 +75,7 @@ func (e *editor) buildCodexFields(items *[]*widget.FormItem, s config.CodexSetti
 	e.exe.OnChanged = func(string) { e.refreshDiscovery() }
 	e.refreshDiscovery()
 
-	launcherHelp := widget.NewLabel("AI Monitor runs:\n<executable> app-server --stdio\nExecutable wrappers are supported.")
+	launcherHelp := widget.NewLabel("AI Monitor runs:\n<executable> app-server --stdio\nExecutable wrappers are supported; tools they call by bare name are found next to the wrapper.")
 	launcherHelp.TextStyle = fyne.TextStyle{Italic: true}
 	launcherHelp.Wrapping = fyne.TextWrapWord
 
@@ -199,7 +199,7 @@ func (e *editor) refreshDiscovery() {
 	}
 	switch d.State {
 	case codex.DiscoveryNotFoundInPath:
-		e.cli.SetText("Codex CLI not found in PATH.\nInstall Codex CLI or choose its executable/wrapper below.")
+		e.cli.SetText("Codex CLI not found in PATH or ~/.local/bin, ~/bin.\nInstall Codex CLI or choose its executable/wrapper below.")
 	default:
 		e.cli.SetText("Executable not found or not executable.")
 	}

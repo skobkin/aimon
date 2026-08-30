@@ -9,6 +9,72 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-30 — Codex launcher discovery falls back to the user bin directories
+
+The application is started two ways on one machine: from a terminal, whose
+`PATH` carries `~/.local/bin`, and from the desktop (a systemd user
+session), whose `PATH` does not. A bare configured launcher such as `cdx`
+resolved from the terminal and reported "not found in PATH" from the app,
+although the file was exactly where the user's shell found it.
+
+Discovery now searches the per-user executable directories `~/.local/bin`
+and then `~/bin` — via `os.UserHomeDir()`, never `$HOME` directly — for a
+bare name the effective `PATH` did not resolve. They come after the whole
+effective `PATH`, so a `PATH` override keeps its order and keeps winning,
+and they are not consulted on Windows, which has no such convention. This
+extends `docs/S6_CODEX.md` §Environment and executable resolution
+("Executable lookup must use the effective PATH") from this date onward:
+the effective `PATH` is still what is searched first, and the user bin
+directories only close the gap between a terminal-resolvable and an
+app-resolvable launcher. The not-found setup message names both
+directories, so the lookup stays cheap and pure-filesystem and the message
+promises exactly what is searched.
+
+## 2026-08-30 — The Codex app-server's PATH starts with the launcher's directory
+
+The same report's second half: the launcher was a wrapper script (`exec
+graftcp ~/.local/bin/codex`), and its own bare-name lookups happen in the
+child's `PATH` — the GUI session's, without the directory the wrapper and
+its tools live in. The shell exited 127 and no app-server ever started.
+
+The child environment is now built by `childEnv`, which prepends the
+resolved launcher's directory to the effective `PATH`, and forms a `PATH`
+out of it when the effective environment has none at all. A directory
+already on the child's `PATH` is left exactly where the user put it — no
+duplicate entry, no silent reordering of an override — and everything
+behind it stays the user's `PATH`, override included. Discovery and exec
+share one environment builder, so what discovery resolved is what the
+wrapper can reach by name. This extends §Environment and executable
+resolution ("Effective env = parent env + overrides") from this date
+onward.
+
+## 2026-08-30 — A Codex CLI that exits during startup is no longer reported as incompatible
+
+`classifyStageError` mapped every transport-shaped initialize failure onto
+the authored incompatible-CLI message, so the wrapper's exit 127 surfaced
+as "This Codex CLI does not support the app-server rate-limit interface"
+and the connection test said "Codex CLI: incompatible / This version does
+not support account/rateLimits/read" — an environment failure sold as a
+missing feature.
+
+The initialize failure is now classified only after the process has been
+reaped, and the process's own exit status decides the wording. A status the
+CLI ended with is reported as "The Codex CLI exited during startup (exit
+status N). Its executable may lack app-server support, or a wrapper script
+failed to start its tools." — both causes named, because that exit is
+equally the signature of an old release and of a wrapper whose tool is
+missing. A stream that died under a still-running process (no status to
+learn from; AI Monitor's own kill included, since a signal is not the CLI's
+doing) keeps the authored incompatible-CLI message, as does a genuine
+method-not-found rejection. `TestOutcome.CLIIncompatible` is therefore true
+only for those two cases; the observed-exit case reports
+`CLIState: found` with the new `source.Error`, and the settings test report
+names the launcher stage ("Codex CLI: failed to start") for it. Exit
+statuses are safe to show and stderr still is not. `docs/S6_CODEX.md`
+§Errors and timeouts already listed "EOF/child exit" as its own failure
+class, so the specification stands and only the implementation follows it
+now.
+
 ## 2026-08-30 — Version identity from buildinfo; FyneApp.toml removed
 
 The application version is now link-time build information instead of a

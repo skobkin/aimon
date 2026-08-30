@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
@@ -25,8 +26,8 @@ type DiscoveryState string
 const (
 	// DiscoveryFound means the launcher resolved to an executable file.
 	DiscoveryFound DiscoveryState = "found"
-	// DiscoveryNotFoundInPath means a bare name was not found on the
-	// effective PATH.
+	// DiscoveryNotFoundInPath means a bare name was found neither on the
+	// effective PATH nor in the user bin directories.
 	DiscoveryNotFoundInPath DiscoveryState = "not-found-in-path"
 	// DiscoveryExplicitMissing means an explicit path does not exist.
 	DiscoveryExplicitMissing DiscoveryState = "explicit-missing"
@@ -48,10 +49,10 @@ func (d Discovery) OK() bool { return d.State == DiscoveryFound }
 
 // Discover resolves the configured launcher without starting it. Bare names
 // are searched on the effective PATH (the parent environment with the
-// instance's overrides applied, which may itself override PATH); explicit
-// paths are checked directly. The lookup is deliberately cheap — pure
-// filesystem checks, no process is started (docs/S6_IMPLEMENTATION_SPEC.md
-// §3).
+// instance's overrides applied, which may itself override PATH) and then in
+// the user bin directories; explicit paths are checked directly. The lookup
+// is deliberately cheap — pure filesystem checks, no process is started
+// (docs/S6_IMPLEMENTATION_SPEC.md §3).
 func Discover(settings config.CodexSettings) Discovery {
 	exe := settings.EffectiveCodexExecutable()
 	if strings.ContainsRune(exe, '/') || strings.ContainsRune(exe, filepath.Separator) {
@@ -63,7 +64,12 @@ func Discover(settings config.CodexSettings) Discovery {
 		return Discovery{State: state}
 	}
 
-	for _, dir := range effectivePATH(settings) {
+	// The user bin directories come last on purpose: a PATH that does list
+	// them keeps its own order and an override keeps winning over both of
+	// them. They are only ever consulted for a name the PATH did not resolve.
+	dirs := effectivePATH(settings)
+	dirs = append(dirs, userBinDirs()...)
+	for _, dir := range dirs {
 		if dir == "" {
 			continue
 		}
@@ -74,7 +80,9 @@ func Discover(settings config.CodexSettings) Discovery {
 		// The result must be absolute before it reaches the exec layer: a
 		// PATH entry like "." loses its prefix in Join's cleaning and would
 		// come back a bare name, which the exec layer would look up again —
-		// against the inherited PATH instead of the effective one.
+		// against the inherited PATH instead of the effective one. The user
+		// bin directories are absolute by construction, so the guarantee is
+		// unchanged.
 		abs, err := filepath.Abs(candidate)
 		if err != nil {
 			abs = candidate
@@ -84,6 +92,28 @@ func Discover(settings config.CodexSettings) Discovery {
 	}
 
 	return Discovery{State: DiscoveryNotFoundInPath}
+}
+
+// userBinDirs lists the per-user executable directories a desktop session's
+// PATH routinely omits: ~/.local/bin, where most CLI installers put
+// themselves, and the traditional ~/bin. A GUI session launches applications
+// with a session-default PATH (a systemd user environment does not export
+// either directory), while an interactive shell's PATH does, so a launcher
+// that resolves from a terminal is invisible to the same user's app. They
+// are pure filesystem lookups like the PATH scan and nothing is started
+// here.
+func userBinDirs() []string {
+	// Windows has no user bin directory convention; its per-user executable
+	// directories are on the session PATH already.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+
+	return []string{filepath.Join(home, ".local", "bin"), filepath.Join(home, "bin")}
 }
 
 // checkExecutable reports whether path is an existing regular file with an
@@ -155,6 +185,41 @@ func effectivePATH(settings config.CodexSettings) []string {
 	}
 
 	return nil
+}
+
+// childEnv builds the app-server process's environment: the effective
+// environment with the resolved launcher's directory prepended to PATH. A
+// wrapper script invokes its sibling tools by bare name — `exec graftcp
+// codex` is the shape of a proxy front-end — and those lookups happen in the
+// child's PATH, which is the desktop session's and does not necessarily
+// contain the directory the launcher itself was found in. Discovery and exec
+// therefore share one environment builder: what discovery resolved is what
+// the child can reach by name. A directory already on the child's PATH is
+// left exactly where the user put it (an override's order is not silently
+// rewritten, and no duplicate entry is added); anywhere else it simply goes
+// first, in front of the inherited or overridden PATH.
+func childEnv(settings config.CodexSettings, launcherDir string) []string {
+	env := effectiveEnv(settings)
+	if launcherDir == "" {
+		return env
+	}
+	for i, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || name != "PATH" {
+			continue
+		}
+		for _, dir := range strings.Split(value, string(os.PathListSeparator)) {
+			if dir == launcherDir {
+				return env
+			}
+		}
+		env[i] = "PATH=" + launcherDir + string(os.PathListSeparator) + value
+
+		return env
+	}
+	// The effective environment carries no PATH at all: the launcher's
+	// directory becomes it, so the wrapper's sibling lookups still resolve.
+	return append(env, "PATH="+launcherDir)
 }
 
 // spawnArgv is the exact argument vector AI Monitor appends to every Codex

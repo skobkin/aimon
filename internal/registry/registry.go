@@ -596,6 +596,13 @@ func codexTestReport(ctx context.Context, inst config.SourceInstance, deps Deps)
 	}
 	out, err := codex.New(*s, deps.Log, deps.AppVersion).Test(ctx)
 	if err != nil {
+		// The CLI process ended on its own before answering: that is a
+		// startup failure with a status in it (a wrapper whose own tool is
+		// missing is the common case), so neither "incompatible" nor "OK"
+		// may be claimed for the launcher stage.
+		if codex.IsExitedDuringStartup(err) {
+			return TestReport{Lines: []string{"Codex CLI: failed to start", sanitizedReason(err)}}
+		}
 		if out.CLIIncompatible {
 			return TestReport{Lines: []string{
 				"Codex CLI: incompatible",

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -143,11 +144,13 @@ func spawn(settings config.CodexSettings, log *slog.Logger) (*rpcConn, error) {
 	// resolution) so the exec layer never performs a second lookup of a
 	// bare name against the inherited PATH — discovery already searched the
 	// effective one. d.Path is our own resolution of the settings value and
-	// the argv is fixed; no shell is involved.
+	// the argv is fixed; no shell is involved. The child's PATH starts with
+	// the directory that resolution came from, so a wrapper script reaches
+	// the tools next to it by bare name (childEnv).
 	cmd := &exec.Cmd{
 		Path: d.Path,
 		Args: append([]string{d.Path}, spawnArgv()...),
-		Env:  effectiveEnv(settings),
+		Env:  childEnv(settings, filepath.Dir(d.Path)),
 		Dir:  "", // inherit the application's working directory
 	}
 
