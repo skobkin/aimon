@@ -9,6 +9,26 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-08-31 — Free-text labels wrap instead of widening the window
+
+A single long failure footer ("Last refresh failed: This Codex CLI does not
+support the app-server rate-limit interface. …") pushed the whole monitor
+window out to the message's single-line width: an unwrapped label demands
+that width as its minimum, and the tab scroll container's minimum is its
+content's.
+
+Free-text labels — card failure footers, swap model lines, the service
+status summary, running model names, the quota raw-count line, the Settings
+keychain and save-status lines, source-list names, and the editors' help and
+result labels — now set word wrap, so they take the width their container
+offers instead of dictating it. Labels inside an HBox row (card headers,
+metric rows, quota titles) deliberately stay unwrapped: an HBox hands out
+minimum widths, and a wrapping label there collapses to a sliver; the
+Settings status line therefore moved from the Add button's HBox into a
+Border centre. Wordings are unchanged — `docs/S2_UI_UX.md` §Status grammar
+("concise failure detail") and the `docs/UI_UX.md` footer examples still
+hold; only the line count of a long message is allowed to grow.
+
 ## 2026-08-30 — Codex launcher discovery falls back to the user bin directories
 
 The application is started two ways on one machine: from a terminal, whose

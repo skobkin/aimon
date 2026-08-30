@@ -87,8 +87,11 @@ func NewServiceOverviewBody(vm ui.ServiceOverviewVM) fyne.CanvasObject {
 		return noDataLabel()
 	}
 
+	// The summary leads with the upstream status string ("Healthy ·
+	// v0.9.2"), so it wraps rather than widening the overview column to the
+	// status line's own width.
 	body := container.NewVBox(
-		widget.NewLabelWithStyle(vm.Summary, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		NewWrappedLabel(vm.Summary, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 	for i := 0; i < len(vm.Rows); i += 2 {
 		if i+1 < len(vm.Rows) {

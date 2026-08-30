@@ -241,6 +241,11 @@ func walkCanvas(t *testing.T, obj fyne.CanvasObject, visit func(fyne.CanvasObjec
 		visit(o)
 	case *widget.Select:
 		visit(o)
+	case *widget.Form: // visited so tests can inspect the form's items
+		visit(o)
+		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
+			walkCanvas(t, child, visit)
+		}
 	case *widget.PopUp:
 		visit(o)
 		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
@@ -507,6 +512,97 @@ func TestEditorSeparatesOpenRouterSlotsInTestPayload(t *testing.T) {
 }
 
 // --- Codex editor ---------------------------------------------------------
+
+// editorLabels collects every label of the window's open overlay dialogs.
+func editorLabels(t *testing.T, s *Settings) []*widget.Label {
+	t.Helper()
+	var out []*widget.Label
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			if l, ok := o.(*widget.Label); ok {
+				out = append(out, l)
+			}
+		})
+	}
+
+	return out
+}
+
+// findEditorForm returns the open editor's form.
+func findEditorForm(t *testing.T, s *Settings) *widget.Form {
+	t.Helper()
+	var form *widget.Form
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			if f, ok := o.(*widget.Form); ok {
+				form = f
+			}
+		})
+	}
+
+	return form
+}
+
+// An editor's free-text labels carry messages of unbounded length — the
+// launcher, mode and env help, the live discovery status, slot hints, and
+// the connection-test result. Each must wrap: an unwrapped line would widen
+// the dialog, and with it the Settings window, to its single-line width.
+// Short static labels (titles, kind names) stay on one line.
+func TestEditorFreeTextLabelsWrap(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindCodex)
+
+	wrapped := 0
+	for _, l := range editorLabels(t, s) {
+		if len([]rune(l.Text)) < 40 {
+			continue
+		}
+		if l.Wrapping != fyne.TextWrapWord {
+			t.Errorf("label %q does not wrap; it would widen the dialog to its own width", l.Text)
+		}
+		wrapped++
+	}
+	if wrapped < 4 { // launcher + mode help, no-secrets warning, discovery status
+		t.Fatalf("only %d long labels scanned; the walk must reach the editor's free text", wrapped)
+	}
+
+	form := findEditorForm(t, s)
+	if form == nil {
+		t.Fatal("editor form not found in the overlay")
+	}
+	last := form.Items[len(form.Items)-1]
+	result, ok := last.Widget.(*widget.Label)
+	if !ok {
+		t.Fatalf("the form's last row is %T, want the connection-test result label", last.Widget)
+	}
+	if result.Wrapping != fyne.TextWrapWord {
+		t.Errorf("connection-test result wrapping = %v, want word wrap", result.Wrapping)
+	}
+}
+
+// A credential slot's hint explains the slot in a full sentence; it wraps
+// with the rest of the editor's free text.
+func TestEditorSlotHintWraps(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(domain.KindHindsight)
+
+	var hint *widget.Label
+	for _, l := range editorLabels(t, s) {
+		if strings.HasPrefix(l.Text, "Optional Bearer token") {
+			hint = l
+		}
+	}
+	if hint == nil {
+		t.Fatal("the Hindsight key row shows no slot hint")
+	}
+	if hint.Wrapping != fyne.TextWrapWord {
+		t.Errorf("slot hint wrapping = %v, want word wrap", hint.Wrapping)
+	}
+}
 
 // codexEditorScan locates the Codex-specific widgets of an open editor by
 // their stable placeholders, options and label prefixes.

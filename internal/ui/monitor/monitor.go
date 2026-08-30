@@ -401,7 +401,9 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 	case ui.KindSwap:
 		box := container.NewVBox()
 		for _, line := range c.Swap.ModelLines {
-			box.Add(widget.NewLabel(line))
+			// Model names are provider free text and can be long
+			// ("hf.co/org/repo:quant"): wrap instead of widening the tab.
+			box.Add(components.NewWrappedLabel(line, fyne.TextAlignLeading, fyne.TextStyle{}))
 		}
 		if c.Swap.MoreCount > 0 {
 			box.Add(widget.NewLabelWithStyle(

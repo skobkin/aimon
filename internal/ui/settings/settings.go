@@ -114,7 +114,11 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		}
 	}()
 
+	// Both status lines carry messages of unbounded length (a keychain
+	// backend's own error text, a failed save's reason), so they wrap
+	// instead of stretching the window to the message's single-line width.
 	s.keychain = widget.NewLabel("")
+	s.keychain.Wrapping = fyne.TextWrapWord
 	s.status = widget.NewLabel("")
 	s.status.Wrapping = fyne.TextWrapWord
 	s.addBtn = widget.NewButtonWithIcon("Add source", theme.ContentAddIcon(), s.chooseKind)
@@ -129,7 +133,11 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		}
 	})
 
-	bottom := container.NewHBox(s.addBtn, s.status)
+	// The status line sits in a Border's centre, not an HBox: an HBox hands
+	// out minimum widths, so a wrapping label would be squeezed to a sliver
+	// the moment a long message arrived. Here it takes the width left over
+	// from the button and wraps.
+	bottom := container.NewBorder(nil, nil, s.addBtn, nil, s.status)
 
 	content := container.NewBorder(
 		container.NewVBox(
@@ -233,8 +241,11 @@ func (s *Settings) row(inst config.SourceInstance, instances []config.SourceInst
 
 	s.mutControls = append(s.mutControls, check, up, down, edit, del)
 
+	// The name is the user's own free text and can be long: wrap it so a
+	// long name wraps inside the row instead of widening the window. The
+	// kind label is fixed and stays unwrapped.
 	title := container.NewVBox(
-		widget.NewLabelWithStyle(inst.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		wrappedLabel(inst.Name, fyne.TextStyle{Bold: true}),
 		widget.NewLabelWithStyle(kindName, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 	)
 	actions := container.NewHBox(up, down, edit, del)
@@ -456,6 +467,16 @@ func (s *Settings) closing() bool {
 
 func sectionLabel(text string) fyne.CanvasObject {
 	return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+}
+
+// wrappedLabel builds a label that wraps at whatever width its container
+// gives it instead of demanding its single-line width. Only labels that
+// already receive the full width (a Border centre, a VBox child) may wrap.
+func wrappedLabel(text string, style fyne.TextStyle) *widget.Label {
+	l := widget.NewLabelWithStyle(text, fyne.TextAlignLeading, style)
+	l.Wrapping = fyne.TextWrapWord
+
+	return l
 }
 
 // testFailure renders a test failure using the error's user message when

@@ -18,7 +18,9 @@ func NewRuntimeOverviewBody(vm ui.RuntimeOverviewVM) fyne.CanvasObject {
 		widget.NewLabelWithStyle(vm.Summary, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	}
 	for _, name := range vm.Names {
-		objs = append(objs, widget.NewLabel(name))
+		// A running model's name is provider free text ("hf.co/org/repo:Q4")
+		// and can be long: wrap it instead of widening the overview column.
+		objs = append(objs, NewWrappedLabel(name, fyne.TextAlignLeading, fyne.TextStyle{}))
 	}
 	if vm.MoreCount > 0 {
 		objs = append(objs, widget.NewLabelWithStyle(

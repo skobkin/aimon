@@ -28,8 +28,12 @@ func NewSourceCard(vm ui.CardVM, body fyne.CanvasObject) (fyne.CanvasObject, fun
 	content := container.NewVBox(header, body)
 	if vm.Footer != "" {
 		// Plain error text; the wording carries the meaning, never
-		// color alone (NFR).
-		content.Add(widget.NewLabelWithStyle(vm.Footer, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
+		// color alone (NFR). It wraps: a failure message is a full
+		// sentence ("Last refresh failed: This Codex CLI does not
+		// support …"), and an unwrapped line would widen the card's
+		// scroll container — and with it the whole window — to that
+		// sentence's single-line width.
+		content.Add(NewWrappedLabel(vm.Footer, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}))
 	}
 
 	return widget.NewCard("", "", content), func(s string) { setText(status, s) }
@@ -51,4 +55,21 @@ func NewEmptyState(message string, onOpenSettings func()) fyne.CanvasObject {
 // NewSectionLabel builds a small section heading ("Local", "Remote").
 func NewSectionLabel(text string) fyne.CanvasObject {
 	return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+}
+
+// NewWrappedLabel builds a label carrying dynamic free text (failure
+// messages, model names, help paragraphs). It wraps: a wrapping label's
+// minimum width is one word, so its text never stretches the scroll
+// container — and with it the window — to its own single-line width, and it
+// still uses the full width the container offers.
+//
+// Only labels that already receive their container's full width (VBox
+// children) may wrap: an HBox hands out minimum widths, which would squeeze
+// a wrapping label into a sliver. Short static labels stay on NewLabelWith
+// Style, which keeps them on one line.
+func NewWrappedLabel(text string, alignment fyne.TextAlign, style fyne.TextStyle) *widget.Label {
+	l := widget.NewLabelWithStyle(text, alignment, style)
+	l.Wrapping = fyne.TextWrapWord
+
+	return l
 }

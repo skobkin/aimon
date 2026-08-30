@@ -4,9 +4,92 @@ import (
 	"testing"
 	"time"
 
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
+
+// longStatusLine is the shape of a status/keychain message: a full sentence
+// of reasoning, not a short confirmation.
+const longStatusLine = "Keychain: blocked (dbus: org.freedesktop.se was not reachable: connection refused after 3 attempts) — credentials unavailable"
+
+// singleLineWidth measures the width a label demands when it does not wrap.
+func singleLineWidth(t *testing.T, text string, style fyne.TextStyle) float32 {
+	t.Helper()
+
+	return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, style).MinSize().Width
+}
+
+// labelByText returns the first label in the tree carrying exactly text.
+func labelByText(t *testing.T, obj fyne.CanvasObject, text string) *widget.Label {
+	t.Helper()
+	var found *widget.Label
+	walkCanvas(t, obj, func(o fyne.CanvasObject) {
+		if l, ok := o.(*widget.Label); ok && l.Text == text && found == nil {
+			found = l
+		}
+	})
+
+	return found
+}
+
+// The status and keychain lines carry messages of unbounded length, so they
+// wrap. The status line must also get the width left over from the Add
+// button: in an HBox a wrapping label would be handed its minimum width and
+// collapse into a sliver.
+func TestSettingsStatusLinesWrapBesideTheAddButton(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.win.Show()
+
+	if s.status.Wrapping != fyne.TextWrapWord {
+		t.Errorf("status wrapping = %v, want word wrap", s.status.Wrapping)
+	}
+	if s.keychain.Wrapping != fyne.TextWrapWord {
+		t.Errorf("keychain wrapping = %v, want word wrap", s.keychain.Wrapping)
+	}
+
+	s.status.SetText("Save failed: " + longStatusLine)
+	s.keychain.SetText(longStatusLine)
+	if w := s.status.Size().Width; w < 200 {
+		t.Errorf("status line width = %.0f after a long message, want the width left of the Add button", w)
+	}
+	if w := s.keychain.Size().Width; w < 200 {
+		t.Errorf("keychain line width = %.0f, want the full window width", w)
+	}
+}
+
+// A source's name is the user's own free text: a long one wraps inside its
+// row instead of widening the Settings window to the name's single line.
+func TestSettingsListRowNameWraps(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	name := "amdgputop-web on the media box over the LAN"
+	stub.LoadInstances = func() []config.SourceInstance {
+		return []config.SourceInstance{gpu("g1", name, "http://127.0.0.1:1")}
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.refresh() // the list only; the keychain probe needs no window here
+
+	assertWraps := func(l *widget.Label, what string) {
+		t.Helper()
+		if l == nil {
+			t.Fatalf("%s label not found in the list", what)
+		}
+		if l.Wrapping != fyne.TextWrapWord {
+			t.Errorf("%s wrapping = %v, want word wrap", what, l.Wrapping)
+		}
+		if want := singleLineWidth(t, name, l.TextStyle); s.listBox.MinSize().Width >= want {
+			t.Errorf("list min width %.0f reaches %q's single-line width %.0f",
+				s.listBox.MinSize().Width, name, want)
+		}
+	}
+	assertWraps(labelByText(t, s.listBox, name), "the instance name")
+}
 
 func gpu(id, name, url string) config.SourceInstance {
 	return config.SourceInstance{

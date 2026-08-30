@@ -12,6 +12,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
 // stubCtrl is the minimal controller for building the real window. The
@@ -110,6 +111,77 @@ func TestRemoteTabRendersSpendBody(t *testing.T) {
 }
 
 const balanceMask = "$•••••"
+
+// incompatibleCLIMessage is the authored Codex setup guidance carried by a
+// config-category failure — the footer behind the report of a monitor
+// window that grew to fit one long line.
+const incompatibleCLIMessage = "This Codex CLI does not support the app-server rate-limit interface. Update Codex CLI or choose a compatible executable."
+
+// failingCtrl serves one Codex instance whose only refresh failed with that
+// long config detail, which the view model passes through verbatim.
+type failingCtrl struct {
+	stubCtrl
+}
+
+func (c *failingCtrl) Instances() []config.SourceInstance {
+	return []config.SourceInstance{{
+		ID: "cx-1", Kind: domain.KindCodex, Name: "Codex",
+		Enabled: true, PollInterval: time.Minute, Codex: &config.CodexSettings{},
+	}}
+}
+
+func (c *failingCtrl) States() map[domain.InstanceID]domain.Runtime {
+	return map[domain.InstanceID]domain.Runtime{
+		"cx-1": {
+			Enabled: true,
+			LastError: &source.Error{
+				Category: source.CatConfig,
+				Detail:   incompatibleCLIMessage,
+			},
+		},
+	}
+}
+
+// A failed refresh renders its message as the card footer. That footer must
+// wrap: the tab bodies live in a vertical scroll container whose minimum
+// width is its content's, so one unwrapped sentence pushes the whole
+// monitor window far past its normal size.
+func TestFailureFooterWrapsInsteadOfWideningTheTab(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	m := NewMonitor(app, &failingCtrl{}, done)
+	m.rebuild()
+
+	footer := "Last refresh failed: " + incompatibleCLIMessage
+	texts := allTexts(t, m.remoteBox)
+	if !slices.Contains(texts, footer) {
+		t.Fatalf("remote tab lacks the failure footer; texts = %v", texts)
+	}
+
+	var label *widget.Label
+	for _, o := range flatten(t, m.remoteBox.Objects) {
+		if l, ok := o.(*widget.Label); ok && l.Text == footer {
+			label = l
+
+			break
+		}
+	}
+	if label == nil {
+		t.Fatal("the footer is not rendered as a label")
+	}
+	if label.Wrapping != fyne.TextWrapWord {
+		t.Errorf("footer wrapping = %v, want word wrap", label.Wrapping)
+	}
+
+	// The tab must keep fitting the window it is given: a wide unwrapped
+	// footer would demand roughly twice the monitor's width.
+	if w := m.remoteBox.MinSize().Width; w > monitorSize.Width {
+		t.Errorf("remote tab min width %.0f exceeds the %.0f window; the footer must wrap instead",
+			w, monitorSize.Width)
+	}
+}
 
 // countingCtrl counts controller reads, which rebuild() makes exactly once
 // per rebuild; it turns "how often did the tree rebuild" into a plain

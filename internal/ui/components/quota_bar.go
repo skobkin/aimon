@@ -197,7 +197,9 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 		NewQuotaBar(vm.Used, vm.Remaining),
 	)
 	if vm.Secondary != "" {
-		row.Add(widget.NewLabel(vm.Secondary))
+		// The raw "used / limit" line is provider free text: wrap it instead
+		// of letting it widen the card.
+		row.Add(NewWrappedLabel(vm.Secondary, fyne.TextAlignLeading, fyne.TextStyle{}))
 	}
 
 	var tick func(now time.Time)
