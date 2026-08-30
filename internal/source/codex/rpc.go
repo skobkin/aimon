@@ -24,8 +24,12 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+// Error renders the code only. A backend message can carry account data —
+// addresses, ids, paths — and is never rendered anywhere, not even into a
+// log; the raw text stays on the struct for auth classification
+// (looksLikeAuth) alone (docs/S6_CODEX.md §Errors and timeouts).
 func (e *rpcError) Error() string {
-	return fmt.Sprintf("json-rpc error %d: %s", e.Code, e.Message)
+	return fmt.Sprintf("json-rpc error %d", e.Code)
 }
 
 // rpcMessage is one decoded stdout line. A message with a Method is a
@@ -420,7 +424,9 @@ func (c *rpcConn) kill() {
 
 // decodeID accepts the two JSON-RPC id spellings: a number and a string of
 // digits. Anything else is a protocol violation rather than an unrelated
-// reply, so the caller reports it instead of skipping it.
+// reply, so the caller reports it instead of skipping it. The offending
+// bytes are never echoed: the raw spelling is protocol output, not
+// diagnostics, and must not reach a rendered error.
 func decodeID(raw json.RawMessage) (int64, error) {
 	var n int64
 	if err := json.Unmarshal(raw, &n); err == nil {
@@ -431,5 +437,5 @@ func decodeID(raw json.RawMessage) (int64, error) {
 		return strconv.ParseInt(s, 10, 64)
 	}
 
-	return 0, fmt.Errorf("unsupported id %s", string(raw))
+	return 0, errors.New("unsupported response id spelling")
 }

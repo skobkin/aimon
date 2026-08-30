@@ -688,6 +688,25 @@ func TestEnvValuesAndStderrNeverLeak(t *testing.T) {
 			t.Fatalf("spawn count = %d, want 1", got)
 		}
 	})
+
+	// A JSON-RPC error reply may carry account data in its message. The
+	// message drives classification only: the rendered error (and with it
+	// the manager's log line and the UI) carries the code alone.
+	t.Run("backend error message is never rendered", func(t *testing.T) {
+		h := newFakeHarness(t, "read-error-pii")
+		log, buf := quietLogger()
+		adapter := New(h.settings, log, "v")
+		_, err := adapter.Refresh(context.Background())
+		wantRefreshError(t, err, source.CatAuth, "authentication failed")
+		for _, pii := range []string{"acct-77431", "person@example.com", "/orgs/private/path"} {
+			if strings.Contains(err.Error(), pii) || strings.Contains(buf.String(), pii) {
+				t.Fatalf("backend message fragment %q leaked into the error or the log", pii)
+			}
+		}
+		if !strings.Contains(err.Error(), "json-rpc error -32000") {
+			t.Fatalf("error = %q, want the code-only rendering", err.Error())
+		}
+	})
 }
 
 func prefixed(lines []string, prefix string) []string {

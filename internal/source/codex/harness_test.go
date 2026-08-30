@@ -128,6 +128,15 @@ func runFakeChild(script string) {
 				respond(fakeResponse{ID: req.ID, Error: &rpcError{Code: -32000, Message: "unauthorized: session expired, please log in"}})
 
 				return
+			case "read-error-pii":
+				// A backend message shaped like real account output: the
+				// privacy test asserts none of it is ever rendered.
+				respond(fakeResponse{ID: req.ID, Error: &rpcError{
+					Code:    -32000,
+					Message: "unauthorized for account acct-77431 (person@example.com), org /orgs/private/path",
+				}})
+
+				return
 			case "read-error-provider":
 				respond(fakeResponse{ID: req.ID, Error: &rpcError{Code: -32000, Message: "backend upstream unavailable"}})
 
