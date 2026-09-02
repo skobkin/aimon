@@ -9,6 +9,26 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-09-03 — Card headers wrap their title instead of widening the window
+
+A stale source status ("5h32m · stale") clipped the monitor window's right
+side — the floating Refresh/Settings buttons with it — while every status
+on screen read fresh. The card header was an HBox of two unwrapped labels
+(title, freshness), and an HBox hands out minimum widths: the stale status
+is its widest element, the paired overview columns double that width, and
+the 540pt fixed monitor canvas lays out past the window border. The state
+survives the source recovering, because Fyne never shrinks a canvas that
+was once laid out wider than the window.
+
+Card headers (overview and detail) now place the title in a Border centre
+with word wrap and the freshness in the right slot at its natural width, the
+same shape the Settings window's status line already uses. The header row
+keeps its "Source name …… 5s ago" grammar; only a title long enough to need
+it grows to a second line. This amends the 2026-08-31 entry's stance that
+card header labels deliberately stay unwrapped — that reasoning holds for
+the freshness label, but the title is user free text like the labels that
+entry already wraps.
+
 ## 2026-08-31 — Free-text labels wrap instead of widening the window
 
 A single long failure footer ("Last refresh failed: This Codex CLI does not

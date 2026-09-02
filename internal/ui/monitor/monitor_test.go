@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,6 +249,74 @@ func TestOverviewTabRendersCompactSpendBody(t *testing.T) {
 	}
 	if !slices.Contains(texts, balanceMask) && !slices.Contains(texts, "$73.42") {
 		t.Errorf("overview card lacks a Balance row; texts = %v", texts)
+	}
+}
+
+// stalePairCtrl serves two local llama-swap instances side by side in the
+// overview grid, the right one stale: its "… · stale" status label is the
+// widest header element in the report of a clipped monitor window.
+type stalePairCtrl struct {
+	stubCtrl
+}
+
+func (c *stalePairCtrl) Instances() []config.SourceInstance {
+	return []config.SourceInstance{
+		{ID: "gpu", Kind: domain.KindLlamaSwap, Name: "GPU server", Enabled: true, PollInterval: time.Minute, LlamaSwap: &config.LlamaSwapSettings{}},
+		{ID: "inf", Kind: domain.KindLlamaSwap, Name: "inference server.lan", Enabled: true, PollInterval: time.Minute, LlamaSwap: &config.LlamaSwapSettings{}},
+	}
+}
+
+func (c *stalePairCtrl) States() map[domain.InstanceID]domain.Runtime {
+	snap := domain.LlamaSwapSnapshot{
+		CollectedAt: time.Unix(1770000000, 0),
+		Healthy:     true,
+		RunningModels: []domain.RunningModel{
+			{ID: "bge", Name: "BGE-M3 Embedding 8k (CPU)"},
+			{ID: "gemma", Name: "Gemma 4 E4B LS 32k"},
+		},
+	}
+
+	return map[domain.InstanceID]domain.Runtime{
+		"gpu": {Enabled: true, LastSuccessAt: time.Unix(1770000000, 0), Snapshot: snap},
+		// A failed refresh keeps the last-good snapshot on display (D6) and
+		// derives the stale status, while a healthy poll shows a short age.
+		"inf": {
+			Enabled:       true,
+			LastSuccessAt: time.Unix(1770000000, 0),
+			LastError:     &source.Error{Category: source.CatHTTP, Detail: "connection refused"},
+			Snapshot:      snap,
+		},
+	}
+}
+
+// A stale card status ("5h32m · stale") must not widen the monitor: the
+// overview lays its cards out in two fixed columns, so one wide header
+// once pushed the whole tab — and with it the floating action buttons —
+// past the fixed window width, clipping everything on the right. The
+// header now wraps its title instead of demanding a wider row.
+func TestStaleCardDoesNotWidenTheOverview(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	m := NewMonitor(app, &stalePairCtrl{}, done)
+	m.rebuild()
+
+	stale := false
+	for _, s := range allTexts(t, m.overviewBox) {
+		if strings.HasSuffix(s, "· stale") {
+			stale = true
+		}
+	}
+	if !stale {
+		t.Fatalf("no stale card status on the overview; texts = %v", allTexts(t, m.overviewBox))
+	}
+
+	if w := m.overviewBox.MinSize().Width; w > monitorSize.Width {
+		t.Errorf("overview min width %.0f exceeds the %.0f window; the stale header must not widen it", w, monitorSize.Width)
+	}
+	if w := m.win.Content().MinSize().Width; w > monitorSize.Width {
+		t.Errorf("monitor content min width %.0f exceeds the %.0f window", w, monitorSize.Width)
 	}
 }
 

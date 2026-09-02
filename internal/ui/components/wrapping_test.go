@@ -65,26 +65,31 @@ func TestSourceCardFooterWrapsInsteadOfWideningTheCard(t *testing.T) {
 	assertWraps(t, labelByText(t, card, incompatibleCLIFooter), incompatibleCLIFooter, card)
 }
 
-// The header keeps the card grammar "Source name …… 5s ago" on one row. Its
-// labels must not wrap: an HBox hands out minimum widths, so a wrapping
-// header label would collapse into a sliver.
-func TestSourceCardHeaderStaysOnOneRow(t *testing.T) {
+// The header keeps the card grammar "Source name …… 5s ago" on one row. The
+// freshness label must not wrap (a Border right slot keeps its natural
+// width), while the title — user free text like any other — wraps in the
+// Border centre instead of demanding a row wide enough for its one line: a
+// long title or a long stale status once widened the paired overview
+// columns past the fixed monitor width and clipped the window's right side.
+func TestSourceCardHeaderKeepsTheFreshnessOnOneRow(t *testing.T) {
 	test.NewTempApp(t)
 
-	card, _ := NewSourceCard(ui.CardVM{Title: "Codex", Status: "46s ago"}, container.NewVBox())
+	title := "my-inference-server.lan.example.com"
+	status := "1h25m · stale"
+	card, _ := NewSourceCard(ui.CardVM{Title: title, Status: status}, container.NewVBox())
 
-	for _, text := range []string{"Codex", "46s ago"} {
-		l := labelByText(t, card, text)
-		if l == nil {
-			t.Fatalf("header label %q not found", text)
-		}
-		if l.Wrapping != fyne.TextWrapOff {
-			t.Errorf("header label %q wraps; the header row would collapse it", text)
-		}
-		if w := singleLineWidth(t, text, l.TextStyle); l.MinSize().Width < w {
-			t.Errorf("header label %q min width %.0f is below its text width %.0f", text, l.MinSize().Width, w)
-		}
+	freshness := labelByText(t, card, status)
+	if freshness == nil {
+		t.Fatalf("freshness label %q not found", status)
 	}
+	if freshness.Wrapping != fyne.TextWrapOff {
+		t.Errorf("freshness label %q wraps; the right header slot would collapse it", status)
+	}
+	if w := singleLineWidth(t, status, freshness.TextStyle); freshness.MinSize().Width < w {
+		t.Errorf("freshness label %q min width %.0f is below its text width %.0f", status, freshness.MinSize().Width, w)
+	}
+
+	assertWraps(t, labelByText(t, card, title), title, card)
 }
 
 // Other free-text lines that render at their container's full width — the

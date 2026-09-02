@@ -288,14 +288,16 @@ func (m *Monitor) overviewRow(cards []ui.OverviewCardVM, states map[domain.Insta
 }
 
 // overviewSourceCard wraps an overview card body in a title/status header.
-// No footer: Overview omits failure detail per S2_UI_UX. The status label
-// ages with time, so its per-second refresher is collected for the ticker.
+// No footer: Overview omits failure detail per S2_UI_UX. As in the detail
+// cards, the title wraps in a Border centre and the status keeps its
+// natural width on the right: a stale status ("5h32m · stale") in a
+// minimum-width HBox once widened the paired overview columns past the
+// fixed window width. The status label ages with time, so its per-second
+// refresher is collected for the ticker.
 func overviewSourceCard(vm ui.OverviewCardVM, rt domain.Runtime, body fyne.CanvasObject, tick *[]func(now time.Time)) fyne.CanvasObject {
 	status := widget.NewLabel(vm.Status)
-	header := container.NewHBox(
-		widget.NewLabelWithStyle(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		layout.NewSpacer(),
-		status,
+	header := container.NewBorder(nil, nil, nil, status,
+		components.NewWrappedLabel(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 	*tick = append(*tick, func(now time.Time) {
 		setLabelStatus(status, ui.FreshnessText(rt, now))

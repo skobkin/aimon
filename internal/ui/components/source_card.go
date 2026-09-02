@@ -12,17 +12,22 @@ import (
 
 // NewSourceCard builds a source card: a standard widget.Card whose content
 // is a VBox of header row, body, and optional footer. The header row is
-// composed from standard Fyne objects — bold title, spacer, right-aligned
+// composed from standard Fyne objects — bold title, right-aligned
 // freshness — reproducing the wireframe's "Source name    5s ago".
+//
+// The title sits in a Border centre and wraps, while the freshness keeps
+// its natural width in the right slot. Both are free text (a user-named
+// source, an age with a "· stale" suffix) and neither may widen the
+// window: an HBox hands out minimum widths, so a long title or a stale
+// status there once pushed the paired overview columns past the fixed
+// monitor width and clipped everything right of it.
 //
 // The second return sets the freshness label; the monitor's ticker calls
 // it once a second while visible instead of rebuilding the card.
 func NewSourceCard(vm ui.CardVM, body fyne.CanvasObject) (fyne.CanvasObject, func(status string)) {
 	status := widget.NewLabel(vm.Status)
-	header := container.NewHBox(
-		widget.NewLabelWithStyle(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		layout.NewSpacer(),
-		status,
+	header := container.NewBorder(nil, nil, nil, status,
+		NewWrappedLabel(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 
 	content := container.NewVBox(header, body)
