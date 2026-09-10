@@ -64,6 +64,13 @@ type Deps struct {
 	// SetHideSensitiveInfo persists the preference and re-renders visible
 	// sensitive values. It runs on the UI thread.
 	SetHideSensitiveInfo func(bool)
+	// CheckUpdatesAutomatically reports the "Check for updates
+	// automatically" preference. Development builds report the stored value,
+	// but the app will not start automatic checks on them.
+	CheckUpdatesAutomatically func() bool
+	// SetCheckUpdatesAutomatically persists the preference and starts or
+	// stops periodic checks accordingly. It runs on the UI thread.
+	SetCheckUpdatesAutomatically func(bool)
 	// DiscoverGPUs lists the amdgputop-web GPUs at a base URL (the
 	// amdgputop-web connection test doubles as discovery).
 	DiscoverGPUs func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error)
@@ -92,6 +99,7 @@ type Settings struct {
 	status   *widget.Label
 	keychain *widget.Label
 	privacy  *widget.Check
+	updates  *widget.Check
 
 	// mutBusy gates configuration mutations: at most one SaveInstances is
 	// in flight. While one runs, every mutating control is disabled, so a
@@ -133,6 +141,15 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		}
 	})
 
+	// The automatic update-check toggle is the same kind of application-wide
+	// setting: toggling persists immediately and starts or stops periodic
+	// checks. Manual checks from the tray are unaffected.
+	s.updates = widget.NewCheck("Check for updates automatically", func(on bool) {
+		if s.deps.SetCheckUpdatesAutomatically != nil {
+			s.deps.SetCheckUpdatesAutomatically(on)
+		}
+	})
+
 	// The status line sits in a Border's centre, not an HBox: an HBox hands
 	// out minimum widths, so a wrapping label would be squeezed to a sliver
 	// the moment a long message arrived. Here it takes the width left over
@@ -144,6 +161,8 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 			widget.NewLabelWithStyle("Privacy", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 			s.privacy,
 			s.keychain,
+			widget.NewLabelWithStyle("Updates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			s.updates,
 			widget.NewSeparator(),
 		),
 		container.NewVBox(widget.NewSeparator(), bottom),
@@ -167,10 +186,13 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 func (s *Settings) Window() fyne.Window { return s.win }
 
 // Show rebuilds the list from the authoritative configuration, reloads the
-// privacy preference, and reveals the window.
+// application-wide preferences, and reveals the window.
 func (s *Settings) Show() {
 	if s.deps.HideSensitiveInfo != nil {
 		s.privacy.SetChecked(s.deps.HideSensitiveInfo())
+	}
+	if s.deps.CheckUpdatesAutomatically != nil {
+		s.updates.SetChecked(s.deps.CheckUpdatesAutomatically())
 	}
 	s.refresh()
 	s.probeKeychain()

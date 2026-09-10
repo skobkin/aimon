@@ -93,6 +93,41 @@ func TestHideSensitiveInfoPreference(t *testing.T) {
 	}
 }
 
+// CheckUpdatesAutomatically defaults to enabled and persists both ways.
+// Absent preference -> true (inverted storage: skip=false); a manually
+// injected skip=false still reads as enabled.
+func TestCheckUpdatesAutomaticallyPreference(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	if !repo.CheckUpdatesAutomatically() {
+		t.Error("absent updates preference must default to automatic checks enabled")
+	}
+
+	repo.SetCheckUpdatesAutomatically(false)
+	if repo.CheckUpdatesAutomatically() {
+		t.Error("persisted false must read back false")
+	}
+	if v := prefs.Bool(keyUpdatesSkipAutomaticChecks); !v {
+		t.Errorf("storing automatic=false must write skip-automatic-checks=true, got %v", v)
+	}
+
+	repo.SetCheckUpdatesAutomatically(true)
+	if !repo.CheckUpdatesAutomatically() {
+		t.Error("toggled automatic=true must persist")
+	}
+	if v := prefs.Bool(keyUpdatesSkipAutomaticChecks); v {
+		t.Errorf("storing automatic=true must write skip-automatic-checks=false, got %v", v)
+	}
+
+	// An external skip=false still means "checks on", because the default is
+	// inverted-storage.
+	prefs.SetBool(keyUpdatesSkipAutomaticChecks, false)
+	if !repo.CheckUpdatesAutomatically() {
+		t.Error("skip-automatic-checks=false must read as enabled")
+	}
+}
+
 func keysOf(p *memPreferences) []string {
 	out := make([]string, 0, len(p.data))
 	for k := range p.data {

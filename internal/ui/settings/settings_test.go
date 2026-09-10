@@ -311,6 +311,37 @@ func TestNewDraftHindsight(t *testing.T) {
 	}
 }
 
+// The Updates check syncs from the preference on Show and persists toggles
+// through Deps — the same immediate-apply contract as the privacy check.
+func TestSettingsUpdatesCheckSyncsAndPersists(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{} // Show() probes the keychain
+	automatic := true
+	var setCalls []bool
+	stub.CheckUpdatesAutomatically = func() bool { return automatic }
+	stub.SetCheckUpdatesAutomatically = func(on bool) {
+		setCalls = append(setCalls, on)
+		automatic = on
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+
+	s.Show()
+	if !s.updates.Checked {
+		t.Error("Show must sync the check from the preference")
+	}
+
+	automatic = false
+	s.Show()
+	if s.updates.Checked {
+		t.Error("Show must reload the preference")
+	}
+
+	s.updates.SetChecked(true)
+	if len(setCalls) < 1 || !setCalls[len(setCalls)-1] {
+		t.Errorf("toggling the check must reach SetCheckUpdatesAutomatically, got %v", setCalls)
+	}
+}
+
 // The mutation gate: at most one configuration mutation may be in flight;
 // a second entry while one runs is rejected until the first leaves.
 func TestMutationGateSingleFlight(t *testing.T) {

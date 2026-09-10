@@ -23,6 +23,9 @@ you use — without ever opening a browser tab.
   side, each with its own poll interval.
 - Credentials are stored in the system keychain — never in config files or
   logs.
+- Update checks against the project's releases (automatic, or "Check for
+  updates…" in the tray menu) with a release-notes dialog and a direct link
+  to the download.
 - Optional masking of sensitive values such as spending, for screenshots and
   shared screens.
 - Sources are independent: one failing or disabled source never breaks the

@@ -6,6 +6,8 @@ require (
 	fyne.io/fyne/v2 v2.8.0
 	fyne.io/systray v1.12.2
 	github.com/go-gl/glfw/v3.4/glfw v0.1.0-pre.1.0.20260707082822-2a407d02d01a
+	github.com/skobkin/go4updates v0.1.0
+	github.com/skobkin/go4updates/ui/fyne v0.1.0
 	github.com/zalando/go-keyring v0.2.8
 )
 
@@ -40,6 +42,7 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	golang.org/x/image v0.24.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.22.0 // indirect

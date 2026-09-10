@@ -73,6 +73,16 @@ type App struct {
 	settings *settings.Settings
 	pace     *pace.Tracker
 
+	// updateChecker performs release update checks; nil when construction
+	// failed, in which case every entry point degrades to a log line or a
+	// diagnostic dialog.
+	updateChecker updateChecker
+	// checkingUpdates guards one manual update check at a time.
+	checkingUpdates atomic.Bool
+	// updateItem is the tray's "Check for updates…" item, swapped whenever
+	// the menu is rebuilt; nil on off-desktop runs.
+	updateItem atomic.Pointer[systray.MenuItem]
+
 	// loadErr records a failed document load from New; Run surfaces it.
 	// It is written once before any reader exists.
 	loadErr error
@@ -180,6 +190,9 @@ func New() (*App, error) {
 		TestConnection:       a.testConnection,
 		HideSensitiveInfo:    a.HideSensitiveInfo,
 		SetHideSensitiveInfo: a.SetHideSensitiveInfo,
+
+		CheckUpdatesAutomatically:    a.CheckUpdatesAutomatically,
+		SetCheckUpdatesAutomatically: a.SetCheckUpdatesAutomatically,
 		DiscoverGPUs: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
@@ -202,6 +215,7 @@ func New() (*App, error) {
 	// and the other platforms.
 	glfw.WindowHintString(glfw.WaylandAppID, appID)
 
+	a.setupUpdateChecker()
 	a.setupTray()
 	a.unsub = a.mgr.Subscribe(func(id domain.InstanceID) {
 		if !a.running.Load() {
@@ -258,6 +272,7 @@ func (a *App) Run() {
 	if !a.repo.HasDocument() {
 		a.fyneApp.Lifecycle().SetOnStarted(a.settings.Show)
 	}
+	a.startUpdateChecks()
 	a.fyneApp.Run()
 	a.mgr.Wait()
 	a.log.Info("stopped")
@@ -347,6 +362,18 @@ func (a *App) rebuildTrayMenu() {
 	}
 
 	mSettings := systray.AddMenuItem("Settings", "")
+	// A manual check may be in flight when the menu is rebuilt (every config
+	// save rebuilds it). The item is stored before the busy flag is read: a
+	// completing check re-enables whichever item the pointer holds at its
+	// enable moment, so reading the flag first could publish a disabled item
+	// whose enabler had already left for the previous one and strand it
+	// disabled while idle. A click slipping through the store-to-disable
+	// window is rejected by the checkForUpdates CAS guard.
+	mUpdates := systray.AddMenuItem("Check for updates…", "")
+	a.updateItem.Store(mUpdates)
+	if a.checkingUpdates.Load() {
+		mUpdates.Disable()
+	}
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "")
 
@@ -363,6 +390,11 @@ func (a *App) rebuildTrayMenu() {
 	go func() {
 		for range mSettings.ClickedCh {
 			fyne.Do(a.settings.Show)
+		}
+	}()
+	go func() {
+		for range mUpdates.ClickedCh {
+			fyne.Do(a.checkForUpdates)
 		}
 	}()
 	go func() {
@@ -689,6 +721,12 @@ func (a *App) quit() {
 	a.unsub()
 	close(a.done)
 	a.mgr.Cancel()
+	// Stopped before the event loop quits so the auto-update handler's final
+	// fyne.Do dispatch is still serviced; Stop is bounded — cancelling the
+	// context aborts any in-flight check request immediately.
+	if a.updateChecker != nil {
+		a.updateChecker.Stop()
+	}
 	if a.trayEnd != nil {
 		a.trayEnd()
 	}

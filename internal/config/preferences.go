@@ -34,6 +34,11 @@ const (
 	// false/absent means sensitive values are concealed and true means
 	// they are shown.
 	keyPrivacyShowSensitive = "privacy.show-sensitive"
+	// keyUpdatesSkipAutomaticChecks backs the "Check for updates
+	// automatically" preference as an INVERTED bool, for the same reason:
+	// the default must be "checks on", so false/absent means automatic
+	// checks run and true means they are skipped.
+	keyUpdatesSkipAutomaticChecks = "updates.skip-automatic-checks"
 )
 
 // sourceSchemaVersion is the dynamic source document format this build
@@ -193,6 +198,20 @@ func (r *Repository) HideSensitiveInfo() bool {
 // SetHideSensitiveInfo persists the "Hide sensitive info" preference.
 func (r *Repository) SetHideSensitiveInfo(hide bool) {
 	r.prefs.SetBool(keyPrivacyShowSensitive, !hide)
+}
+
+// CheckUpdatesAutomatically reports the "Check for updates automatically"
+// preference. It defaults to true: absent and false both mean periodic
+// checks run. Only automatic checks are gated — the manual tray check stays
+// available regardless, and development builds never check automatically.
+func (r *Repository) CheckUpdatesAutomatically() bool {
+	return !r.prefs.Bool(keyUpdatesSkipAutomaticChecks)
+}
+
+// SetCheckUpdatesAutomatically persists the "Check for updates
+// automatically" preference.
+func (r *Repository) SetCheckUpdatesAutomatically(on bool) {
+	r.prefs.SetBool(keyUpdatesSkipAutomaticChecks, !on)
 }
 
 func recordToInstance(rec sourceRecord) (SourceInstance, error) {

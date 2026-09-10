@@ -234,6 +234,58 @@ and the S2–S7 documents refine them where noted.
   background goroutines do I/O and schedule every UI mutation through
   `fyne.Do`/`fyne.DoAndWait`.
 
+## 2026-09-10 — Update checks via go4updates
+
+The application had no way to tell an installed release from the current
+one; new versions were found only by watching the releases page. Update
+checking is now built on `github.com/skobkin/go4updates` v0.1.0 (plus its
+nested `ui/fyne` v0.1.0 module), the same library and manager pattern as
+`skobkin/qBtRemoteGo`: a UI-free `internal/updates` manager wrapping the
+Forgejo release source, one-shot manual checks, and a periodic watcher that
+checks immediately at startup and then every 12 hours, notifying at most
+once per new version per process.
+
+Decisions and deviations from the reference implementation:
+
+- **Dependencies.** The `ui/fyne` nested module requires Fyne v2.7.4;
+  minimal version selection builds it against this project's v2.8.0, using
+  only stable public dialog/widget API, verified by build and smoke test.
+  The update checker keeps its own `http.Client` (30 s timeout) instead of
+  the application's timeout-less shared client: the app client predates the
+  bounded-request idiom's strict reading and is only safe behind adapter
+  timeouts, which the checker manages through its own 15 s attempt budget.
+- **Preference storage.** "Check for updates automatically" defaults to on,
+  and `fyne.Preferences.Bool` cannot distinguish absent from false, so the
+  stored key `updates.skip-automatic-checks` is inverted (true = skip),
+  mirroring the `privacy.show-sensitive` decision. Automatic checks never
+  run on development builds (`dev` is not a semver; the comparator reports
+  unknown, never a false prompt). Manual checks from the tray stay
+  available in every build and configuration.
+- **Presentation.** A detected update reveals the monitor window and shows
+  the library's release dialog (versions, Forgejo-linked changelog, "Open
+  release") — chosen over a system notification for direct access to the
+  changelog and download; a notification-only variant was considered and
+  rejected as an extra hop to the same information. The dialog is attached
+  to the monitor window, which is shown first because a dialog on a hidden
+  window is invisible on most platforms.
+- **Tray and threading.** "Check for updates…" sits between Settings and
+  Quit; during a manual check the native `systray.MenuItem` is disabled in
+  place (no menu republish, unlike the reference's Fyne menu), and the item
+  pointer is swapped atomically because every configuration save rebuilds
+  the menu — a fresh item derives its initial disabled state from the
+  in-flight busy flag, with the CAS guard as the real protection. All
+  results cross to the UI through `fyne.Do`; the network round-trip runs on
+  a goroutine.
+- **Shutdown.** The checker is stopped inside `quit()`, between the source
+  manager cancel and the tray teardown — earlier than the reference, which
+  stops after the event loop returns. Stopping while the loop still lives
+  lets the update handler's final `fyne.Do` dispatch be serviced, and
+  `Stop` is bounded because cancelling its context aborts any in-flight
+  check request immediately.
+- **Logging.** The manager's logger is fixed for its lifetime (this
+  application never reconfigures logging), so the reference's `SetLogger`
+  and its concurrency tests were dropped.
+
 ## 2026-09-03 — Card headers wrap their title instead of widening the window
 
 A stale source status ("5h32m · stale") clipped the monitor window's right
