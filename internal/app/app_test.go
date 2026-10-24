@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sync"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
@@ -140,11 +143,13 @@ func gpuInst(id, name, baseURL string, enabled bool) config.SourceInstance {
 func TestSaveInstancesFailureLeavesStateUntouched(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	a := &App{
-		log:      logger,
-		client:   &http.Client{},
-		creds:    &memStore{},
-		mgr:      source.NewManager(logger),
-		adapters: map[domain.InstanceID]adapterEntry{},
+		log:         logger,
+		client:      &http.Client{},
+		creds:       &memStore{},
+		mgr:         source.NewManager(logger),
+		adapters:    map[domain.InstanceID]adapterEntry{},
+		pace:        pace.NewTracker(),
+		paceWindows: map[domain.InstanceID]time.Duration{},
 	}
 	defer a.mgr.Stop()
 
@@ -180,11 +185,13 @@ func TestSaveInstancesFailureLeavesStateUntouched(t *testing.T) {
 func TestApplyInstancesAdapterReuseAndRebuild(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	a := &App{
-		log:      logger,
-		client:   &http.Client{},
-		creds:    &memStore{},
-		mgr:      source.NewManager(logger),
-		adapters: map[domain.InstanceID]adapterEntry{},
+		log:         logger,
+		client:      &http.Client{},
+		creds:       &memStore{},
+		mgr:         source.NewManager(logger),
+		adapters:    map[domain.InstanceID]adapterEntry{},
+		pace:        pace.NewTracker(),
+		paceWindows: map[domain.InstanceID]time.Duration{},
 	}
 	defer a.mgr.Stop()
 
@@ -290,4 +297,222 @@ func TestUICoalescerRearmsDuringDispatch(t *testing.T) {
 	if runs != 2 {
 		t.Errorf("re-entrant notification produced %d updates, want 2", runs)
 	}
+}
+
+// --- S7 pace wiring ---
+
+// miniInst builds a minimal MiniMax instance: a pace-capable kind with a
+// fixed endpoint, so applyInstances builds a real adapter without I/O.
+func miniInst(id string, paceWindow time.Duration) config.SourceInstance {
+	return config.SourceInstance{
+		ID:           domain.InstanceID(id),
+		Kind:         domain.KindMiniMax,
+		Name:         "MiniMax " + id,
+		Enabled:      true,
+		PollInterval: time.Hour, // no scheduled churn during the test
+		PaceWindow:   paceWindow,
+		MiniMax:      &config.MiniMaxSettings{},
+	}
+}
+
+func quotaSnapAt(at time.Time, used float64) domain.QuotaSnapshot {
+	return domain.QuotaSnapshot{
+		Kind:        domain.KindMiniMax,
+		CollectedAt: at,
+		Windows: []domain.QuotaWindow{
+			{ID: "interval", Name: "5-hour", UsedFraction: used, RemainingFraction: 1 - used},
+		},
+	}
+}
+
+func paceTestApp() *App {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	return &App{
+		log:         logger,
+		client:      &http.Client{},
+		creds:       &memStore{},
+		mgr:         source.NewManager(logger),
+		adapters:    map[domain.InstanceID]adapterEntry{},
+		pace:        pace.NewTracker(),
+		paceWindows: map[domain.InstanceID]time.Duration{},
+	}
+}
+
+// recordPace must skip everything that would poison the series: non-pace
+// kinds, failed refreshes (the retained last-good snapshot would
+// fabricate a flat interval), missing snapshots, and OpenRouter keys
+// without usage data.
+func TestRecordPaceSkips(t *testing.T) {
+	a := paceTestApp()
+	at := time.Unix(1770000000, 0)
+
+	gpu := gpuInst("gpu-a", "GPU", "http://127.0.0.1:49001", true)
+	a.recordPaceSnapshot("gpu-a", gpu, domain.Runtime{Snapshot: domain.GPUSnapshot{CollectedAt: at}})
+	a.recordPaceSnapshot("gpu-a", gpu, domain.Runtime{LastError: errors.New("boom")})
+
+	mm := miniInst("mm", 0)
+	a.recordPaceSnapshot("mm", mm, domain.Runtime{Snapshot: quotaSnapAt(at, 0.1), LastError: errors.New("boom")})
+	a.recordPaceSnapshot("mm", mm, domain.Runtime{})
+
+	or := config.SourceInstance{
+		ID: domain.InstanceID("or"), Kind: domain.KindOpenRouter, Name: "OpenRouter",
+		Enabled: true, PollInterval: time.Hour, OpenRouter: &config.OpenRouterSettings{},
+	}
+	a.recordPaceSnapshot("or", or, domain.Runtime{Snapshot: domain.OpenRouterSnapshot{CollectedAt: at}})
+
+	if got := a.pace.States(); len(got) != 0 {
+		t.Errorf("tracker recorded %v, want nothing", got)
+	}
+}
+
+// Quota, codex and spend snapshots all land in the tracker through their
+// respective entry points.
+func TestRecordPaceFeedsTracker(t *testing.T) {
+	a := paceTestApp()
+	at := time.Unix(1770000000, 0)
+	mm := miniInst("mm", 0)
+
+	a.recordPaceSnapshot("mm", mm, domain.Runtime{Snapshot: quotaSnapAt(at, 0.1)})
+	a.recordPaceSnapshot("mm", mm, domain.Runtime{Snapshot: quotaSnapAt(at.Add(5*time.Minute), 0.2)})
+	ip, ok := a.pace.States()["mm"]
+	if !ok {
+		t.Fatal("quota series missing")
+	}
+	w, ok := ip.Windows["interval"]
+	if !ok || w.State != pace.StateActive {
+		t.Fatalf("interval estimate = %+v (ok %v), want Active", w, ok)
+	}
+	// 0.1 fraction over 5 minutes ⇒ 1.2/h.
+	if math.Abs(w.SpeedFrac-1.2) > 1e-9 {
+		t.Errorf("speed = %v, want 1.2", w.SpeedFrac)
+	}
+
+	cd := miniInst("cd", 0)
+	cd.Kind = domain.KindCodex
+	cd.MiniMax = nil
+	cd.Codex = &config.CodexSettings{}
+	a.recordPaceSnapshot("cd", cd, domain.Runtime{Snapshot: domain.CodexSnapshot{
+		CollectedAt: at,
+		Windows:     []domain.QuotaWindow{{ID: "codex-primary", Name: "5-hour", UsedFraction: 0.3, RemainingFraction: 0.7}},
+	}})
+	ip, ok = a.pace.States()["cd"]
+	if !ok {
+		t.Fatal("codex series missing")
+	}
+	if _, ok := ip.Windows["codex-primary"]; !ok {
+		t.Errorf("codex windows = %v", ip.Windows)
+	}
+
+	or := config.SourceInstance{
+		ID: domain.InstanceID("or"), Kind: domain.KindOpenRouter, Name: "OpenRouter",
+		Enabled: true, PollInterval: time.Hour, OpenRouter: &config.OpenRouterSettings{},
+	}
+	a.recordPaceSnapshot("or", or, domain.Runtime{Snapshot: domain.OpenRouterSnapshot{
+		CollectedAt: at, Key: &domain.OpenRouterKeyUsage{UsageTotal: 5},
+	}})
+	a.recordPaceSnapshot("or", or, domain.Runtime{Snapshot: domain.OpenRouterSnapshot{
+		CollectedAt: at.Add(10 * time.Minute), Key: &domain.OpenRouterKeyUsage{UsageTotal: 7},
+	}})
+	ip, ok = a.pace.States()["or"]
+	if !ok || ip.Spend == nil {
+		t.Fatalf("spend estimate missing: %+v", ip)
+	}
+	// $2 over 10 minutes ⇒ $12/h.
+	if math.Abs(ip.Spend.SpeedCount-12) > 1e-9 {
+		t.Errorf("spend speed = %v, want 12", ip.Spend.SpeedCount)
+	}
+}
+
+// Pace history survives exactly the edits that keep the adapter: an
+// interval-only change and a rename keep the series, a provider-settings
+// change and a removal drop it.
+func TestApplyInstancesPaceHistoryMatrix(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	seed := func(a *App) {
+		a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+		a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+	}
+	activeExists := func(a *App, what string) {
+		t.Helper()
+		ip, ok := a.pace.States()["mm"]
+		if !ok {
+			t.Fatalf("%s: series missing", what)
+		}
+		w, ok := ip.Windows["interval"]
+		if !ok || w.State != pace.StateActive {
+			t.Fatalf("%s: estimate = %+v, want Active", what, w)
+		}
+	}
+
+	t.Run("interval-only keeps history", func(t *testing.T) {
+		a := paceTestApp()
+		defer a.mgr.Stop()
+		first := miniInst("mm", time.Hour)
+		a.applyInstances([]config.SourceInstance{first})
+		seed(a)
+		second := first
+		second.PollInterval = 5 * time.Minute
+		a.applyInstances([]config.SourceInstance{second})
+		activeExists(a, "interval-only")
+	})
+
+	t.Run("provider settings change resets", func(t *testing.T) {
+		a := paceTestApp()
+		defer a.mgr.Stop()
+		zaiAt := func(baseURL string) config.SourceInstance {
+			inst := miniInst("mm", time.Hour)
+			inst.Kind = domain.KindZAI
+			inst.MiniMax = nil
+			inst.ZAI = &config.ZAISettings{BaseURL: baseURL}
+
+			return inst
+		}
+		a.applyInstances([]config.SourceInstance{zaiAt("https://api.z.ai")})
+		seed(a)
+		// A base-URL change is a provider-settings change: new adapter,
+		// new upstream identity, history dropped.
+		a.applyInstances([]config.SourceInstance{zaiAt("https://bigmodel.cn")})
+		if _, ok := a.pace.States()["mm"]; ok {
+			t.Error("history survived an adapter rebuild")
+		}
+	})
+
+	t.Run("removal resets", func(t *testing.T) {
+		a := paceTestApp()
+		defer a.mgr.Stop()
+		mm, other := miniInst("mm", time.Hour), miniInst("other", time.Hour)
+		a.applyInstances([]config.SourceInstance{mm, other})
+		seed(a)
+		a.applyInstances([]config.SourceInstance{other})
+		if _, ok := a.pace.States()["mm"]; ok {
+			t.Error("history survived instance removal")
+		}
+	})
+}
+
+// A pace-window-only change must recompute immediately from retained
+// history — no re-collecting, no adapter rebuild.
+func TestApplyInstancesPaceWindowRecompute(t *testing.T) {
+	a := paceTestApp()
+	defer a.mgr.Stop()
+	at := time.Unix(1770000000, 0)
+
+	wide := miniInst("mm", time.Hour)
+	a.applyInstances([]config.SourceInstance{wide})
+	a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+	a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+	activeExists := func(want pace.State, what string) {
+		t.Helper()
+		w := a.pace.States()["mm"].Windows["interval"]
+		if w.State != want {
+			t.Fatalf("%s: state = %v, want %v", what, w.State, want)
+		}
+	}
+	activeExists(pace.StateActive, "60m window")
+
+	narrow := wide
+	narrow.PaceWindow = 10 * time.Minute
+	a.applyInstances([]config.SourceInstance{narrow})
+	activeExists(pace.StateCollecting, "10m window: 30m-old endpoint left the window")
 }

@@ -29,6 +29,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/resources"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
@@ -69,6 +70,7 @@ type App struct {
 	mgr      *source.Manager
 	monitor  *monitor.Monitor
 	settings *settings.Settings
+	pace     *pace.Tracker
 
 	// loadErr records a failed document load from New; Run surfaces it.
 	// It is written once before any reader exists.
@@ -87,6 +89,10 @@ type App struct {
 	mu        sync.RWMutex // guards instances and the adapter cache
 	instances []config.SourceInstance
 	adapters  map[domain.InstanceID]adapterEntry
+	// paceWindows mirrors the pace estimation windows the tracker was last
+	// told about, so a pace-window-only change can be detected without
+	// querying the tracker.
+	paceWindows map[domain.InstanceID]time.Duration
 }
 
 // uiCoalescer lets one UI update wait while others arrive. schedule
@@ -140,16 +146,18 @@ func New() (*App, error) {
 	mgr := source.NewManager(logger)
 
 	a := &App{
-		fyneApp:   fa,
-		log:       logger,
-		client:    client,
-		creds:     creds,
-		repo:      repo,
-		mgr:       mgr,
-		instances: instances,
-		adapters:  map[domain.InstanceID]adapterEntry{},
-		loadErr:   loadErr,
-		done:      make(chan struct{}),
+		fyneApp:     fa,
+		log:         logger,
+		client:      client,
+		creds:       creds,
+		repo:        repo,
+		mgr:         mgr,
+		instances:   instances,
+		adapters:    map[domain.InstanceID]adapterEntry{},
+		pace:        pace.NewTracker(),
+		paceWindows: map[domain.InstanceID]time.Duration{},
+		loadErr:     loadErr,
+		done:        make(chan struct{}),
 	}
 	a.running.Store(true)
 
@@ -185,10 +193,11 @@ func New() (*App, error) {
 	glfw.WindowHintString(glfw.WaylandAppID, appID)
 
 	a.setupTray()
-	a.unsub = a.mgr.Subscribe(func(domain.InstanceID) {
+	a.unsub = a.mgr.Subscribe(func(id domain.InstanceID) {
 		if !a.running.Load() {
 			return
 		}
+		a.recordPace(id)
 		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
 	})
 	a.monitor.StartTicker()
@@ -368,9 +377,67 @@ func (a *App) Instances() []config.SourceInstance {
 // States implements monitor.MonitorController.
 func (a *App) States() map[domain.InstanceID]domain.Runtime { return a.mgr.States() }
 
+// PaceStates implements monitor.MonitorController: the derived usage-pace
+// estimates of the pace-capable sources (S7).
+func (a *App) PaceStates() map[domain.InstanceID]pace.InstancePaces { return a.pace.States() }
+
 // HideSensitiveInfo implements monitor.MonitorController: the global
 // privacy preference, read straight from the repository.
 func (a *App) HideSensitiveInfo() bool { return a.repo.HideSensitiveInfo() }
+
+// recordPace feeds one completed refresh into the pace tracker. It runs on
+// the manager's loop goroutine before the UI update is scheduled; the
+// tracker is mutex-guarded and touches no Fyne. Failure notifications
+// carry the retained last-good snapshot: re-recording it would fabricate
+// a flat interval (a false idle), so they are skipped and the next
+// successful poll continues the series. Sample times always come from the
+// snapshot's CollectedAt, never from receive time.
+func (a *App) recordPace(id domain.InstanceID) {
+	inst, ok := a.instanceByID(id)
+	if !ok {
+		return
+	}
+	rt, ok := a.mgr.States()[id]
+	if !ok {
+		return
+	}
+	a.recordPaceSnapshot(id, inst, rt)
+}
+
+// recordPaceSnapshot applies one runtime to the tracker: the kind-aware
+// half of recordPace, separate so tests can drive it without a live
+// manager refresh.
+func (a *App) recordPaceSnapshot(id domain.InstanceID, inst config.SourceInstance, rt domain.Runtime) {
+	if !config.PaceCapable(inst.Kind) {
+		return
+	}
+	if rt.LastError != nil || rt.Snapshot == nil {
+		return
+	}
+	switch snap := rt.Snapshot.(type) {
+	case domain.QuotaSnapshot:
+		a.pace.ObserveQuota(id, snap.CollectedAt, snap.Windows)
+	case domain.CodexSnapshot:
+		a.pace.ObserveQuota(id, snap.CollectedAt, snap.Windows)
+	case domain.OpenRouterSnapshot:
+		if snap.Key != nil {
+			a.pace.ObserveSpend(id, snap.CollectedAt, snap.Key.UsageTotal)
+		}
+	}
+}
+
+// instanceByID resolves one configured instance under the instances lock.
+func (a *App) instanceByID(id domain.InstanceID) (config.SourceInstance, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, inst := range a.instances {
+		if inst.ID == id {
+			return inst, true
+		}
+	}
+
+	return config.SourceInstance{}, false
+}
 
 // SetHideSensitiveInfo persists the privacy preference and re-renders the
 // monitor so visible sensitive values follow it immediately. It is called
@@ -451,6 +518,10 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 		}
 		entry, cached := a.adapters[inst.ID]
 		if !cached || !config.SameSettings(entry.settings, settings) {
+			// A new adapter means a new upstream identity: the pace
+			// history of the old one must never bleed into the new series
+			// (base-URL change, credential change, …).
+			a.pace.Reset(inst.ID)
 			src, err := def.Build(inst, deps)
 			if err != nil {
 				a.log.Error("building source instance failed; instance skipped", "instance", string(inst.ID), "error", err)
@@ -468,9 +539,42 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 		}
 	}
 
+	// Instances that disappeared (or failed to build) lose their pace
+	// history with their adapter.
+	for id := range a.adapters {
+		if _, ok := live[id]; !ok {
+			a.pace.Reset(id)
+		}
+	}
 	a.adapters = live
 	a.mgr.Apply(regs)
 	a.instances = list
+
+	// Pace estimation windows apply without touching adapters or history:
+	// estimates are computed at read time, so a changed window re-renders
+	// and takes effect immediately. Interval-only, rename and
+	// enable/disable edits land here with an unchanged window and do not
+	// even re-render.
+	rePace := false
+	for _, inst := range list {
+		if !config.PaceCapable(inst.Kind) {
+			continue
+		}
+		if prev, known := a.paceWindows[inst.ID]; known && prev == inst.PaceWindow {
+			continue
+		}
+		a.pace.SetWindow(inst.ID, inst.PaceWindow)
+		a.paceWindows[inst.ID] = inst.PaceWindow
+		rePace = true
+	}
+	for id := range a.paceWindows {
+		if _, ok := live[id]; !ok {
+			delete(a.paceWindows, id)
+		}
+	}
+	if rePace && a.running.Load() {
+		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
+	}
 }
 
 // quit is the single shutdown path (tray Quit). It is idempotent: the

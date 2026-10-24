@@ -13,6 +13,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
@@ -22,9 +23,12 @@ type stubCtrl struct{}
 
 func (stubCtrl) Instances() []config.SourceInstance           { return nil }
 func (stubCtrl) States() map[domain.InstanceID]domain.Runtime { return nil }
-func (stubCtrl) RefreshAll()                                  {}
-func (stubCtrl) OpenSettings()                                {}
-func (stubCtrl) HideSensitiveInfo() bool                      { return true }
+func (stubCtrl) PaceStates() map[domain.InstanceID]pace.InstancePaces {
+	return nil
+}
+func (stubCtrl) RefreshAll()             {}
+func (stubCtrl) OpenSettings()           {}
+func (stubCtrl) HideSensitiveInfo() bool { return true }
 
 // The actions overlay must keep its buttons at their natural height: a
 // Stack stretches its children to the full window size and an HBox then
