@@ -66,6 +66,10 @@ type sourceRecord struct {
 	Name         string `json:"name"`
 	Enabled      bool   `json:"enabled"`
 	PollInterval string `json:"poll_interval"`
+	// PaceWindow is present only for pace-capable kinds; an empty value and
+	// its absence are both the default (S7). Additive field: the source
+	// document schema stays version 1, and older builds ignore it.
+	PaceWindow string `json:"pace_window,omitempty"`
 
 	// Exactly one provider block is set, matching Kind.
 	AMDGPUWeb  *amdGPUWebRecord  `json:"amdgputop_web,omitempty"`
@@ -209,6 +213,19 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 		Enabled:      rec.Enabled,
 		PollInterval: interval,
 	}
+	if PaceCapable(kind) {
+		// Absent and zero both mean the default; an off-list stored value
+		// snaps to the nearest preset like intervals do. Loads always carry
+		// an explicit, on-list window for capable kinds.
+		var window time.Duration
+		if rec.PaceWindow != "" {
+			var err error
+			if window, err = time.ParseDuration(rec.PaceWindow); err != nil {
+				return SourceInstance{}, fmt.Errorf("pace window %q: %w", rec.PaceWindow, err)
+			}
+		}
+		inst.PaceWindow = normalizePaceWindow(window)
+	}
 	switch kind {
 	case domain.KindAMDGPUWeb:
 		if rec.AMDGPUWeb != nil {
@@ -256,6 +273,9 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 		Name:         inst.Name,
 		Enabled:      inst.Enabled,
 		PollInterval: inst.PollInterval.String(),
+	}
+	if PaceCapable(inst.Kind) && inst.PaceWindow != 0 { // absence stays the default
+		rec.PaceWindow = inst.PaceWindow.String()
 	}
 	switch inst.Kind {
 	case domain.KindAMDGPUWeb:

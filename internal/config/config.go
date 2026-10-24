@@ -43,6 +43,17 @@ var (
 	DefaultHindsightInterval = 10 * time.Second
 	DefaultRemoteInterval    = 60 * time.Second
 	DefaultCodexInterval     = 5 * time.Minute
+
+	// PaceWindows are the offered usage-pace estimation windows (S7): how
+	// much recent history the pace average spans. They are evenly divisible
+	// by every remote poll-interval preset so a window boundary aligns with
+	// whole samples.
+	PaceWindows = []time.Duration{10 * time.Minute, 20 * time.Minute, 30 * time.Minute, 60 * time.Minute}
+	// DefaultPaceWindow balances smoothing against reaction time: long
+	// enough to average a burst, short enough to follow the user starting
+	// or stopping agents within minutes (the idle rule handles the stop
+	// case regardless).
+	DefaultPaceWindow = 20 * time.Minute
 )
 
 // ValidationError describes one invalid field.

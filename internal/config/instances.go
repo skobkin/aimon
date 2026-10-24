@@ -38,6 +38,9 @@ type SourceInstance struct {
 	Name         string
 	Enabled      bool
 	PollInterval time.Duration
+	// PaceWindow is the trailing span pace averages over (S7). Meaningful
+	// only for pace-capable kinds (PaceCapable); zero means the default.
+	PaceWindow time.Duration
 
 	// Exactly one provider settings pointer is non-nil, matching Kind.
 	AMDGPUWeb  *AMDGPUWebSettings
@@ -310,8 +313,39 @@ func (i SourceInstance) Validate() []ValidationError {
 	}
 
 	errs = append(errs, validateInterval(label, i.PollInterval, KindIntervals(i.Kind))...)
+	if PaceCapable(i.Kind) {
+		errs = append(errs, validatePaceWindow(label, i.PaceWindow, PaceWindows)...)
+	}
 
 	return errs
+}
+
+// validatePaceWindow accepts the zero value (meaning the default) or an
+// offered preset; anything else is rejected the same way poll intervals are.
+func validatePaceWindow(source string, d time.Duration, presets []time.Duration) []ValidationError {
+	if d == 0 {
+		return nil
+	}
+	for _, p := range presets {
+		if d == p {
+			return nil
+		}
+	}
+
+	return []ValidationError{{Source: source, Field: "Pace window", Message: fmt.Sprintf("must be one of %s", intervalList(presets))}}
+}
+
+// PaceCapable reports whether a kind carries quota/spend series the pace
+// feature can estimate (S7): the three subscription-quota providers plus
+// OpenRouter's per-key spend. Local sources never show pace UI and their
+// PaceWindow field is never read.
+func PaceCapable(kind domain.SourceKind) bool {
+	switch kind {
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindOpenRouter:
+		return true
+	}
+
+	return false
 }
 
 func mismatchSettings(label string) ValidationError {
@@ -371,6 +405,23 @@ func normalizeInterval(kind domain.SourceKind, d time.Duration) time.Duration {
 	}
 
 	return snapInterval(presets, d)
+}
+
+// normalizePaceWindow snaps a stored pace window onto the presets, mapping
+// zero (never configured) to the default. Load-time only, mirroring
+// normalizeInterval: a document written when the preset list differed must
+// still load. Only called for pace-capable kinds.
+func normalizePaceWindow(d time.Duration) time.Duration {
+	if d == 0 {
+		return DefaultPaceWindow
+	}
+	for _, p := range PaceWindows {
+		if d == p {
+			return d
+		}
+	}
+
+	return snapInterval(PaceWindows, d)
 }
 
 // snapInterval returns the preset nearest to d. An exact tie between two
