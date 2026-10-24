@@ -6,6 +6,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 )
 
 // codexSnap builds a Codex snapshot for the presentation tests: a 5-hour
@@ -35,7 +36,7 @@ func codexInstance() config.SourceInstance {
 }
 
 func TestBuildCodexVMWindows(t *testing.T) {
-	vm := BuildCodexVM(codexSnap(), now, false)
+	vm := BuildCodexVM(codexSnap(), pace.InstancePaces{}, now, false)
 	if len(vm.Windows) != 2 {
 		t.Fatalf("windows = %d, want 2", len(vm.Windows))
 	}
@@ -55,7 +56,7 @@ func TestBuildCodexVMWindows(t *testing.T) {
 }
 
 func TestBuildCodexVMAccountRows(t *testing.T) {
-	vm := BuildCodexVM(codexSnap(), now, true)
+	vm := BuildCodexVM(codexSnap(), pace.InstancePaces{}, now, true)
 	if len(vm.Account) != 2 {
 		t.Fatalf("account rows = %+v, want Plan and Reset credits", vm.Account)
 	}
@@ -72,13 +73,13 @@ func TestBuildCodexVMAbsentOptionalFieldsOmitted(t *testing.T) {
 	snap.PlanType = ""
 	snap.ResetCreditsAvailable = nil
 	snap.RateLimitReachedType = ""
-	vm := BuildCodexVM(snap, now, true)
+	vm := BuildCodexVM(snap, pace.InstancePaces{}, now, true)
 	if len(vm.Account) != 0 {
 		t.Fatalf("absent metadata produced rows: %+v", vm.Account)
 	}
 
 	snap.RateLimitReachedType = "primary"
-	vm = BuildCodexVM(snap, now, true)
+	vm = BuildCodexVM(snap, pace.InstancePaces{}, now, true)
 	if len(vm.Account) != 1 {
 		t.Fatalf("reached rows = %+v, want one", vm.Account)
 	}
@@ -88,14 +89,14 @@ func TestBuildCodexVMAbsentOptionalFieldsOmitted(t *testing.T) {
 
 	// Unknown plan names pass through unchanged and never as a fake one.
 	snap.PlanType = "team"
-	vm = BuildCodexVM(snap, now, true)
+	vm = BuildCodexVM(snap, pace.InstancePaces{}, now, true)
 	if vm.Account[0].Value != "team" {
 		t.Errorf("plan row = %+v, want the raw name", vm.Account[0])
 	}
 }
 
 func TestBuildCodexOverview(t *testing.T) {
-	vm := BuildCodexOverview(codexSnap(), now)
+	vm := BuildCodexOverview(codexSnap(), pace.InstancePaces{}, now)
 	if !vm.HasData || len(vm.Windows) != 2 {
 		t.Fatalf("overview = %+v, want two donuts", vm)
 	}
@@ -113,7 +114,7 @@ func TestBuildCodexOverview(t *testing.T) {
 	// One usable window renders alone, without a fake second donut.
 	single := codexSnap()
 	single.Windows = single.Windows[:1]
-	vm = BuildCodexOverview(single, now)
+	vm = BuildCodexOverview(single, pace.InstancePaces{}, now)
 	if len(vm.Windows) != 1 {
 		t.Fatalf("single-window overview = %+v", vm)
 	}
@@ -121,7 +122,7 @@ func TestBuildCodexOverview(t *testing.T) {
 
 func TestBuildCodexCardsDispatch(t *testing.T) {
 	rt := domain.Runtime{Enabled: true, LastSuccessAt: now, Snapshot: codexSnap()}
-	card := BuildCard(codexInstance(), rt, now, true)
+	card := BuildCard(codexInstance(), rt, pace.InstancePaces{}, now, true)
 	if card.Kind != KindQuota {
 		t.Fatalf("card kind = %q, want %q", card.Kind, KindQuota)
 	}
@@ -129,7 +130,7 @@ func TestBuildCodexCardsDispatch(t *testing.T) {
 		t.Fatalf("detail card = %+v", card.Quota)
 	}
 
-	overview := BuildOverviewCard(codexInstance(), rt, now)
+	overview := BuildOverviewCard(codexInstance(), rt, pace.InstancePaces{}, now)
 	if overview.Kind != OverviewQuota {
 		t.Fatalf("overview kind = %q, want %q", overview.Kind, OverviewQuota)
 	}
@@ -147,7 +148,7 @@ func TestBuildCodexCardsDispatch(t *testing.T) {
 func TestCodexOverviewTitleCarriesPlan(t *testing.T) {
 	build := func(snap domain.CodexSnapshot) OverviewCardVM {
 		return BuildOverviewCard(codexInstance(),
-			domain.Runtime{Enabled: true, LastSuccessAt: now, Snapshot: snap}, now)
+			domain.Runtime{Enabled: true, LastSuccessAt: now, Snapshot: snap}, pace.InstancePaces{}, now)
 	}
 
 	if got := build(codexSnap()).Title; got != "ChatGPT Codex (Plus)" {
@@ -168,7 +169,7 @@ func TestCodexOverviewTitleCarriesPlan(t *testing.T) {
 
 	// Before the first snapshot there is no plan to show.
 	if got := BuildOverviewCard(codexInstance(),
-		domain.Runtime{Enabled: true, LastSuccessAt: now}, now).Title; got != "ChatGPT Codex" {
+		domain.Runtime{Enabled: true, LastSuccessAt: now}, pace.InstancePaces{}, now).Title; got != "ChatGPT Codex" {
 		t.Errorf("title before first snapshot = %q, want the bare source name", got)
 	}
 }
@@ -211,7 +212,7 @@ func TestQuotaKindsStayUntouched(t *testing.T) {
 			{ID: "interval", Name: "5-hour", UsedFraction: 0.31, RemainingFraction: 0.69},
 		},
 	}
-	vm := BuildQuotaVM(snap, now, true)
+	vm := BuildQuotaVM(snap, pace.InstancePaces{}, now, true)
 	if len(vm.Account) != 0 {
 		t.Fatalf("minimax account rows = %+v", vm.Account)
 	}

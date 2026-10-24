@@ -363,7 +363,7 @@ func TestBuildTabsWithHindsightInstance(t *testing.T) {
 		instance.ID: {Enabled: true, Snapshot: hindsightSnap(), LastSuccessAt: now.Add(-4 * time.Second)},
 	}
 
-	local := BuildLocalTab([]config.SourceInstance{instance}, states, now)
+	local := BuildLocalTab([]config.SourceInstance{instance}, states, nil, now)
 	if len(local) != 1 {
 		t.Fatalf("local tab = %d cards, want 1", len(local))
 	}
@@ -371,7 +371,7 @@ func TestBuildTabsWithHindsightInstance(t *testing.T) {
 		t.Errorf("local card = kind %q hasData %v", local[0].Kind, local[0].Service.HasData)
 	}
 
-	overview := BuildOverview([]config.SourceInstance{instance}, states, now)
+	overview := BuildOverview([]config.SourceInstance{instance}, states, nil, now)
 	if len(overview.LocalCards) != 1 {
 		t.Fatalf("overview = %d local cards, want 1", len(overview.LocalCards))
 	}

@@ -15,6 +15,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
@@ -82,6 +83,10 @@ type QuotaWindowVM struct {
 	Secondary string
 	Used      float64
 	Remaining float64
+	// Pace carries the derived speed/projection for this window (S7); nil
+	// when the tracker has no estimate for it (non-pace kinds, or no data
+	// yet) — the row then renders exactly as before.
+	Pace *PaceVM
 }
 
 // QuotaVM carries the window rows of one quota snapshot. Account holds the
@@ -122,6 +127,9 @@ type SpendVM struct {
 	Usage   []MoneyMetricVM
 	Account []MoneyMetricVM
 	Limit   *SpendLimitVM
+	// Pace carries the derived spend speed (S7); nil without a spend
+	// estimate. Never projectable — OpenRouter has no reset time.
+	Pace    *PaceVM
 	HasData bool
 }
 
@@ -217,6 +225,9 @@ type OverviewDonutVM struct {
 	// ResetAt is the absolute instant ResetText was derived from, so the
 	// rendered countdown line can age in place; nil means no countdown.
 	ResetAt *time.Time
+	// Pace carries the derived projection for this window (S7); the
+	// Overview renders only the projection bar, never the speed text.
+	Pace *PaceVM
 }
 
 // QuotaOverviewVM carries up to two headline quota donuts.
@@ -269,18 +280,19 @@ const overviewSwapLines = 3
 // BuildOverview derives the overview tab from the configured instances and
 // their runtimes. Cards follow the configured order within each category;
 // disabled instances are omitted entirely; enabled ones appear even before
-// their first snapshot lands.
-func BuildOverview(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, now time.Time) OverviewVM {
+// their first snapshot lands. paces carries the derived pace estimates by
+// instance ID (nil is valid: pace is then simply absent).
+func BuildOverview(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, paces map[domain.InstanceID]pace.InstancePaces, now time.Time) OverviewVM {
 	vm := OverviewVM{
-		LocalCards:  buildOverviewCards(instances, domain.CategoryLocal, states, now),
-		RemoteCards: buildOverviewCards(instances, domain.CategoryRemote, states, now),
+		LocalCards:  buildOverviewCards(instances, domain.CategoryLocal, states, paces, now),
+		RemoteCards: buildOverviewCards(instances, domain.CategoryRemote, states, paces, now),
 	}
 	vm.NothingEnabled = len(vm.LocalCards) == 0 && len(vm.RemoteCards) == 0
 
 	return vm
 }
 
-func buildOverviewCards(instances []config.SourceInstance, category domain.Category, states map[domain.InstanceID]domain.Runtime, now time.Time) []OverviewCardVM {
+func buildOverviewCards(instances []config.SourceInstance, category domain.Category, states map[domain.InstanceID]domain.Runtime, paces map[domain.InstanceID]pace.InstancePaces, now time.Time) []OverviewCardVM {
 	cards := make([]OverviewCardVM, 0, len(instances))
 	for _, inst := range instances {
 		if inst.Kind.Category() != category {
@@ -290,23 +302,23 @@ func buildOverviewCards(instances []config.SourceInstance, category domain.Categ
 		if !ok || !rt.Enabled {
 			continue
 		}
-		cards = append(cards, BuildOverviewCard(inst, rt, now))
+		cards = append(cards, BuildOverviewCard(inst, rt, paces[inst.ID], now))
 	}
 
 	return cards
 }
 
 // BuildLocalTab derives the local tab cards (full detail bodies).
-func BuildLocalTab(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, now time.Time) []CardVM {
-	return buildCards(instances, domain.CategoryLocal, states, now)
+func BuildLocalTab(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, paces map[domain.InstanceID]pace.InstancePaces, now time.Time) []CardVM {
+	return buildCards(instances, domain.CategoryLocal, states, paces, now)
 }
 
 // BuildRemoteTab derives the remote tab cards (full detail bodies).
-func BuildRemoteTab(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, now time.Time) []CardVM {
-	return buildCards(instances, domain.CategoryRemote, states, now)
+func BuildRemoteTab(instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, paces map[domain.InstanceID]pace.InstancePaces, now time.Time) []CardVM {
+	return buildCards(instances, domain.CategoryRemote, states, paces, now)
 }
 
-func buildCards(instances []config.SourceInstance, category domain.Category, states map[domain.InstanceID]domain.Runtime, now time.Time) []CardVM {
+func buildCards(instances []config.SourceInstance, category domain.Category, states map[domain.InstanceID]domain.Runtime, paces map[domain.InstanceID]pace.InstancePaces, now time.Time) []CardVM {
 	cards := make([]CardVM, 0, len(instances))
 	for _, inst := range instances {
 		if inst.Kind.Category() != category {
@@ -316,7 +328,7 @@ func buildCards(instances []config.SourceInstance, category domain.Category, sta
 		if !ok || !rt.Enabled {
 			continue
 		}
-		cards = append(cards, BuildCard(inst, rt, now, true))
+		cards = append(cards, BuildCard(inst, rt, paces[inst.ID], now, true))
 	}
 
 	return cards
@@ -362,8 +374,9 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 
 // BuildCard derives one source card. The title is the instance's
 // user-chosen name; the body is filled only when a snapshot of the
-// matching type has landed.
-func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, detail bool) CardVM {
+// matching type has landed. ip carries the instance's pace estimates (the
+// zero value means none).
+func BuildCard(inst config.SourceInstance, rt domain.Runtime, ip pace.InstancePaces, now time.Time, detail bool) CardVM {
 	card := CardVM{
 		Instance: inst.ID,
 		Kind:     cardKind(inst.Kind),
@@ -378,11 +391,11 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, det
 	case domain.LlamaSwapSnapshot:
 		card.Swap = BuildSwapVM(snap, detail)
 	case domain.QuotaSnapshot:
-		card.Quota = BuildQuotaVM(snap, now, detail)
+		card.Quota = BuildQuotaVM(snap, ip, now, detail)
 	case domain.CodexSnapshot:
-		card.Quota = BuildCodexVM(snap, now, detail)
+		card.Quota = BuildCodexVM(snap, ip, now, detail)
 	case domain.OpenRouterSnapshot:
-		card.Spend = BuildSpendVM(snap, detail)
+		card.Spend = BuildSpendVM(snap, ip, detail)
 	case domain.HindsightSnapshot:
 		card.Service = BuildServiceVM(snap, now)
 	}
@@ -393,7 +406,7 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, now time.Time, det
 // BuildOverviewCard derives one overview card from an instance and its
 // runtime. The title is the instance's user-chosen name; the body is
 // filled only when a snapshot of the matching type has landed.
-func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.Time) OverviewCardVM {
+func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, ip pace.InstancePaces, now time.Time) OverviewCardVM {
 	card := OverviewCardVM{
 		Instance: inst.ID,
 		Kind:     overviewKind(inst.Kind),
@@ -407,9 +420,9 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, now time.T
 	case domain.LlamaSwapSnapshot:
 		card.Runtime = BuildRuntimeOverview(snap)
 	case domain.QuotaSnapshot:
-		card.Quota = BuildQuotaOverview(snap, now)
+		card.Quota = BuildQuotaOverview(snap, ip, now)
 	case domain.CodexSnapshot:
-		card.Quota = BuildCodexOverview(snap, now)
+		card.Quota = BuildCodexOverview(snap, ip, now)
 		// The plan name joins the card title ("ChatGPT Codex (Plus)") instead
 		// of taking a line of its own, matching the other usage-based
 		// providers' single-title cards. Only a landed snapshot knows it.
@@ -483,19 +496,25 @@ func BuildRuntimeOverview(snap domain.LlamaSwapSnapshot) RuntimeOverviewVM {
 	return vm
 }
 
-// BuildQuotaOverview derives up to two headline quota donuts.
-func BuildQuotaOverview(snap domain.QuotaSnapshot, now time.Time) QuotaOverviewVM {
+// BuildQuotaOverview derives up to two headline quota donuts. Pace
+// estimates attach to the headline windows only — the Overview shows the
+// projection of the windows it already displays.
+func BuildQuotaOverview(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Time) QuotaOverviewVM {
 	vm := QuotaOverviewVM{}
 	headlines := selectHeadlineWindows(snap.Windows)
 	for _, w := range headlines {
-		vm.Windows = append(vm.Windows, OverviewDonutVM{
+		donut := OverviewDonutVM{
 			Label:     shortLabel(w),
 			PctText:   formatPctOnly(w.UsedFraction),
 			Used:      w.UsedFraction,
 			Remaining: w.RemainingFraction,
 			ResetText: FormatResetCountdown(w.ResetAt, now),
 			ResetAt:   w.ResetAt,
-		})
+		}
+		if est, ok := ip.Windows[w.ID]; ok {
+			donut.Pace = buildPaceVM(est, now)
+		}
+		vm.Windows = append(vm.Windows, donut)
 	}
 	vm.HasData = len(vm.Windows) > 0
 
@@ -725,8 +744,10 @@ func BuildSwapVM(snap domain.LlamaSwapSnapshot, detail bool) SwapVM {
 }
 
 // BuildQuotaVM derives the quota window rows. Secondary (raw counts) is a
-// detail-tab extra; the overview shows the used lines only.
-func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM {
+// detail-tab extra; the overview shows the used lines only. A window with
+// a tracker estimate carries its pace; without one the row renders exactly
+// as before.
+func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Time, detail bool) QuotaVM {
 	vm := QuotaVM{Windows: make([]QuotaWindowVM, 0, len(snap.Windows))}
 	for _, w := range snap.Windows {
 		row := QuotaWindowVM{
@@ -740,6 +761,9 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM
 		if detail {
 			row.Secondary = formatCounts(w)
 		}
+		if est, ok := ip.Windows[w.ID]; ok {
+			row.Pace = buildPaceVM(est, now)
+		}
 		vm.Windows = append(vm.Windows, row)
 	}
 
@@ -751,17 +775,21 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, now time.Time, detail bool) QuotaVM
 // (plan, reset credits, rate-limit-reached). Absent optional fields are
 // omitted, never faked (docs/S6_UI_UX.md §Detail); no row is
 // money-sensitive, so the privacy setting never touches them.
-func BuildCodexVM(snap domain.CodexSnapshot, now time.Time, detail bool) QuotaVM {
+func BuildCodexVM(snap domain.CodexSnapshot, ip pace.InstancePaces, now time.Time, detail bool) QuotaVM {
 	vm := QuotaVM{Windows: make([]QuotaWindowVM, 0, len(snap.Windows))}
 	for _, w := range snap.Windows {
-		vm.Windows = append(vm.Windows, QuotaWindowVM{
+		row := QuotaWindowVM{
 			Name:      w.Name,
 			UsedText:  FormatUsed(w.UsedFraction),
 			ResetText: FormatResetCountdown(w.ResetAt, now),
 			ResetAt:   w.ResetAt,
 			Used:      w.UsedFraction,
 			Remaining: w.RemainingFraction,
-		})
+		}
+		if est, ok := ip.Windows[w.ID]; ok {
+			row.Pace = buildPaceVM(est, now)
+		}
+		vm.Windows = append(vm.Windows, row)
 	}
 	if !detail {
 		return vm
@@ -788,18 +816,22 @@ func BuildCodexVM(snap domain.CodexSnapshot, now time.Time, detail bool) QuotaVM
 
 // BuildCodexOverview derives the compact overview card: the shared headline
 // donuts. The plan name is not part of the body — the card title carries it.
-func BuildCodexOverview(snap domain.CodexSnapshot, now time.Time) QuotaOverviewVM {
+func BuildCodexOverview(snap domain.CodexSnapshot, ip pace.InstancePaces, now time.Time) QuotaOverviewVM {
 	vm := QuotaOverviewVM{}
 	headlines := selectHeadlineWindows(snap.Windows)
 	for _, w := range headlines {
-		vm.Windows = append(vm.Windows, OverviewDonutVM{
+		donut := OverviewDonutVM{
 			Label:     shortLabel(w),
 			PctText:   formatPctOnly(w.UsedFraction),
 			Used:      w.UsedFraction,
 			Remaining: w.RemainingFraction,
 			ResetText: FormatResetCountdown(w.ResetAt, now),
 			ResetAt:   w.ResetAt,
-		})
+		}
+		if est, ok := ip.Windows[w.ID]; ok {
+			donut.Pace = buildPaceVM(est, now)
+		}
+		vm.Windows = append(vm.Windows, donut)
 	}
 	vm.HasData = len(vm.Windows) > 0
 
@@ -826,8 +858,9 @@ func formatCounts(w domain.QuotaWindow) string {
 
 // BuildSpendVM derives an OpenRouter card's usage, limit and account rows.
 // The Total line is a detail-tab extra; account values are always marked
-// sensitive (the global privacy setting conceals them).
-func BuildSpendVM(snap domain.OpenRouterSnapshot, detail bool) SpendVM {
+// sensitive (the global privacy setting conceals them). ip.Spend attaches
+// the derived spend speed when the tracker has an estimate.
+func BuildSpendVM(snap domain.OpenRouterSnapshot, ip pace.InstancePaces, detail bool) SpendVM {
 	var vm SpendVM
 
 	if snap.Key != nil {
@@ -850,15 +883,19 @@ func BuildSpendVM(snap domain.OpenRouterSnapshot, detail bool) SpendVM {
 			sensitiveMoneyRow("Account usage", a.TotalUsage),
 		}
 	}
+	if ip.Spend != nil {
+		vm.Pace = buildSpendPaceVM(*ip.Spend)
+	}
 	vm.HasData = snap.Key != nil || snap.Account != nil
 
 	return vm
 }
 
 // BuildSpendOverview derives the compact overview variant: no Total row,
-// the Balance surfaced as its own optional row.
+// the Balance surfaced as its own optional row. No pace — the Overview
+// spend card stays as compact as it is today (S7_UI_UX).
 func BuildSpendOverview(snap domain.OpenRouterSnapshot) SpendOverviewVM {
-	detail := BuildSpendVM(snap, false)
+	detail := BuildSpendVM(snap, pace.InstancePaces{}, false)
 	ov := SpendOverviewVM{Usage: detail.Usage, Limit: detail.Limit}
 	if len(detail.Account) > 0 {
 		balance := detail.Account[0]

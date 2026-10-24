@@ -7,6 +7,7 @@ import (
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 )
 
@@ -331,7 +332,7 @@ func TestBuildQuotaVM(t *testing.T) {
 		},
 	}
 
-	over := BuildQuotaVM(snap, now, false)
+	over := BuildQuotaVM(snap, pace.InstancePaces{}, now, false)
 	if len(over.Windows) != 2 {
 		t.Fatalf("windows = %d", len(over.Windows))
 	}
@@ -339,7 +340,7 @@ func TestBuildQuotaVM(t *testing.T) {
 		t.Error("overview must not show raw counts")
 	}
 
-	detail := BuildQuotaVM(snap, now, true)
+	detail := BuildQuotaVM(snap, pace.InstancePaces{}, now, true)
 	if detail.Windows[0].Secondary != "310 / 1000 requests" {
 		t.Errorf("secondary = %q", detail.Windows[0].Secondary)
 	}
@@ -367,7 +368,7 @@ func TestBuildOverviewOmitsDisabled(t *testing.T) {
 		"mm1":   {Enabled: true, LastError: &source.Error{Category: source.CatConnection, Detail: "refused"}},
 	}
 
-	vm := BuildOverview(instances, states, now)
+	vm := BuildOverview(instances, states, nil, now)
 	if len(vm.LocalCards) != 1 {
 		t.Fatalf("local cards = %d, want 1 (llama-swap disabled)", len(vm.LocalCards))
 	}
@@ -395,7 +396,7 @@ func TestBuildOverviewOmitsDisabled(t *testing.T) {
 }
 
 func TestBuildOverviewNothingEnabled(t *testing.T) {
-	vm := BuildOverview(nil, map[domain.InstanceID]domain.Runtime{}, now)
+	vm := BuildOverview(nil, map[domain.InstanceID]domain.Runtime{}, nil, now)
 	if !vm.NothingEnabled {
 		t.Error("empty states must set NothingEnabled")
 	}
@@ -403,6 +404,7 @@ func TestBuildOverviewNothingEnabled(t *testing.T) {
 	vm = BuildOverview(
 		[]config.SourceInstance{inst("z1", "Z.AI", domain.KindZAI, true)},
 		map[domain.InstanceID]domain.Runtime{"z1": {Enabled: false}},
+		nil,
 		now,
 	)
 	if !vm.NothingEnabled {
@@ -427,7 +429,7 @@ func TestBuildOverviewTwoSameKindAndConfiguredOrder(t *testing.T) {
 		"mm2":  {Enabled: true, LastSuccessAt: now},
 	}
 
-	vm := BuildOverview(instances, states, now)
+	vm := BuildOverview(instances, states, nil, now)
 	if len(vm.LocalCards) != 1 || vm.LocalCards[0].Title != "GPU server" {
 		t.Fatalf("local cards = %+v, want only GPU server", vm.LocalCards)
 	}
@@ -446,7 +448,7 @@ func TestBuildOverviewTwoSameKindAndConfiguredOrder(t *testing.T) {
 		}
 	}
 
-	remote := BuildRemoteTab(instances, states, now)
+	remote := BuildRemoteTab(instances, states, nil, now)
 	if len(remote) != 3 {
 		t.Fatalf("remote tab = %d cards, want 3", len(remote))
 	}
@@ -465,11 +467,11 @@ func TestBuildLocalAndRemoteTabs(t *testing.T) {
 		"z1":    {Enabled: true, LastSuccessAt: now, Snapshot: domain.QuotaSnapshot{Windows: []domain.QuotaWindow{{ID: "tokens-5h", Name: "5-hour", RemainingFraction: 0.58, UsedFraction: 0.42}}}},
 	}
 
-	local := BuildLocalTab(instances, states, now)
+	local := BuildLocalTab(instances, states, nil, now)
 	if len(local) != 1 || local[0].Kind != KindSwap || local[0].Title != "swap" {
 		t.Fatalf("local tab = %+v", local)
 	}
-	remote := BuildRemoteTab(instances, states, now)
+	remote := BuildRemoteTab(instances, states, nil, now)
 	if len(remote) != 1 || remote[0].Kind != KindQuota || remote[0].Title != "Z.AI" {
 		t.Fatalf("remote tab = %+v", remote)
 	}
@@ -477,10 +479,10 @@ func TestBuildLocalAndRemoteTabs(t *testing.T) {
 		t.Errorf("used = %q", w.UsedText)
 	}
 
-	if got := BuildLocalTab(nil, map[domain.InstanceID]domain.Runtime{}, now); len(got) != 0 {
+	if got := BuildLocalTab(nil, map[domain.InstanceID]domain.Runtime{}, nil, now); len(got) != 0 {
 		t.Errorf("empty local tab = %+v", got)
 	}
-	if got := BuildRemoteTab(nil, map[domain.InstanceID]domain.Runtime{}, now); len(got) != 0 {
+	if got := BuildRemoteTab(nil, map[domain.InstanceID]domain.Runtime{}, nil, now); len(got) != 0 {
 		t.Errorf("empty remote tab = %+v", got)
 	}
 }
@@ -520,7 +522,7 @@ func TestBuildQuotaVMResetText(t *testing.T) {
 		},
 	}
 
-	vm := BuildQuotaVM(snap, now, true)
+	vm := BuildQuotaVM(snap, pace.InstancePaces{}, now, true)
 	if vm.Windows[0].ResetText != "2h14m" {
 		t.Errorf("interval reset text = %q, want \"2h14m\"", vm.Windows[0].ResetText)
 	}
@@ -545,7 +547,7 @@ func TestQuotaVMsCarryResetAt(t *testing.T) {
 		},
 	}
 
-	detail := BuildQuotaVM(snap, now, true)
+	detail := BuildQuotaVM(snap, pace.InstancePaces{}, now, true)
 	if got := detail.Windows[0].ResetAt; got == nil || !got.Equal(reset) {
 		t.Errorf("detail ResetAt = %v, want %v", got, reset)
 	}
@@ -553,7 +555,7 @@ func TestQuotaVMsCarryResetAt(t *testing.T) {
 		t.Errorf("window without reset carries ResetAt %v, want nil", got)
 	}
 
-	over := BuildQuotaOverview(snap, now)
+	over := BuildQuotaOverview(snap, pace.InstancePaces{}, now)
 	// Headline selection keeps the 5h window (priority 0) first.
 	if got := over.Windows[0].ResetAt; got == nil || !got.Equal(reset) {
 		t.Errorf("overview ResetAt = %v, want %v", got, reset)
@@ -654,7 +656,7 @@ func TestBuildQuotaOverview(t *testing.T) {
 		},
 	}
 
-	vm := BuildQuotaOverview(snap, now)
+	vm := BuildQuotaOverview(snap, pace.InstancePaces{}, now)
 	if !vm.HasData {
 		t.Error("should have data")
 	}
@@ -676,7 +678,7 @@ func TestBuildQuotaOverview(t *testing.T) {
 	}
 
 	// No windows.
-	vm = BuildQuotaOverview(domain.QuotaSnapshot{}, now)
+	vm = BuildQuotaOverview(domain.QuotaSnapshot{}, pace.InstancePaces{}, now)
 	if vm.HasData {
 		t.Error("no windows should not have data")
 	}
@@ -698,7 +700,7 @@ func TestZAINormalizedWindowsRender(t *testing.T) {
 	}
 
 	// Remote detail rows.
-	detail := BuildQuotaVM(snap, now, true)
+	detail := BuildQuotaVM(snap, pace.InstancePaces{}, now, true)
 	if len(detail.Windows) != 2 {
 		t.Fatalf("detail windows = %d, want 2", len(detail.Windows))
 	}
@@ -716,7 +718,7 @@ func TestZAINormalizedWindowsRender(t *testing.T) {
 	}
 
 	// Overview donuts.
-	ov := BuildQuotaOverview(snap, now)
+	ov := BuildQuotaOverview(snap, pace.InstancePaces{}, now)
 	if len(ov.Windows) != 2 {
 		t.Fatalf("overview windows = %d, want 2", len(ov.Windows))
 	}
@@ -815,7 +817,7 @@ func orSnap(key *domain.OpenRouterKeyUsage, acct *domain.OpenRouterAccountCredit
 }
 
 func TestBuildSpendVMAPIOnlyDetail(t *testing.T) {
-	vm := BuildSpendVM(orSnap(orKey(), nil), true)
+	vm := BuildSpendVM(orSnap(orKey(), nil), pace.InstancePaces{}, true)
 
 	if !vm.HasData || len(vm.Account) != 0 {
 		t.Fatalf("api-only vm = %+v", vm)
@@ -854,7 +856,7 @@ func TestBuildSpendVMOverviewOmitsTotal(t *testing.T) {
 
 func TestBuildSpendVMAccountRowsAreSensitive(t *testing.T) {
 	acct := &domain.OpenRouterAccountCredits{TotalCredits: 105.89, TotalUsage: 32.47, Balance: 73.42}
-	vm := BuildSpendVM(orSnap(nil, acct), true)
+	vm := BuildSpendVM(orSnap(nil, acct), pace.InstancePaces{}, true)
 
 	if !vm.HasData || len(vm.Account) != 3 {
 		t.Fatalf("account vm = %+v", vm)
@@ -905,7 +907,7 @@ func TestBuildSpendVMLimitLabelsAndFractions(t *testing.T) {
 		vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
 			UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1, UsageTotal: 1,
 			Limit: orLimit(c.cadence, 25, c.remaining),
-		}, nil), true)
+		}, nil), pace.InstancePaces{}, true)
 		l := vm.Limit
 		if l == nil {
 			t.Fatalf("%s: limit dropped", c.cadence)
@@ -935,12 +937,12 @@ func TestBuildSpendVMOmitsUnusableLimit(t *testing.T) {
 	vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
 		UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1,
 		Limit: orLimit("monthly", -3, 0),
-	}, nil), true)
+	}, nil), pace.InstancePaces{}, true)
 	if vm.Limit != nil || !vm.HasData || len(vm.Usage) != 4 {
 		t.Errorf("non-positive limit must be omitted but keep usage: %+v", vm)
 	}
 
-	vm = BuildSpendVM(orSnap(nil, nil), true)
+	vm = BuildSpendVM(orSnap(nil, nil), pace.InstancePaces{}, true)
 	if vm.HasData || vm.Limit != nil || len(vm.Usage) != 0 || len(vm.Account) != 0 {
 		t.Errorf("empty snapshot = %+v, want no data", vm)
 	}
@@ -954,7 +956,7 @@ func TestBuildSpendVMTinyLimitUsageReadsUnderOnePercent(t *testing.T) {
 	vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
 		UsageDaily: 0.02, UsageWeekly: 0.02, UsageMonthly: 0.02,
 		Limit: orLimit("daily", 25, 24.98),
-	}, nil), true)
+	}, nil), pace.InstancePaces{}, true)
 	if vm.Limit.UsedText != "<1% used" {
 		t.Errorf("limit used text = %q, want \"<1%% used\"", vm.Limit.UsedText)
 	}
@@ -970,7 +972,7 @@ func TestCardKindSpend(t *testing.T) {
 		"mm1": {Enabled: true},
 	}
 
-	tab := BuildRemoteTab(instances, states, now)
+	tab := BuildRemoteTab(instances, states, nil, now)
 	if len(tab) != 2 {
 		t.Fatalf("remote tab = %d cards", len(tab))
 	}
@@ -982,7 +984,7 @@ func TestCardKindSpend(t *testing.T) {
 		t.Errorf("detail body rows = %+v / %+v", card.Spend.Usage, card.Spend.Account)
 	}
 
-	ov := BuildOverview(instances, states, now)
+	ov := BuildOverview(instances, states, nil, now)
 	spendCard := ov.RemoteCards[0]
 	if spendCard.Kind != OverviewSpend || !spendCard.Spend.HasData {
 		t.Fatalf("overview card = %+v", spendCard)
@@ -1022,5 +1024,237 @@ func TestFormatMoney(t *testing.T) {
 		if got := FormatMoney(c.v); got != c.want {
 			t.Errorf("FormatMoney(%v) = %q, want %q", c.v, got, c.want)
 		}
+	}
+}
+
+// --- S7 pace view models ---
+
+// activeEst builds a count-bearing Active estimate one hour from reset:
+// 31% used now, burning 20 units/h ⇒ projected 51% at reset.
+func activeEst() pace.Estimate {
+	reset := now.Add(time.Hour)
+
+	return pace.Estimate{
+		State:      pace.StateActive,
+		SpeedFrac:  0.20,
+		SpeedCount: 2000,
+		HasCount:   true,
+		Unit:       "credits",
+		LastUsed:   0.31,
+		LastAt:     now,
+		ResetAt:    &reset,
+	}
+}
+
+// The state drives both the speed text and the projection: no estimate
+// text before Active/Idle, counts preferred over fractions, and no
+// projection for a state that cannot have one.
+func TestBuildPaceVMStateMapping(t *testing.T) {
+	vm := buildPaceVM(pace.Estimate{State: pace.StateCollecting, ResetAt: activeEst().ResetAt}, now)
+	if vm.SpeedText != "" || vm.CanProject || vm.ProjectedText != "" {
+		t.Errorf("collecting VM = %+v, want no speed and no projection", vm)
+	}
+	vm = buildPaceVM(pace.Estimate{State: pace.StateUnavailable}, now)
+	if vm.State != pace.StateUnavailable || vm.SpeedText != "" {
+		t.Errorf("unavailable VM = %+v", vm)
+	}
+
+	vm = buildPaceVM(activeEst(), now)
+	if vm.State != pace.StateActive || vm.SpeedText != "2000 credits/h" {
+		t.Fatalf("active VM = %+v", vm)
+	}
+	if !vm.CanProject || vm.ProjectedText != "≈51% at reset" {
+		t.Errorf("projection = %q/%v, want \"≈51%% at reset\"", vm.ProjectedText, vm.CanProject)
+	}
+
+	fractionOnly := activeEst()
+	fractionOnly.HasCount = false
+	vm = buildPaceVM(fractionOnly, now)
+	if vm.SpeedText != "20%/h" {
+		t.Errorf("fraction speed = %q, want \"20%%/h\"", vm.SpeedText)
+	}
+
+	idle := activeEst()
+	idle.State = pace.StateIdle
+	idle.SpeedFrac = 0
+	idle.SpeedCount = 0
+	vm = buildPaceVM(idle, now)
+	if vm.SpeedText != "0 credits/h" {
+		t.Errorf("idle speed = %q, want \"0 credits/h\"", vm.SpeedText)
+	}
+	if !vm.CanProject || vm.ProjectedText != "≈31% at reset" {
+		t.Errorf("idle projection = %q, want the bare anchor", vm.ProjectedText)
+	}
+
+	noReset := activeEst()
+	noReset.ResetAt = nil
+	vm = buildPaceVM(noReset, now)
+	if vm.CanProject {
+		t.Errorf("projection without a reset time = %+v", vm)
+	}
+
+	// A projection already past its reset at build time renders as
+	// non-projectable — the ticker then has nothing to hide.
+	stale := activeEst()
+	stale.ResetAt = &now
+	vm = buildPaceVM(stale, now)
+	if vm.CanProject || vm.ProjectedText != "" {
+		t.Errorf("stale projection = %+v, want none", vm)
+	}
+}
+
+// The projected text is unclamped: real usage never reads as zero, and an
+// over-100% projection keeps its true value (only the bar segments cap).
+func TestBuildPaceVMProjectionBoundaries(t *testing.T) {
+	cases := []struct {
+		projected float64
+		want      string
+	}{
+		{0, "≈0% at reset"},
+		{0.001, "≈<1% at reset"},
+		{0.31, "≈31% at reset"},
+		{1.0, "≈100% at reset"},
+		{1.37, "≈137% at reset"},
+		{10.0, "≈1000% at reset"},
+	}
+	for _, c := range cases {
+		est := activeEst()
+		est.LastUsed = c.projected // 1h span at SpeedFrac 0 ⇒ anchor alone
+		est.SpeedFrac = 0
+		vm := buildPaceVM(est, now)
+		if !vm.CanProject || vm.ProjectedText != c.want {
+			t.Errorf("projected %v = %q (CanProject %v), want %q",
+				c.projected, vm.ProjectedText, vm.CanProject, c.want)
+		}
+	}
+}
+
+// Expiry boundary: the projection dies exactly at the reset instant, and a
+// reset-less series never expires.
+func TestPaceVMProjectionExpired(t *testing.T) {
+	reset := now.Add(time.Hour)
+	vm := PaceVM{ResetAt: &reset}
+
+	if vm.ProjectionExpired(now.Add(-time.Second)) || vm.ProjectionExpired(now) {
+		t.Error("projection must survive until the reset instant")
+	}
+	if !vm.ProjectionExpired(now.Add(time.Hour)) || !vm.ProjectionExpired(now.Add(time.Hour+time.Second)) {
+		t.Error("projection must expire at and after the reset instant")
+	}
+
+	never := PaceVM{}
+	if never.ProjectionExpired(now.Add(24 * time.Hour)) {
+		t.Error("a series without a reset never expires")
+	}
+}
+
+func TestFormatPctPerHour(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want string
+	}{
+		{0, "0%/h"},
+		{0.049, "<0.1%/h"},
+		{0.1, "0.1%/h"},
+		{3.4, "3.4%/h"},
+		{5, "5%/h"},
+		{124.4, "124%/h"},
+	}
+	for _, c := range cases {
+		if got := FormatPctPerHour(c.v); got != c.want {
+			t.Errorf("FormatPctPerHour(%v) = %q, want %q", c.v, got, c.want)
+		}
+	}
+}
+
+func TestFormatCountPerHour(t *testing.T) {
+	cases := []struct {
+		v    float64
+		unit string
+		want string
+	}{
+		{2000, "credits", "2000 credits/h"},
+		{12400, "requests", "12.4k requests/h"},
+		{312, "credits", "312 credits/h"},
+		{312, "", "312/h"},
+		{12400, "", "12.4k/h"},
+	}
+	for _, c := range cases {
+		if got := FormatCountPerHour(c.v, c.unit); got != c.want {
+			t.Errorf("FormatCountPerHour(%v, %q) = %q, want %q", c.v, c.unit, got, c.want)
+		}
+	}
+}
+
+func TestFormatMoneyPerHour(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want string
+	}{
+		{0, "$0.00/h"},
+		{1.24, "$1.24/h"},
+		{0.001, "$0.001/h"}, // sub-cent burns never read as $0.00/h
+		{41.08, "$41.08/h"},
+	}
+	for _, c := range cases {
+		if got := FormatMoneyPerHour(c.v); got != c.want {
+			t.Errorf("FormatMoneyPerHour(%v) = %q, want %q", c.v, got, c.want)
+		}
+	}
+}
+
+// Estimates attach by window ID; windows without an estimate keep a nil
+// Pace, and an empty InstancePaces leaves every row untouched.
+func TestQuotaVMPacePerWindowAttach(t *testing.T) {
+	snap := domain.QuotaSnapshot{
+		Kind: domain.KindMiniMax,
+		Windows: []domain.QuotaWindow{
+			{ID: "interval", Name: "5-hour", UsedFraction: 0.31, RemainingFraction: 0.69},
+			{ID: "other", Name: "Month", UsedFraction: 0.1, RemainingFraction: 0.9},
+		},
+	}
+	ip := pace.InstancePaces{Windows: map[string]pace.Estimate{"interval": activeEst()}}
+
+	vm := BuildQuotaVM(snap, ip, now, true)
+	if vm.Windows[0].Pace == nil || vm.Windows[0].Pace.SpeedText != "2000 credits/h" {
+		t.Errorf("matched row pace = %+v", vm.Windows[0].Pace)
+	}
+	if vm.Windows[1].Pace != nil {
+		t.Errorf("unmatched row pace = %+v, want nil", vm.Windows[1].Pace)
+	}
+
+	vm = BuildQuotaVM(snap, pace.InstancePaces{}, now, true)
+	for i, row := range vm.Windows {
+		if row.Pace != nil {
+			t.Errorf("row %d pace = %+v, want nil without estimates", i, row.Pace)
+		}
+	}
+}
+
+// The spend pace renders as $/h and is never projectable — by construction
+// (the spend series carries no reset time).
+func TestSpendVMPaceAttach(t *testing.T) {
+	spend := pace.Estimate{
+		State:      pace.StateActive,
+		SpeedCount: 2,
+		HasCount:   true,
+		LastUsed:   5,
+		LastAt:     now,
+	}
+	vm := BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
+		UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1, UsageTotal: 5,
+	}, nil), pace.InstancePaces{Spend: &spend}, true)
+	if vm.Pace == nil || vm.Pace.SpeedText != "$2.00/h" {
+		t.Fatalf("spend pace = %+v, want \"$2.00/h\"", vm.Pace)
+	}
+	if vm.Pace.CanProject || vm.Pace.ResetAt != nil {
+		t.Errorf("spend pace must never project: %+v", vm.Pace)
+	}
+
+	vm = BuildSpendVM(orSnap(&domain.OpenRouterKeyUsage{
+		UsageDaily: 1, UsageWeekly: 1, UsageMonthly: 1, UsageTotal: 5,
+	}, nil), pace.InstancePaces{}, true)
+	if vm.Pace != nil {
+		t.Errorf("spend pace without an estimate = %+v, want nil", vm.Pace)
 	}
 }

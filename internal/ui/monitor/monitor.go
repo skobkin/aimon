@@ -15,6 +15,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/buildinfo"
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/resources"
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
@@ -231,9 +232,12 @@ func (m *Monitor) rebuild() {
 
 	var tick []func(now time.Time)
 
-	m.rebuildOverview(ui.BuildOverview(instances, states, now), states, &tick)
-	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, now), instances, states, "No local sources enabled.", &tick)...)
-	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, now), instances, states, "No remote sources enabled.", &tick)...)
+	// Pace data reaches the builders as plain read-only maps; the wired
+	// tracker supply lands with the app integration (S7).
+	var paces map[domain.InstanceID]pace.InstancePaces
+	m.rebuildOverview(ui.BuildOverview(instances, states, paces, now), states, &tick)
+	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, paces, now), instances, states, "No local sources enabled.", &tick)...)
+	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, paces, now), instances, states, "No remote sources enabled.", &tick)...)
 
 	m.tickFns = tick
 }
