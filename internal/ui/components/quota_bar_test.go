@@ -59,7 +59,7 @@ func TestThresholdColorBoundaries(t *testing.T) {
 }
 
 func TestThresholdColorExactValues(t *testing.T) {
-	// The exact palette from DECISIONS D9.
+	// The exact palette from legacy decision D9 (docs/DECISION_LOG.md).
 	if got := ThresholdColor(0.05); got != (color.RGBA{R: 0xF4, G: 0x43, B: 0x36, A: 0xFF}) {
 		t.Errorf("critical color = %v", got)
 	}

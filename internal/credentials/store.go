@@ -1,6 +1,7 @@
 // Package credentials stores source credentials in the system keychain
 // via github.com/zalando/go-keyring. There is no plaintext fallback in S1
-// (DECISIONS D12): when the keychain is unavailable, credential features
+// legacy decision D12, docs/DECISION_LOG.md): when the keychain is
+// unavailable, credential features
 // degrade, they do not bypass.
 package credentials
 

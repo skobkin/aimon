@@ -25,7 +25,8 @@ const quotaBarHeight = 8
 // quotaBarMinWidth keeps the bar readable inside cards.
 const quotaBarMinWidth = 120
 
-// Quota threshold colors (DECISIONS D9). Fixed constants, not
+// Quota threshold colors (legacy decision D9 in docs/DECISION_LOG.md —
+// its remaining-based wording is superseded, the palette survives). Fixed constants, not
 // theme-derived, so the meaning is stable across light and dark themes.
 var (
 	colorCritical = color.RGBA{R: 0xF4, G: 0x43, B: 0x36, A: 0xFF} // red

@@ -592,7 +592,7 @@ func formatPctOnly(fraction float64) string {
 	return fmt.Sprintf("%d%%", pct)
 }
 
-// FreshnessText renders the per-source freshness label (DECISIONS D7).
+// FreshnessText renders the per-source freshness label (legacy decision D7, docs/DECISION_LOG.md).
 // There is no global timestamp; every source carries its own age.
 func FreshnessText(rt domain.Runtime, now time.Time) string {
 	switch rt.DeriveState() {

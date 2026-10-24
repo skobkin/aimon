@@ -7,7 +7,7 @@ Implement S1 end-to-end from the repository specifications.
 Read, in order:
 
 1. `AGENTS.md`
-2. `docs/DECISIONS.md`
+2. `docs/DECISIONS.md` (retired 2026-10-24 — its decisions live in `docs/DECISION_LOG.md`'s legacy section)
 3. `docs/S1_IMPLEMENTATION_SPEC.md`
 4. `docs/ARCHITECTURE.md`
 5. `docs/UI_UX.md`

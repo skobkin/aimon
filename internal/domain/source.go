@@ -66,7 +66,7 @@ type Snapshot interface {
 	Timestamp() time.Time
 }
 
-// State is the coarse per-source state shown in the UI (DECISIONS D6).
+// State is the coarse per-source state shown in the UI (legacy decision D6, docs/DECISION_LOG.md).
 type State string
 
 // Per-source states. Disabled sources are omitted from the UI entirely;
@@ -89,7 +89,7 @@ type Runtime struct {
 	LastSuccessAt time.Time
 	LastError     error
 	// Snapshot is nil until the first successful refresh; a later failure
-	// never clears it (last-good data is retained, DECISIONS D6).
+	// never clears it (last-good data is retained, legacy decision D6 in docs/DECISION_LOG.md).
 	Snapshot Snapshot
 }
 

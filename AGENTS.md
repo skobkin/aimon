@@ -21,12 +21,11 @@ For the current S2 task, precedence is:
 2. `docs/S2_UI_UX.md` — current UI contract for the S2 changes.
 3. `docs/S2_IMPLEMENTATION_SPEC.md` — current implementation/acceptance contract.
 4. `docs/tasks/S2-ui-density-agent-task.md` — execution plan and scope.
-5. `docs/DECISIONS.md`
-6. `docs/S1_IMPLEMENTATION_SPEC.md`
-7. `docs/ARCHITECTURE.md`
-8. `docs/UI_UX.md`
-9. `docs/INTEGRATIONS.md`
-10. `docs/tasks/S1-agent-task.md`
+5. `docs/S1_IMPLEMENTATION_SPEC.md`
+6. `docs/ARCHITECTURE.md`
+7. `docs/UI_UX.md`
+8. `docs/INTEGRATIONS.md`
+9. `docs/tasks/S1-agent-task.md`
 
 S1 documents remain useful architectural history, but S2 documents and later Decision Log entries explicitly supersede them where they conflict. Do not rewrite old specs retroactively merely to remove historical differences. Do not redesign the product or UI while implementing the current task.
 

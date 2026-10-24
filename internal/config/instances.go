@@ -375,7 +375,7 @@ func validateCodexSettings(label string, s CodexSettings) []ValidationError {
 // KindIntervals returns the offered poll interval presets for a kind. The
 // lists are per kind: Hindsight has its own shifted-up ladder, Codex its own
 // minute-and-up ladder (every on-demand refresh spawns a process), and the
-// remaining kinds follow their category (DECISIONS D8: local sources poll
+// remaining kinds follow their category (legacy D8: local sources poll
 // faster than remote plans).
 func KindIntervals(kind domain.SourceKind) []time.Duration {
 	if kind == domain.KindHindsight {

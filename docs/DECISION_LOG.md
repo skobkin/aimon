@@ -1,13 +1,143 @@
 # Decision Log
 
 Dated record of implementation-time decisions that change or extend the
-authoritative documents (`AGENTS.md`, `docs/DECISIONS.md`,
-`docs/S1_IMPLEMENTATION_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/UI_UX.md`,
-`docs/INTEGRATIONS.md`).
+authoritative documents (`AGENTS.md`, `docs/S1_IMPLEMENTATION_SPEC.md`,
+`docs/ARCHITECTURE.md`, `docs/UI_UX.md`, `docs/INTEGRATIONS.md`; until
+2026-10-24 also `docs/DECISIONS.md`, now retired — see the 2026-10-24 S7
+entry below).
 
 The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
+
+## 2026-10-24 — S7: usage pace (speed and end-of-window projection), implementation-time decisions
+
+Implementation of S7 / v0.7.0 per `docs/S7_PACE.md`, `docs/S7_AGENT_RULES.md`,
+`docs/S7_UI_UX.md`, and `docs/S7_IMPLEMENTATION_SPEC.md`. The following
+choices were made while coding (and in plan review with the user) and
+extend the documents from this date.
+
+1. **In-memory pace history in `internal/pace`, fed from the manager
+   subscription.** Each quota (and OpenRouter spend) series keeps a
+   bounded in-memory ring (≤240 samples, ≥2h retention spanning the
+   largest supported pace window). This supersedes the DECISIONS D14
+   ring-buffer ban and the AGENTS.md S2-era "no history storage" rule
+   **for this numeric derived metric only**: there is still no
+   persistence, no charts, no sparklines, no dynamic tray telemetry —
+   history exists solely to derive pace. The tracker is cleared on app
+   restart and on adapter rebuild/removal, and survives interval-only and
+   pace-window-only reconfiguration.
+
+2. **Idle is gated on in-window coverage.** The newest sample pair being
+   flat drops speed to 0 immediately, but only once the estimation
+   window's endpoint span meets `MinSpan` (3 minutes); a brand-new or
+   sparsely covered series reports Collecting even when flat. Counts
+   compare exactly (1e-9 epsilon), fractions with the same epsilon so
+   quantized integer-percent series read as idle correctly.
+
+3. **The projection is computed once per rebuild and expires at
+   `ResetAt`.** `LastUsed + SpeedFrac × (ResetAt − LastAt)` is constant
+   between provider samples — never re-ticked; when the current time
+   reaches `ResetAt` the projection text and bar hide in place via the
+   existing 1-second ticker until a fresh sample delivers a new one. The
+   anchor is `UsedCount/Limit` when counts are valid, else the reported
+   used fraction; this affects only the pace projection, the ordinary
+   quota display keeps `UsedFraction`. The projected text is unclamped
+   ("≈137% at reset"). This approves a fourth narrowly scoped custom
+   widget, `ProjectionBar`: constant width, internally rescaling segments
+   (`scale = min(max(projected, 1), 2)`), red overflow never drawn beyond
+   the widget, a 1px divider at the 100% point; the [0,1] clamp
+   convention is lifted for this widget's visual only. This supersedes
+   ARCHITECTURE.md §14's "remote quota forecasting" line for this
+   per-window projection.
+
+4. **OpenRouter gets a spend speed, never a projection.** The pace series
+   derives from `Key.UsageTotal` and renders as one detail money row
+   ("Pace $1.24/h") that follows the S4 monetary privacy policy — masked
+   under the global "hide sensitive info" preference like every other
+   monetary value (extends S4_OPENROUTER.md §5). No bar, no Overview
+   line.
+
+5. **Discontinuity rules.** A usage decrease is a genuine window rollover
+   or provider correction — never a negative burn rate; when both samples
+   carry absolute counts, the count decrease is authoritative and is
+   checked even when the quantized fraction is unchanged (a rollover can
+   hide inside an integer percent). A limit change resets the series too.
+   A discontinuity drops older samples and keeps exactly one observation
+   as `StateUnavailable` (via a per-series reset flag), then the normal
+   path resumes. `ResetAt` movement alone never discards history:
+   MiniMax derives `ResetAt` from a relative duration and jitters every
+   poll, and Codex rolling deadlines move between requests — the latest
+   valid `ResetAt` is kept for projection.
+
+6. **Pace window presets {10m, 20m, 30m, 60m}, default 20m**, stored
+   additively as `pace_window` on the source record — the document schema
+   stays version 1 (older builds ignore the field). Estimates are
+   computed at read time, so a window change takes effect immediately
+   with one coalesced re-render; no adapter rebuild, no history clear, no
+   poll wait.
+
+7. **`docs/DECISIONS.md` is retired.** It was the S1/MVP decision record
+   and its superseded entries kept misleading later readers. The
+   still-valid decisions are preserved below under "Legacy decisions";
+   the superseded ones are noted in one line each; the file is deleted
+   and references swept. Superseded: D1 (product scope — AGENTS.md is
+   authoritative and S2–S7 widened the source set), D8 (polling cadence —
+   superseded by S3 per-kind interval ladders and S5's Hindsight ladder),
+   D9 (remaining-based quota semantics — S2 flipped quota displays to
+   used-based wording; the threshold palette survives as
+   `ThresholdColor`), D11 (one approved custom component — extended by
+   each stage's DECISION_LOG approvals: MetricBar, SensitiveValue,
+   ProjectionBar), D14 (no history — superseded for pace only by entry 1
+   above).
+
+## Legacy decisions (extracted from the retired docs/DECISIONS.md)
+
+These entered the record at S1 and still hold as amended; later entries
+and the S2–S7 documents refine them where noted.
+
+- **D2 — Tray-first, no persistent dashboard window.** Normal runtime
+  interaction is the tray icon and the compact borderless monitor window;
+  Settings is a separate decorated window. There is no persistent
+  dashboard window.
+- **D3 — Monitor window behavior.** Tray show/hide (left click), `Esc`
+  hides, an explicit Show Monitor tray action for incomplete Linux tray
+  implementations. No focus-loss auto-hide: Fyne exposes no portable
+  top-level focus-lost callback, and no platform-specific hacks. No
+  reliance on programmatic positioning next to the tray icon (Wayland may
+  ignore positions).
+- **D4 — Navigation.** Overview / Local / Remote tabs, Overview the
+  default; Settings is not a fourth tab.
+- **D5 — Optional independent sources.** Every source enables/disables
+  independently; disabled sources are not polled, do not appear on
+  Overview, and never degrade the app. An empty Local/Remote tab stays
+  present with an empty state and a Settings action.
+- **D6 — Graceful degradation.** One failing source never affects the
+  others; a never-succeeded source is Unavailable; a later failure keeps
+  the last good data visible, marks the source Stale with the snapshot
+  age, and surfaces a concise error in the detail view. Valid stale data
+  is never replaced by an empty card.
+- **D7 — Per-source freshness.** No global "updated N seconds ago"; each
+  source header carries its own freshness/status, aging locally without
+  network requests.
+- **D10 — Local telemetry coloring (as amended).** High GPU utilization is
+  not intrinsically bad. The 2026-08-23 user-directed exception colors
+  GPU utilization, VRAM and temperature by load with agreed thresholds;
+  clocks and other local metrics stay neutral (see the S2-era entry in
+  this log and `docs/DECISION_LOG.md`'s AGENTS.md rule).
+- **D12 — Secret storage.** System keychain via `github.com/zalando/go-keyring`
+  with the credential-store/status pattern from `skobkin/qBtRemoteGo`; no
+  plaintext fallback; non-secret settings in Fyne Preferences; a locked
+  or unavailable keychain degrades the affected sources, not the app.
+- **D13 — Read-only monitor.** No write/control operations against any
+  source (S7 included); opening an upstream web UI is navigation, not
+  control.
+- **D15 — Local source ownership.** `amdgputop-web` owns AMD GPU
+  telemetry; `llama-swap` owns model/runtime state. No duplicating GPU
+  telemetry from llama-swap `/metrics`.
+- **D16 — Implementation technology.** Go and current stable Fyne 2.8.x;
+  background goroutines do I/O and schedule every UI mutation through
+  `fyne.Do`/`fyne.DoAndWait`.
 
 ## 2026-09-03 — Card headers wrap their title instead of widening the window
 

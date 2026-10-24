@@ -453,7 +453,7 @@ The exact default local URLs are not normative; use sensible defaults only if th
 - `Enabled` is a `widget.Check`.
 - URL uses `widget.Entry` with URL validation.
 - GPU selection is `widget.Select` populated from `GET /api/gpus` after a successful test/discovery.
-- Poll interval is a `widget.Select` from the fixed choices in `DECISIONS.md`.
+- Poll interval is a `widget.Select` from the fixed choices in the decision record (now `docs/DECISION_LOG.md`).
 - API key is `widget.NewPasswordEntry()`.
 - Existing API keys should not be read back and displayed in plaintext. Showing a masked placeholder/state such as `Credential stored` is preferable to unnecessarily retrieving a secret into the widget.
 - Saving a changed secret writes it to keychain.

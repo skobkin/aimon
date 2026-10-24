@@ -59,7 +59,7 @@ type loop struct {
 // keyed by instance ID. Loops never share work: a slow or failing instance
 // cannot delay any other (including another instance of the same kind),
 // two refreshes of the same instance never overlap, and the last
-// successful snapshot survives later failures (DECISIONS D6).
+// successful snapshot survives later failures (legacy decision D6, docs/DECISION_LOG.md).
 //
 // Sources implementing Closer are closed deterministically when the manager
 // stops using them: on removal, disable, adapter replacement, and shutdown.

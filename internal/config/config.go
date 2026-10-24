@@ -1,7 +1,7 @@
 // Package config holds the non-secret application configuration: the
 // ordered list of configured source instances and their provider settings.
 // Credentials are deliberately absent — they live only in the system
-// keychain (DECISIONS D12).
+// keychain (legacy decision D12, docs/DECISION_LOG.md).
 package config
 
 import (
@@ -20,7 +20,8 @@ const (
 	DefaultZAIURL       = "https://api.z.ai"
 )
 
-// Polling presets and defaults (DECISIONS D8). Free-text interval entry is
+// Polling presets and defaults (legacy decision D8 in
+// docs/DECISION_LOG.md, superseded where per-kind ladders apply). Free-text interval entry is
 // forbidden; users pick from these lists. The lists are per kind, not per
 // category: Hindsight is a memory-service aggregate rather than GPU
 // telemetry, so its ladder starts one step higher — re-polling an aggregate
