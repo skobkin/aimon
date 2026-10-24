@@ -7,27 +7,39 @@ This project is a small, tray-first desktop monitor for:
 - local AMD GPU telemetry from `amdgputop-web`;
 - local model/runtime state from `llama-swap`;
 - MiniMax Token Plan quota;
-- Z.AI / GLM Coding Plan quota.
+- Z.AI / GLM Coding Plan quota;
+- OpenRouter account spend and key limits;
+- ChatGPT Codex plan usage;
+- Hindsight memory-service banks (rate and liveness).
 
-The product remains a **read-only monitor** in the current S2 task, not an administration console.
+The product remains a **read-only monitor**, not an administration console.
 
 ## Authoritative documents
 
-Read these before implementation. The repository contains historical S1 specs as well as the current S2 / v0.2 UI-density task.
+Read these before implementation. The repository contains historical S1–S6
+specs as well as the current S7 / v0.7 usage-pace task.
 
-For the current S2 task, precedence is:
+For the current S7 task, precedence is:
 
 1. `docs/DECISION_LOG.md` — dated implementation-time decisions; newest applicable entry wins.
-2. `docs/S2_UI_UX.md` — current UI contract for the S2 changes.
-3. `docs/S2_IMPLEMENTATION_SPEC.md` — current implementation/acceptance contract.
-4. `docs/tasks/S2-ui-density-agent-task.md` — execution plan and scope.
-5. `docs/S1_IMPLEMENTATION_SPEC.md`
-6. `docs/ARCHITECTURE.md`
-7. `docs/UI_UX.md`
-8. `docs/INTEGRATIONS.md`
-9. `docs/tasks/S1-agent-task.md`
+2. `docs/S7_PACE.md` — current feature spec for the S7 usage pace.
+3. `docs/S7_UI_UX.md` — current UI contract for the S7 changes.
+4. `docs/S7_IMPLEMENTATION_SPEC.md` — current implementation/acceptance contract.
+5. `docs/tasks/S7-pace-agent-task.md` — execution plan and scope.
+6. `docs/S6_CODEX.md`, `docs/S6_UI_UX.md`, `docs/S6_IMPLEMENTATION_SPEC.md`
+7. `docs/S5_HINDSIGHT.md`, `docs/S4_OPENROUTER.md`, `docs/S3_DYNAMIC_SOURCE_INSTANCES.md`
+8. `docs/S1_IMPLEMENTATION_SPEC.md`
+9. `docs/ARCHITECTURE.md`
+10. `docs/UI_UX.md`
+11. `docs/INTEGRATIONS.md`
 
-S1 documents remain useful architectural history, but S2 documents and later Decision Log entries explicitly supersede them where they conflict. Do not rewrite old specs retroactively merely to remove historical differences. Do not redesign the product or UI while implementing the current task.
+Earlier stage documents remain useful architectural history, but S7
+documents and later Decision Log entries explicitly supersede them where
+they conflict. Do not rewrite old specs retroactively merely to remove
+historical differences. Do not redesign the product or UI while
+implementing the current task. `docs/DECISIONS.md` was retired on
+2026-10-24; its still-valid decisions live in the Decision Log's legacy
+section.
 
 ## Decision log
 
@@ -53,20 +65,26 @@ diverge silently.
 - Provider/source-specific DTOs must stop at the adapter boundary. UI code consumes normalized domain snapshots/view models only.
 - Network I/O must never run synchronously in a Fyne event callback.
 - Any Fyne API call made from an application-created goroutine must be scheduled with `fyne.Do` or `fyne.DoAndWait` as appropriate.
-- Do not add historical persistence, historical charts, or dynamic tray telemetry in the current S2 task. The new Overview donut gauges are current-value visualizations, not history charts.
+- No historical persistence, no historical charts, no dynamic tray telemetry.
+  The S7 usage-pace history is the single approved exception: a bounded
+  in-memory ring in `internal/pace` (no disk, no charts, no sparklines)
+  that exists solely to derive pace; recorded in `docs/DECISION_LOG.md`
+  (2026-10-24). The Overview donut gauges are current-value
+  visualizations, not history charts.
 
 ## UI implementation rules
 
-For the current task, treat `docs/S2_UI_UX.md` as the UI contract; use historical `docs/UI_UX.md` only where S2 does not supersede it.
+For the current task, treat `docs/S7_UI_UX.md` as the UI contract; use the
+historical UI documents only where S7 does not supersede them.
 
 - Use `container.AppTabs` for the monitor's Overview / Local / Remote navigation.
 - Detail Local/Remote source cards continue to use the established standard Fyne card/container grammar. Overview is now allowed to use presentation-specific compact bodies while preserving the common source header/status grammar.
 - Use standard Fyne controls for forms: `widget.Form`, `widget.Entry`, `widget.NewPasswordEntry()`, `widget.Select`, `widget.Check`, and normal buttons.
-- Do not use free-text inputs for enumerated polling intervals.
+- Do not use free-text inputs for enumerated polling intervals (or pace windows).
 - Do not create custom dropdowns, tabs, toggles, forms, card systems, or dialogs.
-- Approved custom presentation-only visualizations are narrowly scoped: existing `QuotaBar`; an Overview-only labeled metric usage bar; and an Overview-only quota donut/ring gauge. Do not turn them into a general widget framework.
-- Circular gauges are allowed only for quota usage in the Overview as specified by `docs/S2_UI_UX.md`; Remote detail keeps linear quota bars.
-- Do not introduce historical charts, sparklines, history storage, or chart dependencies in this task.
+- Approved custom presentation-only visualizations are narrowly scoped: `QuotaBar`; the Overview-only labeled metric usage bar; the Overview-only quota donut/ring gauge; and the S7 `ProjectionBar` (end-of-window projection; constant width, internally rescaling segments, overflow capped at 2.0×). Do not turn them into a general widget framework.
+- Circular gauges are allowed only for quota usage in the Overview; Remote detail keeps linear quota bars.
+- Do not introduce historical charts, sparklines, history storage, or chart dependencies.
 - Do not use color as the only status signal; always pair status color with text/iconography.
 - High GPU utilization is not an error and must not be colored as a warning merely because it is high. (User-directed exception, 2026-08-23: GPU utilization, VRAM and temperature values are colored by load with agreed thresholds — recorded in `docs/DECISION_LOG.md`.)
 - Keep equivalent metrics visually consistent across providers.
@@ -80,7 +98,7 @@ For the current task, treat `docs/S2_UI_UX.md` as the UI contract; use historica
 - Manual refresh should trigger immediate refresh of enabled sources without creating duplicate in-flight requests.
 - Use per-request timeouts.
 - Do not add aggressive internal retries. The next scheduled poll is the retry mechanism.
-- Respect minimum/default refresh intervals defined in the S1 spec.
+- Respect minimum/default refresh intervals defined per kind (S1 baseline; S3/S5/S6 carry per-kind ladders).
 - Stop pollers cleanly on application shutdown.
 
 ## Credentials
