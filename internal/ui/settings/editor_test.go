@@ -554,6 +554,16 @@ func TestEditorFreeTextLabelsWrap(t *testing.T) {
 	s := NewSettings(test.NewTempApp(t), stub)
 	s.editDraft(domain.KindCodex)
 
+	// A host with an installed launcher shows the short "found" status, so
+	// the fourth long label only exists in the not-found state: force it
+	// with a bare name nothing installs (the entry's change callback
+	// re-runs the discovery lookup synchronously).
+	scan := scanCodexEditor(t, s)
+	if scan.exe == nil {
+		t.Fatal("launcher entry not found in the editor")
+	}
+	scan.exe.SetText("aimon-no-such-cli")
+
 	wrapped := 0
 	for _, l := range editorLabels(t, s) {
 		if len([]rune(l.Text)) < 40 {
