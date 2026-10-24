@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
@@ -233,5 +234,50 @@ func walkObjects(t *testing.T, obj fyne.CanvasObject, visit func(fyne.CanvasObje
 		for _, child := range o.Objects {
 			walkObjects(t, child, visit)
 		}
+	}
+}
+
+// The OpenRouter detail card's pace row is a monetary value: masked under
+// the privacy preference like every other money row, absent until a
+// usable estimate exists.
+func TestSpendDetailPaceRow(t *testing.T) {
+	test.NewTempApp(t)
+	isHidden := func() bool { return true }
+	detail := NewSpendDetailBody(ui.SpendVM{
+		HasData: true,
+		Usage:   []ui.MoneyMetricVM{{Label: "Today", Text: "$0.42"}},
+		Pace:    &ui.PaceVM{State: pace.StateActive, SpeedText: "$1.24/h"},
+	}, isHidden)
+	if !containsLabelText(t, detail, "Pace") {
+		t.Error("detail body lacks the Pace row")
+	}
+	values := sensitiveValuesIn(t, detail)
+	if len(values) != 1 {
+		t.Fatalf("masked values = %d, want the pace row", len(values))
+	}
+	if !values[0].Masked() {
+		t.Error("the pace value must be masked while the privacy flag is set")
+	}
+
+	// Privacy off: the real value shows.
+	open := NewSpendDetailBody(ui.SpendVM{
+		HasData: true,
+		Usage:   []ui.MoneyMetricVM{{Label: "Today", Text: "$0.42"}},
+		Pace:    &ui.PaceVM{State: pace.StateActive, SpeedText: "$1.24/h"},
+	}, func() bool { return false })
+	for _, v := range sensitiveValuesIn(t, open) {
+		if v.DisplayText() != "$1.24/h" {
+			t.Errorf("revealed pace value = %q", v.DisplayText())
+		}
+	}
+
+	// No estimate yet: no pace row at all, not even a placeholder.
+	collecting := NewSpendDetailBody(ui.SpendVM{
+		HasData: true,
+		Usage:   []ui.MoneyMetricVM{{Label: "Today", Text: "$0.42"}},
+		Pace:    &ui.PaceVM{State: pace.StateCollecting},
+	}, isHidden)
+	if containsLabelText(t, collecting, "Pace") {
+		t.Error("collecting pace must not render a money row")
 	}
 }

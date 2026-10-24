@@ -196,6 +196,11 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 		),
 		NewQuotaBar(vm.Used, vm.Remaining),
 	)
+
+	// The pace caption sits between the bar and the optional raw-counts
+	// line, with the projection bar directly beneath it (S7_UI_UX).
+	paceCaption, paceBar := addPaceLine(row, vm.Pace)
+
 	if vm.Secondary != "" {
 		// The raw "used / limit" line is provider free text: wrap it instead
 		// of letting it widen the card.
@@ -210,10 +215,60 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 				Name:      vm.Name,
 				ResetText: ui.FormatResetCountdown(reset, now),
 			}))
+			// The projection dies at the reset instant while the speed
+			// stays meaningful: drop the projection part in place until a
+			// fresh sample rebuilds the row with a new one.
+			tickPaceExpiry(paceCaption, paceBar, vm.Pace, now)
 		}
 	}
 
 	return row, tick
+}
+
+// addPaceLine appends the pace caption (and, when a fresh projection
+// exists, the ProjectionBar) to a row box. It returns the caption and the
+// bar for the row's expiry tick; both are nil without pace data.
+func addPaceLine(row *fyne.Container, pace *ui.PaceVM) (*widget.Label, *ProjectionBar) {
+	if pace == nil {
+		return nil, nil
+	}
+	caption := widget.NewLabel(pace.Caption())
+	row.Add(caption)
+
+	var bar *ProjectionBar
+	if pace.CanProject {
+		bar = NewProjectionBar(pace.Projected)
+		row.Add(bar)
+	}
+
+	return caption, bar
+}
+
+// tickPaceExpiry applies the projection-expiry flip of one pace line: once
+// now has reached the reset, the bar and the projection half of the
+// caption hide in place; the speed text stays. A no-op without pace data
+// or a projection, and a no-op while the state is unchanged.
+func tickPaceExpiry(caption *widget.Label, bar *ProjectionBar, pace *ui.PaceVM, now time.Time) {
+	if pace == nil || !pace.CanProject {
+		return
+	}
+	expired := pace.ProjectionExpired(now)
+	want := pace.Caption()
+	if expired {
+		want = pace.SpeedCaption()
+	}
+	if caption.Text == want {
+		// The caption already matches the wanted state.
+		return
+	}
+	if expired {
+		if bar != nil {
+			bar.Hide()
+		}
+	} else if bar != nil {
+		bar.Show()
+	}
+	setText(caption, want)
 }
 
 // quotaRowTitle renders the row's first line: the window name, with the

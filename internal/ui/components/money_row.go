@@ -72,6 +72,17 @@ func NewSpendDetailBody(vm ui.SpendVM, hidden func() bool) fyne.CanvasObject {
 	for _, row := range vm.Usage {
 		body.Add(NewMoneyRow(row, hidden))
 	}
+	// The derived spend speed ("Pace  $1.24/h") follows the usage rows
+	// through the same monetary masking as every other money value; it has
+	// no bar and never a projection (S7_UI_UX). Absent until the first
+	// usable estimate — no collecting placeholder on a money row.
+	if vm.Pace != nil && vm.Pace.SpeedText != "" {
+		body.Add(NewMoneyRow(ui.MoneyMetricVM{
+			Label:     "Pace",
+			Text:      vm.Pace.SpeedText,
+			Sensitive: true,
+		}, hidden))
+	}
 	if vm.Limit != nil {
 		body.Add(spendLimitBlock(vm.Limit, true))
 	}

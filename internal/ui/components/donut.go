@@ -178,6 +178,32 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 				setText(reset, ui.FormatResetCountdown(at, now))
 			})
 		}
+		// One compact projection line under a projectable donut: a thin
+		// bar plus the centered caption (S7_UI_UX). No speed text — the
+		// Overview stays compact. The caption and the bar hide together
+		// once the projection expires at the reset instant.
+		if w.Pace != nil && w.Pace.CanProject {
+			pace := w.Pace
+			bar := NewProjectionBar(pace.Projected)
+			caption := widget.NewLabel(pace.ProjectedText)
+			caption.Alignment = fyne.TextAlignCenter
+			col.Add(bar)
+			col.Add(caption)
+			ticks = append(ticks, func(now time.Time) {
+				expired := pace.ProjectionExpired(now)
+				if caption.Hidden == expired {
+					// Already in the wanted state.
+					return
+				}
+				if expired {
+					bar.Hide()
+					caption.Hide()
+				} else {
+					bar.Show()
+					caption.Show()
+				}
+			})
+		}
 		cells = append(cells, container.New(layout.NewCenterLayout(), col))
 	}
 	body := container.NewGridWithColumns(len(cells), cells...)

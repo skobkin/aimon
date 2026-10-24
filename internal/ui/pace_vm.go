@@ -25,9 +25,11 @@ type PaceVM struct {
 	SpeedText string
 	// CanProject reports that a fresh projection was computable at build
 	// time. ProjectedText then reads "≈68% at reset" (unclamped:
-	// "≈137% at reset").
+	// "≈137% at reset") and Projected carries the unclamped fraction for
+	// the ProjectionBar.
 	CanProject    bool
 	ProjectedText string
+	Projected     float64
 
 	SpeedFrac float64
 	LastUsed  float64
@@ -70,10 +72,41 @@ func buildPaceVM(est pace.Estimate, now time.Time) *PaceVM {
 
 	if projected, ok := est.Project(now); ok {
 		vm.CanProject = true
+		vm.Projected = projected
 		vm.ProjectedText = "≈" + formatProjectedPct(projected) + " at reset"
 	}
 
 	return vm
+}
+
+// Caption renders the detail row's pace line (S7_UI_UX): the speed with
+// the projection when fresh, or a state placeholder while estimating.
+func (vm PaceVM) Caption() string {
+	switch vm.State {
+	case pace.StateCollecting:
+		return "Pace collecting…"
+	case pace.StateUnavailable:
+		return "Pace —"
+	}
+	if vm.CanProject {
+		return vm.SpeedCaption() + " · " + vm.ProjectedText
+	}
+
+	return vm.SpeedCaption()
+}
+
+// SpeedCaption is the caption without the projection part — the line
+// shown once the projection has expired at the window reset (the speed
+// itself stays meaningful).
+func (vm PaceVM) SpeedCaption() string {
+	switch vm.State {
+	case pace.StateCollecting:
+		return "Pace collecting…"
+	case pace.StateUnavailable:
+		return "Pace —"
+	}
+
+	return "Pace " + vm.SpeedText
 }
 
 // buildSpendPaceVM derives the OpenRouter spend pace. The spend series has

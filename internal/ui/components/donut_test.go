@@ -2,6 +2,7 @@ package components
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
+	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
@@ -123,5 +125,78 @@ func TestDonutTextBlockStaysCenteredWhenTight(t *testing.T) {
 	}
 	if lblPos.Y != want+26+2 {
 		t.Errorf("lbl y = %v, want %v", lblPos.Y, want+26+2)
+	}
+}
+
+// One compact projection line under a projectable donut: the centered
+// caption, no speed text, exactly one bar for one projectable window. The
+// expiry tick hides the caption and the bar together.
+func TestQuotaOverviewBodyPaceLine(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	reset := at.Add(time.Hour)
+	weekReset := at.Add(24 * time.Hour)
+	body, tick := NewQuotaOverviewBody(ui.QuotaOverviewVM{
+		HasData: true,
+		Windows: []ui.OverviewDonutVM{
+			{Label: "5h", PctText: "31%", Used: 0.31, Remaining: 0.69,
+				ResetText: "1h0m", ResetAt: &reset,
+				Pace: &ui.PaceVM{
+					State: pace.StateActive, SpeedText: "3.4%/h",
+					CanProject: true, ProjectedText: "≈51% at reset", Projected: 0.51,
+					ResetAt: &reset,
+				}},
+			{Label: "week", PctText: "14%", Used: 0.14, Remaining: 0.86,
+				ResetText: "1d0h", ResetAt: &weekReset},
+		},
+	})
+
+	texts := donutTexts(t, body)
+	if !slices.Contains(texts, "≈51% at reset") {
+		t.Errorf("overview texts = %v, want the projection caption", texts)
+	}
+	if slices.Contains(texts, "3.4%/h") {
+		t.Errorf("overview texts = %v, want no speed text in Overview", texts)
+	}
+	bars := projectionBars(t, body)
+	if len(bars) != 1 {
+		t.Fatalf("projection bars = %d, want 1 (only the projectable window)", len(bars))
+	}
+
+	// Expiry: the caption and the bar hide together; the countdown keeps
+	// its column.
+	tick(at.Add(time.Hour))
+	for _, l := range rowLabels(t, body) {
+		if l.Text == "≈51% at reset" && !l.Hidden {
+			t.Error("projection caption still visible after expiry")
+		}
+	}
+	if bars[0].Visible() {
+		t.Error("projection bar still visible after expiry")
+	}
+	if !slices.Contains(donutTexts(t, body), "23h0m") {
+		t.Error("the other column's countdown stopped ticking")
+	}
+}
+
+// A body without any projectable window renders exactly as before S7.
+func TestQuotaOverviewBodyWithoutPace(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	reset := at.Add(time.Hour)
+	body, tick := NewQuotaOverviewBody(ui.QuotaOverviewVM{
+		HasData: true,
+		Windows: []ui.OverviewDonutVM{
+			{Label: "5h", PctText: "31%", Used: 0.31, Remaining: 0.69, ResetText: "1h0m", ResetAt: &reset},
+		},
+	})
+	if tick == nil {
+		t.Fatal("countdown tick lost")
+	}
+	if bars := projectionBars(t, body); len(bars) != 0 {
+		t.Errorf("projection bars = %d, want 0 without pace", len(bars))
+	}
+	for _, l := range rowLabels(t, body) {
+		if strings.HasPrefix(l.Text, "≈") {
+			t.Errorf("unexpected projection caption %q", l.Text)
+		}
 	}
 }

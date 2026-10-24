@@ -1258,3 +1258,35 @@ func TestSpendVMPaceAttach(t *testing.T) {
 		t.Errorf("spend pace without an estimate = %+v, want nil", vm.Pace)
 	}
 }
+
+// The caption wording contract (S7_UI_UX): speed plus projection when
+// fresh, the bare speed once the projection expired, placeholders while
+// estimating.
+func TestPaceVMCaptions(t *testing.T) {
+	vm := buildPaceVM(activeEst(), now)
+	if got := vm.Caption(); got != "Pace 2000 credits/h · ≈51% at reset" {
+		t.Errorf("Caption() = %q", got)
+	}
+	if got := vm.SpeedCaption(); got != "Pace 2000 credits/h" {
+		t.Errorf("SpeedCaption() = %q", got)
+	}
+
+	noProj := activeEst()
+	noProj.ResetAt = nil
+	if got := buildPaceVM(noProj, now).Caption(); got != "Pace 2000 credits/h" {
+		t.Errorf("caption without a projection = %q", got)
+	}
+
+	for state, want := range map[pace.State]string{
+		pace.StateCollecting:  "Pace collecting…",
+		pace.StateUnavailable: "Pace —",
+	} {
+		pvm := buildPaceVM(pace.Estimate{State: state}, now)
+		if got := pvm.Caption(); got != want {
+			t.Errorf("Caption(%v) = %q, want %q", state, got, want)
+		}
+		if got := pvm.SpeedCaption(); got != want {
+			t.Errorf("SpeedCaption(%v) = %q, want %q", state, got, want)
+		}
+	}
+}
