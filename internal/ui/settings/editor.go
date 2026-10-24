@@ -39,6 +39,7 @@ type editor struct {
 	name     *widget.Entry
 	enabled  *widget.Check
 	interval *widget.Select
+	pace     *widget.Select // pace-capable kinds only (S7); nil otherwise
 
 	url    *widget.Entry // amdgputop-web / llama-swap / zai / hindsight
 	webURL *widget.Entry // hindsight only: optional independent Web UI URL
@@ -113,6 +114,10 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	e.enabled.SetChecked(inst.Enabled)
 	e.interval = widget.NewSelect(intervalOptions(def.Intervals), nil)
 	selectInterval(e.interval, inst.PollInterval, def.Intervals, def.DefaultInterval)
+	if config.PaceCapable(inst.Kind) {
+		e.pace = widget.NewSelect(intervalOptions(config.PaceWindows), nil)
+		selectInterval(e.pace, inst.PaceWindow, config.PaceWindows, config.DefaultPaceWindow)
+	}
 	e.testLabel = widget.NewLabel("")
 	e.testLabel.Wrapping = fyne.TextWrapWord
 
@@ -121,6 +126,9 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 		widget.NewFormItem("Name", e.name),
 		widget.NewFormItem("Enabled", e.enabled),
 		widget.NewFormItem("Refresh every", e.interval),
+	}
+	if e.pace != nil {
+		items = append(items, widget.NewFormItem("Pace window", e.pace))
 	}
 
 	// A URL field exists only for kinds whose settings have a base URL —
@@ -328,6 +336,11 @@ func (e *editor) collect() (config.SourceInstance, error) {
 	inst.Name = strings.TrimSpace(e.name.Text)
 	inst.Enabled = e.enabled.Checked
 	inst.PollInterval = selectedInterval(e.interval, e.def.Intervals, e.def.DefaultInterval)
+	if e.pace != nil {
+		inst.PaceWindow = selectedInterval(e.pace, config.PaceWindows, config.DefaultPaceWindow)
+	} else {
+		inst.PaceWindow = 0 // the field only exists for pace-capable kinds
+	}
 
 	switch inst.Kind {
 	case domain.KindAMDGPUWeb:

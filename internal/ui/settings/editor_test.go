@@ -847,3 +847,151 @@ func findTestButton(t *testing.T, s *Settings) *widget.Button {
 
 	return found
 }
+
+// editorSelects collects every select in the editor overlay.
+func editorSelects(t *testing.T, s *Settings) []*widget.Select {
+	t.Helper()
+	var out []*widget.Select
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			if sel, ok := o.(*widget.Select); ok {
+				out = append(out, sel)
+			}
+		})
+	}
+
+	return out
+}
+
+// paceSelect finds the select offering exactly the pace presets.
+func paceSelect(sels []*widget.Select) *widget.Select {
+	for _, sel := range sels {
+		if len(sel.Options) == len(config.PaceWindows) && sel.Options[0] == config.IntervalLabel(config.PaceWindows[0]) {
+			return sel
+		}
+	}
+
+	return nil
+}
+
+// The "Pace window" select exists exactly for the pace-capable kinds,
+// defaulting to the 20m preset; local kinds never offer it.
+func TestEditorPaceSelectPerKind(t *testing.T) {
+	cases := []struct {
+		kind domain.SourceKind
+		want bool
+	}{
+		{domain.KindMiniMax, true},
+		{domain.KindZAI, true},
+		{domain.KindCodex, true},
+		{domain.KindOpenRouter, true},
+		{domain.KindAMDGPUWeb, false},
+		{domain.KindLlamaSwap, false},
+		{domain.KindHindsight, false},
+	}
+	for _, c := range cases {
+		t.Run(string(c.kind), func(t *testing.T) {
+			stub := stubDeps()
+			stub.Creds = blockedStore{}
+			s := NewSettings(test.NewTempApp(t), stub)
+			s.editDraft(c.kind)
+
+			sel := paceSelect(editorSelects(t, s))
+			if !c.want {
+				if sel != nil {
+					t.Errorf("%s editor offers a pace select", c.kind)
+				}
+
+				return
+			}
+			if sel == nil {
+				t.Fatalf("%s editor lacks the pace select", c.kind)
+			}
+			if sel.Selected != config.IntervalLabel(config.DefaultPaceWindow) {
+				t.Errorf("default pace selection = %q, want %q",
+					sel.Selected, config.IntervalLabel(config.DefaultPaceWindow))
+			}
+		})
+	}
+}
+
+// Saving maps the selected preset onto the instance: a chosen 30m lands
+// as 30 minutes, an untouched select as the default, and a non-pace kind
+// keeps the field zero.
+func TestEditorPaceSelectCollects(t *testing.T) {
+	t.Run("chosen preset", func(t *testing.T) {
+		saved := tapEditorSave(t, stubDeps(), func(s *Settings) {
+			sel := paceSelect(editorSelects(t, s))
+			if sel == nil {
+				t.Fatal("pace select missing")
+			}
+			sel.SetSelected("30m")
+		}, domain.KindMiniMax)
+		if got := saved[0].PaceWindow; got != 30*time.Minute {
+			t.Errorf("saved pace window = %v, want 30m", got)
+		}
+	})
+
+	t.Run("untouched select saves the default", func(t *testing.T) {
+		saved := tapEditorSave(t, stubDeps(), func(*Settings) {}, domain.KindOpenRouter)
+		if got := saved[0].PaceWindow; got != config.DefaultPaceWindow {
+			t.Errorf("saved pace window = %v, want the default %v", got, config.DefaultPaceWindow)
+		}
+	})
+
+	t.Run("non-pace kind keeps the field zero", func(t *testing.T) {
+		saved := tapEditorSave(t, stubDeps(), func(*Settings) {}, domain.KindAMDGPUWeb)
+		if got := saved[0].PaceWindow; got != 0 {
+			t.Errorf("saved pace window = %v, want 0", got)
+		}
+	})
+}
+
+// tapEditorSave opens a draft editor of the given kind, lets the caller
+// interact with it, taps Save and waits for the asynchronous save to
+// reach SaveInstances (the save goroutine writes credentials first).
+func tapEditorSave(t *testing.T, stub Deps, act func(*Settings), kind domain.SourceKind) []config.SourceInstance {
+	t.Helper()
+	stub.Creds = blockedStore{}
+	saved := make(chan []config.SourceInstance, 1)
+	stub.SaveInstances = func(list []config.SourceInstance) error {
+		saved <- list
+
+		return nil
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.editDraft(kind)
+	act(s)
+
+	buttons := map[string]*widget.Button{}
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		findButtons(t, overlay, buttons)
+	}
+	save := buttons["Save"]
+	if save == nil {
+		t.Fatal("Save button missing")
+	}
+	save.OnTapped()
+
+	select {
+	case list := <-saved:
+		if len(list) != 1 {
+			t.Fatalf("saved %d instances, want 1", len(list))
+		}
+		// The save goroutine still owes the UI one hop (close + refresh);
+		// let it finish while this test's app is alive, or it lands in
+		// whatever test is running by then.
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if len(s.win.Canvas().Overlays().List()) == 0 {
+				return list
+			}
+		}
+		t.Fatal("the editor dialog never closed after the save")
+
+		return list
+	case <-time.After(2 * time.Second):
+		t.Fatal("the save never reached SaveInstances")
+
+		return nil
+	}
+}
