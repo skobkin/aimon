@@ -13,6 +13,12 @@ you use — without ever opening a browser tab.
 
 - Compact borderless monitor window launched from the tray, with Overview,
   Local and Remote tabs.
+- Usage pace for subscription quotas: how fast a quota window is burning
+  ("Pace 3.4%/h") and where the usage is heading by the window's reset
+  ("≈68% at reset", with a red overflow segment when the projection passes
+  100%). OpenRouter shows a spend speed in $/h. Estimates derive from a
+  bounded in-memory history; the estimation window (10–60 minutes) is
+  configurable per source.
 - Multiple instances per source: monitor several accounts or endpoints side by
   side, each with its own poll interval.
 - Credentials are stored in the system keychain — never in config files or
@@ -29,10 +35,10 @@ you use — without ever opening a browser tab.
 | AMD GPU via [amdgputop-web](https://github.com/skobkin/amdgputop-web) | Local | GPU and VRAM utilization, temperature; power, GTT and clocks in detail |
 | [llama-swap](https://github.com/mostlygeek/llama-swap) | Local | Running models and service health |
 | [Hindsight](https://github.com/vectorize-io/hindsight) | Local | Deployment health, memory banks and facts, activity rates |
-| MiniMax Token Plan | Remote | 5-hour and weekly remaining quota |
-| Z.AI GLM Coding Plan | Remote | 5-hour token quota and monthly MCP usage quota |
-| OpenRouter | Remote | Key usage and spend limit, account credits and balance |
-| ChatGPT Codex | Remote | Plan, 5-hour rate-limit windows, remaining credits |
+| MiniMax Token Plan | Remote | 5-hour and weekly remaining quota, usage pace and end-of-window projection |
+| Z.AI GLM Coding Plan | Remote | 5-hour token quota and monthly MCP usage quota, usage pace and projection |
+| OpenRouter | Remote | Key usage and spend limit, account credits and balance, $/h spend pace |
+| ChatGPT Codex | Remote | Plan, 5-hour rate-limit windows, remaining credits, usage pace and projection |
 
 ## Download
 
