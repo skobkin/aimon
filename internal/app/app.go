@@ -515,23 +515,96 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 	defer a.applyMu.Unlock()
 
 	a.mu.Lock()
-	regs, rePace := a.applyInstancesLocked(list)
+	regs, stalePace := a.applyInstancesLocked(list)
 	a.mu.Unlock()
 
 	a.mgr.Apply(regs)
 
-	if rePace && a.running.Load() {
+	if rePace := a.settlePace(list, regs, stalePace); rePace && a.running.Load() {
 		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
 	}
 }
 
+// settlePace is the post-Apply half of applyInstances: it drops the stale
+// pace histories and syncs the estimation windows, reporting whether a
+// user-visible pace change needs a re-render. It must run only after
+// Manager.Apply has returned: until Apply has waited out a replaced loop,
+// that loop can still deliver its final completion callback, whose
+// recordPace reads the old runtime — a history cleared earlier would let
+// that stale reading repopulate the fresh series, and its first sample
+// would be estimated across the adapter boundary. Apply waits for every
+// stopped loop's done, which closes only after the loop's last callback,
+// so anything recorded between the rebuild and this point is wiped here;
+// afterwards only the new adapters feed the tracker.
+func (a *App) settlePace(list []config.SourceInstance, regs map[domain.InstanceID]source.Registration, stalePace []domain.InstanceID) bool {
+	rePace := false
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for _, id := range stalePace {
+		if a.dropPaceHistoryLocked(id) {
+			rePace = true
+		}
+	}
+
+	// Pace estimation windows apply without touching adapters or history:
+	// estimates are computed at read time, so a changed window re-renders
+	// and takes effect immediately. Interval-only, rename and
+	// enable/disable edits land here with an unchanged window and do not
+	// even re-render.
+	for _, inst := range list {
+		if !config.PaceCapable(inst.Kind) {
+			continue
+		}
+		if prev, known := a.paceWindows[inst.ID]; known && prev == inst.PaceWindow {
+			continue
+		}
+		a.pace.SetWindow(inst.ID, inst.PaceWindow)
+		a.paceWindows[inst.ID] = inst.PaceWindow
+		rePace = true
+	}
+	for id := range a.paceWindows {
+		if _, kept := regs[id]; !kept {
+			delete(a.paceWindows, id)
+		}
+	}
+
+	return rePace
+}
+
+// dropPaceHistoryLocked clears one instance's pace history and re-applies
+// its configured estimation window (Reset drops the tracker's stored
+// window together with the samples). It reports whether the instance is
+// configured and pace-capable, i.e. whether the drop is user-visible.
+// Callers hold mu.
+func (a *App) dropPaceHistoryLocked(id domain.InstanceID) bool {
+	a.pace.Reset(id)
+	delete(a.paceWindows, id)
+	for _, inst := range a.instances {
+		if inst.ID != id {
+			continue
+		}
+		if !config.PaceCapable(inst.Kind) {
+			return false
+		}
+		a.pace.SetWindow(id, inst.PaceWindow)
+		a.paceWindows[id] = inst.PaceWindow
+
+		return true
+	}
+
+	return false
+}
+
 // applyInstancesLocked is the lock-guarded half of applyInstances: it
-// rebuilds adapters, drops pace histories whose upstream identity changed
-// and syncs the pace windows. It returns the registrations for
-// Manager.Apply, which must run without the lock (see applyInstances).
-func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.InstanceID]source.Registration, bool) {
+// rebuilds adapters and decides which pace histories are stale. It returns
+// the registrations for Manager.Apply and the instance IDs whose pace
+// history must drop — the drops themselves run in settlePace, only after
+// Apply has waited out the replaced loops (see settlePace).
+func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.InstanceID]source.Registration, []domain.InstanceID) {
 	regs := make(map[domain.InstanceID]source.Registration, len(list))
 	live := make(map[domain.InstanceID]adapterEntry, len(list))
+	stalePace := []domain.InstanceID(nil)
 	deps := registry.Deps{Creds: a.creds, Client: a.client, Log: a.log, AppVersion: a.appVersion()}
 	for _, inst := range list {
 		def, ok := registry.Get(inst.Kind)
@@ -548,14 +621,11 @@ func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.Ins
 		}
 		entry, cached := a.adapters[inst.ID]
 		if !cached || !config.SameSettings(entry.settings, settings) {
-			// A new adapter means a new upstream identity: the pace
-			// history of the old one must never bleed into the new series
-			// (base-URL change, credential change, …). Reset also drops
-			// the tracker's window, so the cached value goes with it —
-			// the sync below re-tells the tracker the configured window
-			// instead of silently reverting it to the default.
-			a.pace.Reset(inst.ID)
-			delete(a.paceWindows, inst.ID)
+			// A new adapter means a new upstream identity: the pace history
+			// of the old one must never bleed into the new series (base-URL
+			// change, credential change, …). The drop itself is deferred to
+			// settlePace, after Manager.Apply has waited out the old loop.
+			stalePace = append(stalePace, inst.ID)
 			src, err := def.Build(inst, deps)
 			if err != nil {
 				a.log.Error("building source instance failed; instance skipped", "instance", string(inst.ID), "error", err)
@@ -577,36 +647,13 @@ func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.Ins
 	// history with their adapter.
 	for id := range a.adapters {
 		if _, ok := live[id]; !ok {
-			a.pace.Reset(id)
+			stalePace = append(stalePace, id)
 		}
 	}
 	a.adapters = live
 	a.instances = list
 
-	// Pace estimation windows apply without touching adapters or history:
-	// estimates are computed at read time, so a changed window re-renders
-	// and takes effect immediately. Interval-only, rename and
-	// enable/disable edits land here with an unchanged window and do not
-	// even re-render.
-	rePace := false
-	for _, inst := range list {
-		if !config.PaceCapable(inst.Kind) {
-			continue
-		}
-		if prev, known := a.paceWindows[inst.ID]; known && prev == inst.PaceWindow {
-			continue
-		}
-		a.pace.SetWindow(inst.ID, inst.PaceWindow)
-		a.paceWindows[inst.ID] = inst.PaceWindow
-		rePace = true
-	}
-	for id := range a.paceWindows {
-		if _, ok := live[id]; !ok {
-			delete(a.paceWindows, id)
-		}
-	}
-
-	return regs, rePace
+	return regs, stalePace
 }
 
 // quit is the single shutdown path (tray Quit). It is idempotent: the

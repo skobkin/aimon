@@ -554,3 +554,55 @@ func TestApplyInstancesRebuildKeepsPaceWindow(t *testing.T) {
 		t.Errorf("after rebuild: state = %v, want Active (60m window retained, not the 20m default)", w.State)
 	}
 }
+
+// The locked half of an apply must not touch the tracker: until Manager.Apply
+// has waited out a replaced loop, that loop's final completion callback can
+// still record its old snapshot, and a history cleared earlier would let it
+// repopulate the fresh series. The drop therefore runs in settlePace, after
+// Apply returns — which also wipes anything recorded in between.
+func TestApplyInstancesDefersPaceResetUntilAfterApply(t *testing.T) {
+	a := paceTestApp()
+	defer a.mgr.Stop()
+	at := time.Unix(1770000000, 0)
+
+	zaiAt := func(baseURL string) config.SourceInstance {
+		inst := miniInst("mm", time.Hour)
+		inst.Kind = domain.KindZAI
+		inst.MiniMax = nil
+		inst.ZAI = &config.ZAISettings{BaseURL: baseURL}
+
+		return inst
+	}
+	a.applyInstances([]config.SourceInstance{zaiAt("https://api.z.ai")})
+	a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+	a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+
+	// The base-URL change rebuilds the adapter: the locked half queues the
+	// drop but leaves every sample in place — Apply has not run yet, so an
+	// old loop may still be recording.
+	regs, stale := a.applyInstancesLocked([]config.SourceInstance{zaiAt("https://bigmodel.cn")})
+	if len(stale) != 1 || stale[0] != domain.InstanceID("mm") {
+		t.Fatalf("stale pace ids = %v, want [mm]", stale)
+	}
+	if w, ok := a.pace.States()["mm"].Windows["interval"]; !ok || w.State != pace.StateActive {
+		t.Fatalf("locked phase dropped the history before Apply: %+v (ok %v)", w, ok)
+	}
+
+	// Only the post-Apply half wipes the history — and restores the window,
+	// which Reset drops together with the samples.
+	a.mgr.Apply(regs)
+	if rePace := a.settlePace([]config.SourceInstance{zaiAt("https://bigmodel.cn")}, regs, stale); !rePace {
+		t.Error("settlePace reported no user-visible change for a rebuilt pace instance")
+	}
+	if _, ok := a.pace.States()["mm"]; ok {
+		t.Fatal("history survived the post-Apply reset")
+	}
+
+	// The rebuilt series is measured with the configured 60m window, not
+	// the 20m default (30m span fits the former, not the latter).
+	a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+	a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+	if w := a.pace.States()["mm"].Windows["interval"]; w.State != pace.StateActive {
+		t.Errorf("after rebuild: state = %v, want Active (60m window retained)", w.State)
+	}
+}
