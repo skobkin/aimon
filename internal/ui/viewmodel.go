@@ -883,7 +883,11 @@ func BuildSpendVM(snap domain.OpenRouterSnapshot, ip pace.InstancePaces, detail 
 			sensitiveMoneyRow("Account usage", a.TotalUsage),
 		}
 	}
-	if ip.Spend != nil {
+	// The spend pace only attaches while a key is configured: without one
+	// the tracker simply stops receiving samples, and an unconditional
+	// attach would render its frozen last estimate forever on a card whose
+	// usage section is gone (S4: a nil key is unconfigured).
+	if snap.Key != nil && ip.Spend != nil {
 		vm.Pace = buildSpendPaceVM(*ip.Spend)
 	}
 	vm.HasData = snap.Key != nil || snap.Account != nil

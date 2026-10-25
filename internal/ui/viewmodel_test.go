@@ -1262,6 +1262,14 @@ func TestSpendVMPaceAttach(t *testing.T) {
 	if vm.Pace != nil {
 		t.Errorf("spend pace without an estimate = %+v, want nil", vm.Pace)
 	}
+
+	// A removed API key (S4: nil key = unconfigured) hides the pace too —
+	// the tracker stops receiving samples and would otherwise keep
+	// rendering its frozen estimate under the account-only card.
+	vm = BuildSpendVM(orSnap(nil, &domain.OpenRouterAccountCredits{}), pace.InstancePaces{Spend: &spend}, true)
+	if vm.Pace != nil {
+		t.Errorf("spend pace without a configured key = %+v, want nil", vm.Pace)
+	}
 }
 
 // The caption wording contract (S7_UI_UX): speed plus projection when
