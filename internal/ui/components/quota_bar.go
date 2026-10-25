@@ -228,12 +228,14 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 
 // addPaceLine appends the pace caption (and, when a fresh projection
 // exists, the ProjectionBar) to a row box. It returns the caption and the
-// bar for the row's expiry tick; both are nil without pace data.
+// bar for the row's expiry tick; both are nil without pace data. The
+// caption word-wraps like the row's other free-text lines, so a long
+// projection widens nothing.
 func addPaceLine(row *fyne.Container, pace *ui.PaceVM) (*widget.Label, *ProjectionBar) {
 	if pace == nil {
 		return nil, nil
 	}
-	caption := widget.NewLabel(pace.Caption())
+	caption := NewWrappedLabel(pace.Caption(), fyne.TextAlignLeading, fyne.TextStyle{})
 	row.Add(caption)
 
 	var bar *ProjectionBar

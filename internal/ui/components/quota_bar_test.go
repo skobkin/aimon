@@ -238,6 +238,11 @@ func TestNewQuotaRowPaceLine(t *testing.T) {
 	if !slices.Contains(texts, "Pace 3.4%/h · ≈51% at reset") {
 		t.Errorf("row labels = %v, want the pace caption", texts)
 	}
+	for _, l := range rowLabels(t, row) {
+		if strings.HasPrefix(l.Text, "Pace ") && l.Wrapping != fyne.TextWrapWord {
+			t.Errorf("pace caption wrapping = %v, want word wrap", l.Wrapping)
+		}
+	}
 	if !slices.Contains(texts, "2051 / 12.0k credits") {
 		t.Errorf("row labels = %v, want the secondary line", texts)
 	}

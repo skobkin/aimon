@@ -157,6 +157,13 @@ func TestQuotaOverviewBodyPaceLine(t *testing.T) {
 	if slices.Contains(texts, "3.4%/h") {
 		t.Errorf("overview texts = %v, want no speed text in Overview", texts)
 	}
+	for _, l := range rowLabels(t, body) {
+		if l.Text == "≈51% at reset" && l.Wrapping != fyne.TextWrapWord {
+			// An unclamped projection can reach four digits; the caption
+			// must wrap instead of widening the donut column.
+			t.Errorf("projection caption wrapping = %v, want word wrap", l.Wrapping)
+		}
+	}
 	bars := projectionBars(t, body)
 	if len(bars) != 1 {
 		t.Fatalf("projection bars = %d, want 1 (only the projectable window)", len(bars))

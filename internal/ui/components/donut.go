@@ -185,8 +185,11 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 		if w.Pace != nil && w.Pace.CanProject {
 			pace := w.Pace
 			bar := NewProjectionBar(pace.Projected)
-			caption := widget.NewLabel(pace.ProjectedText)
-			caption.Alignment = fyne.TextAlignCenter
+			// Word-wrapped like every other free-text line: an unclamped
+			// projection can reach four digits ("≈1037% at reset"), and an
+			// unwrapped caption would widen the whole donut column past
+			// the window (the label-wrapping policy, docs/DECISION_LOG.md).
+			caption := NewWrappedLabel(pace.ProjectedText, fyne.TextAlignCenter, fyne.TextStyle{})
 			col.Add(bar)
 			col.Add(caption)
 			ticks = append(ticks, func(now time.Time) {
