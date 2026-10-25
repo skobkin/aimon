@@ -1178,6 +1178,11 @@ func TestFormatCountPerHour(t *testing.T) {
 		{312, "credits", "312 credits/h"},
 		{312, "", "312/h"},
 		{12400, "", "12.4k/h"},
+		{3, "credits", "3 credits/h"},
+		{2.5, "credits", "2.5 credits/h"},
+		{0.5, "credits", "0.5 credits/h"},
+		{0.04, "credits", "<0.1 credits/h"},
+		{0.04, "", "<0.1/h"},
 	}
 	for _, c := range cases {
 		if got := FormatCountPerHour(c.v, c.unit); got != c.want {

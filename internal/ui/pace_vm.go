@@ -144,13 +144,25 @@ func FormatPctPerHour(v float64) string {
 }
 
 // FormatCountPerHour renders a count-unit speed ("12.4k credits/h"); an
-// empty unit falls back to a bare "/h".
+// empty unit falls back to a bare "/h". It stretches FormatCount with the
+// same grammar FormatPctPerHour uses for percent speeds: sub-unit burns
+// render as "<0.1" and sub-ten speeds keep one decimal, so a slow burn
+// never reads as zero the way "0 credits/h" would.
 func FormatCountPerHour(v float64, unit string) string {
+	s := ""
+	switch {
+	case v > 0 && v < 0.1:
+		s = "<0.1"
+	case v > 0 && v < 10 && v != math.Trunc(v):
+		s = fmt.Sprintf("%.1f", v)
+	default:
+		s = FormatCount(v)
+	}
 	if unit == "" {
-		return FormatCount(v) + "/h"
+		return s + "/h"
 	}
 
-	return FormatCount(v) + " " + unit + "/h"
+	return s + " " + unit + "/h"
 }
 
 // FormatMoneyPerHour renders a spend speed ("$1.24/h"); sub-cent burns keep
