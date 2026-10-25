@@ -317,3 +317,32 @@ func TestNewQuotaRowPaceExpiryTick(t *testing.T) {
 		t.Error("restore flip failed")
 	}
 }
+
+// A projectable pace wires the expiry tick even when the row's quota
+// snapshot carried no reset time: the monitor reads states before paces,
+// so a sample landing between the two reads can pair a reset-less
+// snapshot with a newer projectable estimate — and that projection must
+// still retire at its reset instant instead of living until the next
+// rebuild.
+func TestNewQuotaRowTickForPaceWithoutReset(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	vm := paceRowVM(at)
+	vm.ResetAt = nil
+	vm.ResetText = ""
+	row, tick := NewQuotaRow(vm)
+	if tick == nil {
+		t.Fatal("projectable pace lost its expiry tick")
+	}
+	bars := projectionBars(t, row)
+	if len(bars) != 1 {
+		t.Fatalf("projection bars = %d, want 1", len(bars))
+	}
+
+	tick(at.Add(2 * time.Hour))
+	if bars[0].Visible() || slices.Contains(labelTexts(rowLabels(t, row)), "≈51% at reset") {
+		t.Error("expired projection survived on a countdown-less row")
+	}
+	if !slices.Contains(labelTexts(rowLabels(t, row)), "Pace 3.4%/h") {
+		t.Error("the speed part of the caption must stay")
+	}
+}

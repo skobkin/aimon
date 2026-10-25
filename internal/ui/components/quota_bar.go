@@ -185,8 +185,9 @@ func (r *quotaBarRenderer) Refresh() {
 //
 // The second return re-renders the row's reset countdown for a new time
 // (a no-op text write unless the rendered second/minute ticked over); it
-// is nil when the row has no countdown. Rows are never rebuilt for time:
-// the monitor's ticker calls this instead.
+// is nil when the row has neither a countdown nor a projectable pace to
+// retire. Rows are never rebuilt for time: the monitor's ticker calls
+// this instead.
 func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 	title := widget.NewLabelWithStyle(quotaRowTitle(vm), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	row := container.NewVBox(
@@ -209,16 +210,21 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 	}
 
 	var tick func(now time.Time)
-	if vm.ResetAt != nil {
+	if vm.ResetAt != nil || (vm.Pace != nil && vm.Pace.CanProject) {
 		reset := vm.ResetAt
 		tick = func(now time.Time) {
-			setText(title, quotaRowTitle(ui.QuotaWindowVM{
-				Name:      vm.Name,
-				ResetText: ui.FormatResetCountdown(reset, now),
-			}))
+			if reset != nil {
+				setText(title, quotaRowTitle(ui.QuotaWindowVM{
+					Name:      vm.Name,
+					ResetText: ui.FormatResetCountdown(reset, now),
+				}))
+			}
 			// The projection dies at the reset instant while the speed
 			// stays meaningful: drop the projection part in place until a
-			// fresh sample rebuilds the row with a new one.
+			// fresh sample rebuilds the row with a new one. Wired even
+			// without a countdown: the monitor reads states before paces,
+			// so a sample landing in between can pair a reset-less
+			// snapshot with a projectable estimate.
 			tickPaceExpiry(paceCaption, paceBar, vm.Pace, now)
 		}
 	}
