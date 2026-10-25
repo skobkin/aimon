@@ -139,6 +139,16 @@ func (r *projectionBarRenderer) Layout(size fyne.Size) {
 }
 
 func (r *projectionBarRenderer) Refresh() {
+	// A renderer refresh never re-runs Layout by itself, but the segment
+	// geometry follows the projected value: re-place it so an in-place
+	// SetProjected moves the divider and the overflow, not just their
+	// colors (the step Fyne's own progress bar takes in its Refresh).
+	// Skipped while unsized: renderer-driven tests lay out manually with
+	// a size the widget itself never received.
+	if s := r.bar.Size(); s.Width > 0 && s.Height > 0 {
+		r.Layout(s)
+	}
+
 	r.track.FillColor = trackColor()
 	r.base.FillColor = ThresholdColor(math.Max(0, 1-r.bar.projected))
 	r.overflow.FillColor = colorCritical

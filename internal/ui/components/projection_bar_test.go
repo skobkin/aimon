@@ -178,3 +178,35 @@ func TestProjectionBarRefreshGate(t *testing.T) {
 		t.Errorf("negative update = %v, want 0", got)
 	}
 }
+
+// SetProjected must move the rendered segments, not just recolor them: a
+// renderer refresh never re-runs Layout, so the widget re-places its own
+// geometry — the step Fyne's progress bar takes in its Refresh.
+func TestProjectionBarSetProjectedRelayouts(t *testing.T) {
+	const width = float32(300)
+
+	b := NewProjectionBar(0.5)
+	b.Resize(fyne.NewSize(width, projectionBarHeight))
+	r, ok := projectionRects(t, b)
+	if !ok {
+		t.Fatal("renderer type assertion failed")
+	}
+	r.Layout(b.Size())
+	if r.overflow.Visible() || r.divider.Visible() {
+		t.Fatal("bar must start at or below 100%")
+	}
+
+	b.SetProjected(1.5)
+	if !r.overflow.Visible() || !r.divider.Visible() {
+		t.Error("overflow and divider must show above 100%")
+	}
+	if w := r.base.Size().Width; !near(float64(w), float64(width)/1.5) {
+		t.Errorf("base width = %v, want %v", w, float64(width)/1.5)
+	}
+	if x := r.divider.Position().X; !near(float64(x), float64(width)/1.5) {
+		t.Errorf("divider x = %v, want %v", x, float64(width)/1.5)
+	}
+	if w := r.overflow.Size().Width; !near(float64(w), float64(width)/3) {
+		t.Errorf("overflow width = %v, want %v", w, float64(width)/3)
+	}
+}
