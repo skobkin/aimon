@@ -122,6 +122,39 @@ func TestProjectionBarRendererLayout(t *testing.T) {
 
 func nearF(a, b float32) bool { return math.Abs(float64(a-b)) < 1e-6 }
 
+// The very first paint must be correct without a Refresh: Fyne's renderer
+// cache never refreshes a fresh renderer, so CreateRenderer already carries
+// the final colors and visibility.
+func TestProjectionBarRendererInitialPaint(t *testing.T) {
+	test.NewTempApp(t)
+
+	t.Run("past 100%", func(t *testing.T) {
+		r, ok := projectionRects(t, NewProjectionBar(1.37))
+		if !ok {
+			t.Fatal("renderer type assertion failed")
+		}
+		if got := r.base.FillColor; got != colorCritical {
+			t.Errorf("base color = %v, want red (no remaining quota)", got)
+		}
+		if !r.overflow.Visible() || !r.divider.Visible() {
+			t.Error("overflow and divider must start visible above 100%")
+		}
+	})
+
+	t.Run("under 100%", func(t *testing.T) {
+		r, ok := projectionRects(t, NewProjectionBar(0.31))
+		if !ok {
+			t.Fatal("renderer type assertion failed")
+		}
+		if got := r.base.FillColor; got != ThresholdColor(0.69) {
+			t.Errorf("base color = %v, want the remaining-fraction threshold color", got)
+		}
+		if r.overflow.Visible() || r.divider.Visible() {
+			t.Error("overflow and divider must start hidden at or below 100%")
+		}
+	})
+}
+
 func TestProjectionBarNegativeClamp(t *testing.T) {
 	if got := NewProjectionBar(-3).Projected(); got != 0 {
 		t.Errorf("negative projection = %v, want 0", got)

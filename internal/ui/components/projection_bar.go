@@ -54,14 +54,24 @@ func (b *ProjectionBar) SetProjected(projected float64) {
 // Projected reports the currently shown projected fraction (unclamped).
 func (b *ProjectionBar) Projected() float64 { return b.projected }
 
-// CreateRenderer implements fyne.Widget.
+// CreateRenderer implements fyne.Widget. The initial state must already be
+// the final one: Fyne's renderer cache never refreshes a fresh renderer
+// before its first paint, so an unrefreshed bar would flash a wrong frame
+// (QuotaBar builds its fill the same way).
 func (b *ProjectionBar) CreateRenderer() fyne.WidgetRenderer {
+	overflow := canvas.NewRectangle(colorCritical)
+	divider := canvas.NewRectangle(foregroundColor())
+	if b.projected <= 1 {
+		overflow.Hide()
+		divider.Hide()
+	}
+
 	return &projectionBarRenderer{
 		bar:      b,
 		track:    canvas.NewRectangle(trackColor()),
-		base:     canvas.NewRectangle(colorCritical),
-		overflow: canvas.NewRectangle(colorCritical),
-		divider:  canvas.NewRectangle(foregroundColor()),
+		base:     canvas.NewRectangle(ThresholdColor(math.Max(0, 1-b.projected))),
+		overflow: overflow,
+		divider:  divider,
 	}
 }
 
