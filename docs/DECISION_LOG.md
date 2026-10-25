@@ -33,6 +33,16 @@ old key.
    table) and `docs/S7_IMPLEMENTATION_SPEC.md` (app wiring) are updated in
    the same commit.
 
+2. **Only the api-key slot's change resets.** A follow-up max self-review
+   caught the guard resolving the owning instance through *any* of the
+   kind's credential slots: rotating OpenRouter's Management key — whose
+   only capability is the account credit balance, which pace never reads —
+   wiped the spend series measured from the untouched API key's own usage
+   counter (the two slots are documented as never interchangeable). The
+   guard now reacts solely to the `api-key` slot; every current pace feed
+   (quota snapshots, Codex usage, the OpenRouter spend total) is measured
+   with that credential, and single-slot kinds are unaffected.
+
 ## 2026-10-25 — S7 review fix: idle requires a ≥ MinSpan comparison span
 
 Post-implementation review (MiniMax-M3.1-Flash) caught the 2026-10-24 idle

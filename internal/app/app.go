@@ -800,16 +800,19 @@ func (s *paceGuardStore) Delete(ctx context.Context, id credentials.AccountID) e
 // paceCredentialChanged reacts to one credential account changing value:
 // the owning instance's pace series measured the old credential's upstream
 // counter, so its history drops even though the adapter — whose identity
-// is the unchanged provider settings — keeps running. It runs on whatever
-// goroutine wrote the secret (the Settings save path), never on the UI
-// thread.
+// is the unchanged provider settings — keeps running. Only the api-key
+// slot reacts: every pace feed is measured with that credential (quota
+// snapshots, Codex usage, the OpenRouter spend total), while OpenRouter's
+// management key feeds the credit balance the pace never reads. It runs on
+// whatever goroutine wrote the secret (the Settings save path), never on
+// the UI thread.
 func (a *App) paceCredentialChanged(account credentials.AccountID, oldSecret, newSecret string) {
 	if oldSecret == newSecret {
 		return // re-saving the same secret changes nothing upstream
 	}
-	inst, ok := a.instanceForAccount(account)
-	if !ok {
-		return // a first save for an instance the tracker has never fed
+	inst, slot, ok := a.instanceForAccount(account)
+	if !ok || slot != credentials.SlotAPIKey {
+		return // not a pace-measured credential of a known instance
 	}
 	a.mu.Lock()
 	a.dropPaceHistoryLocked(inst.ID)
@@ -820,8 +823,8 @@ func (a *App) paceCredentialChanged(account credentials.AccountID, oldSecret, ne
 }
 
 // instanceForAccount resolves which configured instance owns a credential
-// account, via the registry's per-kind slot lists.
-func (a *App) instanceForAccount(account credentials.AccountID) (config.SourceInstance, bool) {
+// account, and through which slot, via the registry's per-kind slot lists.
+func (a *App) instanceForAccount(account credentials.AccountID) (config.SourceInstance, credentials.Slot, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	for _, inst := range a.instances {
@@ -831,12 +834,12 @@ func (a *App) instanceForAccount(account credentials.AccountID) (config.SourceIn
 		}
 		for _, slot := range def.CredentialSlots {
 			if acc, err := credentials.AccountForInstance(inst.ID, slot); err == nil && acc == account {
-				return inst, true
+				return inst, slot, true
 			}
 		}
 	}
 
-	return config.SourceInstance{}, false
+	return config.SourceInstance{}, "", false
 }
 
 // overrideStore layers typed-in credentials over a backing store.

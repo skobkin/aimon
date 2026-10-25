@@ -69,8 +69,11 @@ that interval").
   running adapter at a different upstream counter (spend pace is per-key
   usage; quota series are per account), so the instance's history drops even
   though its provider settings — and therefore its adapter — are unchanged.
-  Re-saving the same secret keeps the history. Detected at the credential
-  store, at save time (Decision Log, 2026-10-25).
+  Only the `api-key` slot qualifies: every pace feed is measured with that
+  credential, so rotating OpenRouter's Management key (account credit
+  balance, which pace never reads) keeps the history. Re-saving the same
+  secret keeps the history. Detected at the credential store, at save time
+  (Decision Log, 2026-10-25).
 - **`ResetAt` movement alone is never a discontinuity.** MiniMax derives the
   reset stamp from a relative duration and re-derives it every poll; Codex
   rolling-window deadlines move between requests. History is kept and the

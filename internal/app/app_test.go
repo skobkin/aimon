@@ -638,6 +638,39 @@ func TestSettlePaceKeepsWindowMirrorForUnregisteredInstance(t *testing.T) {
 	}
 }
 
+// Only the api-key credential feeds a pace series: the OpenRouter spend
+// total is the API key's own usage counter, while the management key
+// measures the account credit balance the pace never reads. Rotating the
+// management key must therefore keep the history (the guard used to drop
+// on any of a kind's slots); rotating the API key still drops it.
+func TestPaceGuardIgnoresManagementKeySlot(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	a := paceTestApp()
+	defer a.mgr.Stop()
+	a.creds = newPaceGuardStore(&memStore{secret: "or-key-v1"}, a.paceCredentialChanged)
+	or := config.SourceInstance{
+		ID: domain.InstanceID("or"), Kind: domain.KindOpenRouter, Name: "OpenRouter",
+		Enabled: true, PollInterval: time.Hour, OpenRouter: &config.OpenRouterSettings{},
+	}
+	a.applyInstances([]config.SourceInstance{or})
+	a.pace.ObserveSpend("or", at, 5)
+	a.pace.ObserveSpend("or", at.Add(10*time.Minute), 7)
+
+	if err := a.creds.Set(context.Background(), "source/or/management-key", "or-mgmt-v2"); err != nil {
+		t.Fatal(err)
+	}
+	if ip, ok := a.pace.States()["or"]; !ok || ip.Spend == nil {
+		t.Errorf("management-key rotation wiped the spend series: %+v (ok %v)", ip, ok)
+	}
+
+	if err := a.creds.Set(context.Background(), "source/or/api-key", "or-api-v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.pace.States()["or"]; ok {
+		t.Error("api-key rotation kept the spend series")
+	}
+}
+
 // A credential change swaps the upstream counter a pace series measures
 // even though the adapter — whose identity is the unchanged provider
 // settings — keeps running: the guarded store drops the owning instance's
