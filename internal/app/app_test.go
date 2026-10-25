@@ -591,7 +591,7 @@ func TestApplyInstancesDefersPaceResetUntilAfterApply(t *testing.T) {
 	// Only the post-Apply half wipes the history — and restores the window,
 	// which Reset drops together with the samples.
 	a.mgr.Apply(regs)
-	if rePace := a.settlePace([]config.SourceInstance{zaiAt("https://bigmodel.cn")}, regs, stale); !rePace {
+	if rePace := a.settlePace([]config.SourceInstance{zaiAt("https://bigmodel.cn")}, stale); !rePace {
 		t.Error("settlePace reported no user-visible change for a rebuilt pace instance")
 	}
 	if _, ok := a.pace.States()["mm"]; ok {
@@ -604,6 +604,37 @@ func TestApplyInstancesDefersPaceResetUntilAfterApply(t *testing.T) {
 	a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
 	if w := a.pace.States()["mm"].Windows["interval"]; w.State != pace.StateActive {
 		t.Errorf("after rebuild: state = %v, want Active (60m window retained)", w.State)
+	}
+}
+
+// A build failure leaves an instance configured but unregistered — Apply
+// detaches its loop without a replacement — so the window mirror must be
+// pruned against the configured list, not the registrations: the window
+// dropPaceHistoryLocked restores for such an instance would otherwise be
+// forgotten, and the next save would re-announce it as a user-visible
+// pace change nothing visible justifies.
+func TestSettlePaceKeepsWindowMirrorForUnregisteredInstance(t *testing.T) {
+	a := paceTestApp()
+	defer a.mgr.Stop()
+
+	inst := miniInst("mm", time.Hour)
+	inst.Kind = domain.KindZAI
+	inst.MiniMax = nil
+	inst.ZAI = &config.ZAISettings{BaseURL: "https://api.z.ai"}
+	list := []config.SourceInstance{inst}
+
+	// No registrations at all: the adapter build failed for the still-
+	// configured instance, while its history still had to drop.
+	if rePace := a.settlePace(list, []domain.InstanceID{"mm"}); !rePace {
+		t.Fatal("settlePace reported no change for a dropped history")
+	}
+	if got, ok := a.paceWindows["mm"]; !ok || got != inst.PaceWindow {
+		t.Fatalf("window mirror after settle = %v (ok %v), want the configured window", got, ok)
+	}
+
+	// The follow-up save must not re-announce the window it never lost.
+	if rePace := a.settlePace(list, nil); rePace {
+		t.Error("second settle reported a user-visible pace change")
 	}
 }
 

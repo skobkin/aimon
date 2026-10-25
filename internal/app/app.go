@@ -524,7 +524,7 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 
 	a.mgr.Apply(regs)
 
-	if rePace := a.settlePace(list, regs, stalePace); rePace && a.running.Load() {
+	if rePace := a.settlePace(list, stalePace); rePace && a.running.Load() {
 		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
 	}
 }
@@ -540,7 +540,7 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 // stopped loop's done, which closes only after the loop's last callback,
 // so anything recorded between the rebuild and this point is wiped here;
 // afterwards only the new adapters feed the tracker.
-func (a *App) settlePace(list []config.SourceInstance, regs map[domain.InstanceID]source.Registration, stalePace []domain.InstanceID) bool {
+func (a *App) settlePace(list []config.SourceInstance, stalePace []domain.InstanceID) bool {
 	rePace := false
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -567,8 +567,22 @@ func (a *App) settlePace(list []config.SourceInstance, regs map[domain.InstanceI
 		a.paceWindows[inst.ID] = inst.PaceWindow
 		rePace = true
 	}
+	// The window mirror tracks the configured instances, not the
+	// registrations: a build failure leaves an instance configured but
+	// unregistered (Apply detaches its loop without a replacement), and
+	// the window dropPaceHistoryLocked just restored for it must survive
+	// here — pruning by registration would forget it, and the next save
+	// would then re-announce a window nothing visible lost.
 	for id := range a.paceWindows {
-		if _, kept := regs[id]; !kept {
+		kept := false
+		for _, inst := range list {
+			if inst.ID == id {
+				kept = true
+
+				break
+			}
+		}
+		if !kept {
 			delete(a.paceWindows, id)
 		}
 	}
