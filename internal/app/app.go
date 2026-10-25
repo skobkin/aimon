@@ -93,6 +93,11 @@ type App struct {
 	// told about, so a pace-window-only change can be detected without
 	// querying the tracker.
 	paceWindows map[domain.InstanceID]time.Duration
+
+	// applyMu serializes applyInstances against itself. It must stay
+	// separate from mu: Manager.Apply waits for source-loop teardown whose
+	// completion callback takes mu (see applyInstances).
+	applyMu sync.Mutex
 }
 
 // uiCoalescer lets one UI update wait while others arrive. schedule
@@ -496,10 +501,35 @@ func (a *App) appVersion() string {
 // the cached adapter, so their manager registration is unchanged and the
 // poller is never restarted. Instances that cannot be built are logged and
 // skipped — the persisted list stays authoritative for the UI.
+//
+// The instances lock is never held across Manager.Apply: Apply waits for
+// the cancelled source loops to exit, and a loop's completion callback
+// (recordPace → instanceByID) takes that same lock — holding it across
+// Apply would deadlock a settings save against the very poll it
+// reconfigures, and freeze every other lock reader (the UI rebuilds) for
+// the teardown's duration. Applies are serialized against each other with
+// a separate mutex; concurrent readers only ever see the state before or
+// after a whole apply.
 func (a *App) applyInstances(list []config.SourceInstance) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.applyMu.Lock()
+	defer a.applyMu.Unlock()
 
+	a.mu.Lock()
+	regs, rePace := a.applyInstancesLocked(list)
+	a.mu.Unlock()
+
+	a.mgr.Apply(regs)
+
+	if rePace && a.running.Load() {
+		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
+	}
+}
+
+// applyInstancesLocked is the lock-guarded half of applyInstances: it
+// rebuilds adapters, drops pace histories whose upstream identity changed
+// and syncs the pace windows. It returns the registrations for
+// Manager.Apply, which must run without the lock (see applyInstances).
+func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.InstanceID]source.Registration, bool) {
 	regs := make(map[domain.InstanceID]source.Registration, len(list))
 	live := make(map[domain.InstanceID]adapterEntry, len(list))
 	deps := registry.Deps{Creds: a.creds, Client: a.client, Log: a.log, AppVersion: a.appVersion()}
@@ -547,7 +577,6 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 		}
 	}
 	a.adapters = live
-	a.mgr.Apply(regs)
 	a.instances = list
 
 	// Pace estimation windows apply without touching adapters or history:
@@ -572,9 +601,8 @@ func (a *App) applyInstances(list []config.SourceInstance) {
 			delete(a.paceWindows, id)
 		}
 	}
-	if rePace && a.running.Load() {
-		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
-	}
+
+	return regs, rePace
 }
 
 // quit is the single shutdown path (tray Quit). It is idempotent: the
