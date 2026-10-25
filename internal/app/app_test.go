@@ -607,6 +607,36 @@ func TestApplyInstancesDefersPaceResetUntilAfterApply(t *testing.T) {
 	}
 }
 
+// An existing instance whose adapter rebuild fails is claimed by the
+// rebuild branch before its Build runs, and is missing from live
+// afterwards; the disappeared loop must not claim it a second time — the
+// duplicate entry dropped and re-announced the same series twice per save.
+func TestApplyInstancesClaimsFailedRebuildOnce(t *testing.T) {
+	a := paceTestApp()
+	defer a.mgr.Stop()
+
+	zaiAt := func(baseURL string) config.SourceInstance {
+		inst := miniInst("mm", time.Hour)
+		inst.Kind = domain.KindZAI
+		inst.MiniMax = nil
+		inst.ZAI = &config.ZAISettings{BaseURL: baseURL}
+
+		return inst
+	}
+	// Every fresh build claims its series once (nothing to drop yet).
+	if _, stale := a.applyInstancesLocked([]config.SourceInstance{zaiAt("https://api.z.ai")}); len(stale) != 1 {
+		t.Fatalf("first apply queued %v, want exactly [mm]", stale)
+	}
+
+	// A changed base URL forces a rebuild, and the nil credential store
+	// makes that Build fail: the instance stays configured but unregistered.
+	a.creds = nil
+	_, stale := a.applyInstancesLocked([]config.SourceInstance{zaiAt("https://bigmodel.cn")})
+	if len(stale) != 1 || stale[0] != domain.InstanceID("mm") {
+		t.Errorf("stale pace ids after a failed rebuild = %v, want exactly [mm]", stale)
+	}
+}
+
 // A build failure leaves an instance configured but unregistered — Apply
 // detaches its loop without a replacement — so the window mirror must be
 // pruned against the configured list, not the registrations: the window

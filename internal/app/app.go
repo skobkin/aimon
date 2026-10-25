@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -662,9 +663,11 @@ func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.Ins
 	}
 
 	// Instances that disappeared (or failed to build) lose their pace
-	// history with their adapter.
+	// history with their adapter. A stayed-but-failed rebuild is already
+	// claimed above — its Build runs after the claim — so skip it here:
+	// a second entry would drop and re-announce the same series twice.
 	for id := range a.adapters {
-		if _, ok := live[id]; !ok {
+		if _, ok := live[id]; !ok && !slices.Contains(stalePace, id) {
 			stalePace = append(stalePace, id)
 		}
 	}
