@@ -24,9 +24,10 @@ type PaceVM struct {
 	// empty while no estimate exists.
 	SpeedText string
 	// CanProject reports that a fresh projection was computable at build
-	// time. ProjectedText then reads "≈68% at reset" (unclamped:
-	// "≈137% at reset") and Projected carries the unclamped fraction for
-	// the ProjectionBar.
+	// time. ProjectedText then reads "≈68% at reset" — uncapped above 100%
+	// ("≈137% at reset"), floored at zero for providers reporting
+	// remaining above their own limit — and Projected carries the same
+	// fraction for the ProjectionBar.
 	CanProject    bool
 	ProjectedText string
 	Projected     float64
@@ -72,6 +73,14 @@ func buildPaceVM(est pace.Estimate, now time.Time) *PaceVM {
 
 	if projected, ok := est.Project(now); ok {
 		vm.CanProject = true
+		// A count anchor goes negative when a provider reports remaining
+		// above its own limit (a stale remaining after a raise); projected
+		// usage below zero is not a thing, so the display floors it here
+		// exactly like the ProjectionBar does. Only the uncapped-above-100%
+		// side of Project is contractual.
+		if projected < 0 {
+			projected = 0
+		}
 		vm.Projected = projected
 		vm.ProjectedText = "≈" + formatProjectedPct(projected) + " at reset"
 	}

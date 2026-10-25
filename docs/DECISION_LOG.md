@@ -10,6 +10,18 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-25 — S7 review fix: the projection display floors at zero
+
+1. **Projected usage cannot go below zero.** A count anchor turns negative
+   when a provider reports remaining above its own limit (a stale
+   remaining after a limit raise), and the projection then rendered as
+   "≈-N% at reset" — the ProjectionBar floored at 0 while the caption
+   kept the nonsense value. The pace VM floors the projected fraction at
+   zero before it reaches either the caption or the bar; the
+   uncapped-above-100% contract is unchanged. Found in the second max
+   self-review; `docs/S7_PACE.md` (projection formula) is updated in the
+   same commit.
+
 ## 2026-10-25 — S7 review fix: credential changes reset pace history
 
 Post-implementation review (Codex GPT-6.1 Sol) caught a spend-pace leak:

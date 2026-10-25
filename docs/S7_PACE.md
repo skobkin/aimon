@@ -87,8 +87,10 @@ anchor    = UsedCount/Limit when counts are valid and Limit > 0,
             else the reported used fraction
 ```
 
-Unclamped (may exceed 1.0). Constant between samples — recomputed only when a
-new sample or a settings change triggers a rebuild, never per tick.
+Uncapped above (may exceed 1.0), floored at zero: a negative value arises
+only from a provider reporting remaining above its own limit. Constant
+between samples — recomputed only when a new sample or a settings change
+triggers a rebuild, never per tick.
 
 Validity is time-bound: once the current time reaches `ResetAt` the
 projection is stale and the UI hides the projected percentage and bar until a

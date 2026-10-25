@@ -1103,8 +1103,10 @@ func TestBuildPaceVMStateMapping(t *testing.T) {
 	}
 }
 
-// The projected text is unclamped: real usage never reads as zero, and an
-// over-100% projection keeps its true value (only the bar segments cap).
+// The projected text is uncapped above 100% — a real overage keeps its
+// true value (only the bar segments cap) — and floored at zero: a provider
+// reporting remaining above its own limit makes the count anchor negative,
+// and usage below zero is not a thing.
 func TestBuildPaceVMProjectionBoundaries(t *testing.T) {
 	cases := []struct {
 		projected float64
@@ -1116,6 +1118,8 @@ func TestBuildPaceVMProjectionBoundaries(t *testing.T) {
 		{1.0, "≈100% at reset"},
 		{1.37, "≈137% at reset"},
 		{10.0, "≈1000% at reset"},
+		{-0.31, "≈0% at reset"}, // floored, not "≈-31%"
+		{-3, "≈0% at reset"},
 	}
 	for _, c := range cases {
 		est := activeEst()
@@ -1126,6 +1130,14 @@ func TestBuildPaceVMProjectionBoundaries(t *testing.T) {
 			t.Errorf("projected %v = %q (CanProject %v), want %q",
 				c.projected, vm.ProjectedText, vm.CanProject, c.want)
 		}
+	}
+
+	// The floor reaches the bar input too, not just the caption.
+	est := activeEst()
+	est.LastUsed = -3
+	est.SpeedFrac = 0
+	if vm := buildPaceVM(est, now); !vm.CanProject || vm.Projected != 0 {
+		t.Errorf("negative projection fraction = %v (CanProject %v), want 0", vm.Projected, vm.CanProject)
 	}
 }
 
