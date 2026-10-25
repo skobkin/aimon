@@ -231,13 +231,17 @@ func (m *Monitor) onRefresh() {
 func (m *Monitor) rebuild() {
 	instances := m.ctrl.Instances()
 	states := m.ctrl.States()
+	// One snapshot feeds all three tabs: three reads would cost three
+	// estimate passes under the tracker mutex and could disagree across
+	// tabs.
+	paces := m.ctrl.PaceStates()
 	now := time.Now()
 
 	var tick []func(now time.Time)
 
-	m.rebuildOverview(ui.BuildOverview(instances, states, m.ctrl.PaceStates(), now), states, &tick)
-	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, m.ctrl.PaceStates(), now), instances, states, "No local sources enabled.", &tick)...)
-	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, m.ctrl.PaceStates(), now), instances, states, "No remote sources enabled.", &tick)...)
+	m.rebuildOverview(ui.BuildOverview(instances, states, paces, now), states, &tick)
+	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, paces, now), instances, states, "No local sources enabled.", &tick)...)
+	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, paces, now), instances, states, "No remote sources enabled.", &tick)...)
 
 	m.tickFns = tick
 }
