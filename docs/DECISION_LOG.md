@@ -10,6 +10,29 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-25 — S7 review fix: credential changes reset pace history
+
+Post-implementation review (Codex GPT-6.1 Sol) caught a spend-pace leak:
+replacing an API key in Settings did not reset the series measured from the
+old key.
+
+1. **A credential change is a series discontinuity.** Pace series identity
+   is (instance configuration, credential). Settings equality — the adapter
+   rebuild trigger — deliberately excludes secrets, and adapters re-read the
+   keychain on every refresh, so a swapped key silently re-pointed the
+   surviving series at a different upstream counter: two unrelated
+   cumulative usage totals were differenced into one hourly spend (quota
+   kinds have the same per-account issue). The app therefore wraps the
+   credential store it hands to adapters and Settings alike: a write or
+   deletion whose value changed drops the owning instance's pace history
+   (window re-applied) and schedules a re-render. Re-saving an identical
+   secret keeps the history; an unreadable old value (locked keychain)
+   counts as changed, since dropping history is the safe direction. The
+   compared values are used only for that comparison — never stored,
+   logged, or persisted. `docs/S7_PACE.md` (discontinuity rules + edge
+   table) and `docs/S7_IMPLEMENTATION_SPEC.md` (app wiring) are updated in
+   the same commit.
+
 ## 2026-10-25 — S7 review fix: idle requires a ≥ MinSpan comparison span
 
 Post-implementation review (MiniMax-M3.1-Flash) caught the 2026-10-24 idle

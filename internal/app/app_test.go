@@ -606,3 +606,75 @@ func TestApplyInstancesDefersPaceResetUntilAfterApply(t *testing.T) {
 		t.Errorf("after rebuild: state = %v, want Active (60m window retained)", w.State)
 	}
 }
+
+// A credential change swaps the upstream counter a pace series measures
+// even though the adapter — whose identity is the unchanged provider
+// settings — keeps running: the guarded store drops the owning instance's
+// history, keeps it when the same secret is re-saved, and ignores accounts
+// no configured instance owns.
+func TestCredentialChangeResetsPaceHistory(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	account := credentials.AccountID("source/mm/api-key")
+
+	newGuardedApp := func(secret string) *App {
+		a := paceTestApp()
+		a.creds = newPaceGuardStore(&memStore{secret: secret}, a.paceCredentialChanged)
+		a.applyInstances([]config.SourceInstance{miniInst("mm", time.Hour)})
+		a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+		a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+
+		return a
+	}
+	active := func(a *App, what string) {
+		t.Helper()
+		w, ok := a.pace.States()["mm"].Windows["interval"]
+		if !ok || w.State != pace.StateActive {
+			t.Fatalf("%s: estimate = %+v (ok %v), want Active", what, w, ok)
+		}
+	}
+
+	t.Run("changed secret resets", func(t *testing.T) {
+		a := newGuardedApp("key-v1")
+		defer a.mgr.Stop()
+		if err := a.creds.Set(context.Background(), account, "key-v2"); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := a.pace.States()["mm"]; ok {
+			t.Fatal("history survived a credential change")
+		}
+		// The fresh series comes back with the configured window (Reset
+		// drops it with the samples): a 30m span fits 60m, not the default.
+		a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+		a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+		active(a, "after credential change")
+	})
+
+	t.Run("same secret keeps history", func(t *testing.T) {
+		a := newGuardedApp("key-v1")
+		defer a.mgr.Stop()
+		if err := a.creds.Set(context.Background(), account, "key-v1"); err != nil {
+			t.Fatal(err)
+		}
+		active(a, "re-saved same secret")
+	})
+
+	t.Run("foreign account ignored", func(t *testing.T) {
+		a := newGuardedApp("key-v1")
+		defer a.mgr.Stop()
+		if err := a.creds.Set(context.Background(), "source/other/api-key", "key-v2"); err != nil {
+			t.Fatal(err)
+		}
+		active(a, "unrelated account changed")
+	})
+
+	t.Run("removed secret resets", func(t *testing.T) {
+		a := newGuardedApp("key-v1")
+		defer a.mgr.Stop()
+		if err := a.creds.Delete(context.Background(), account); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := a.pace.States()["mm"]; ok {
+			t.Fatal("history survived a credential removal")
+		}
+	})
+}

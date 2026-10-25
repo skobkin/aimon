@@ -164,6 +164,10 @@ func New() (*App, error) {
 		loadErr:     loadErr,
 		done:        make(chan struct{}),
 	}
+	// From here on the app and every consumer (adapters, Settings) share
+	// the guarded store: a credential change must reset the owning
+	// instance's pace history (see paceGuardStore).
+	a.creds = newPaceGuardStore(creds, a.paceCredentialChanged)
 	a.running.Store(true)
 
 	a.monitor = monitor.NewMonitor(fa, a, a.done)
@@ -731,6 +735,94 @@ func (a *App) cleanupCredentials(ctx context.Context, inst config.SourceInstance
 	}
 
 	return errors.Join(errs...)
+}
+
+// paceGuardStore wraps the credential store so a changed secret can reset
+// the owning instance's pace history. Provider settings — and therefore
+// adapter identity — never include secrets: swapping a key in Settings
+// reuses the running adapter, and the adapter picks the new value up from
+// the keychain on its next refresh, so nothing else tells the pace tracker
+// that its series now measures a different upstream counter (S7: spend
+// pace is per-key usage; quota kinds are likewise per account). The old
+// value is compared so re-saving an unchanged secret keeps the history;
+// an unreadable old value (locked keychain) counts as changed — dropping
+// history is the safe direction. The compared values live only for that
+// comparison: they are never stored, logged, or persisted.
+type paceGuardStore struct {
+	inner   credentials.Store
+	changed func(id credentials.AccountID, oldSecret, newSecret string)
+}
+
+func newPaceGuardStore(store credentials.Store, changed func(id credentials.AccountID, oldSecret, newSecret string)) *paceGuardStore {
+	return &paceGuardStore{inner: store, changed: changed}
+}
+
+func (s *paceGuardStore) Status(ctx context.Context) credentials.Status { return s.inner.Status(ctx) }
+
+func (s *paceGuardStore) Get(ctx context.Context, id credentials.AccountID) (string, error) {
+	return s.inner.Get(ctx, id)
+}
+
+func (s *paceGuardStore) Set(ctx context.Context, id credentials.AccountID, secret string) error {
+	old, _ := s.inner.Get(ctx, id) // best effort: an unreadable old value counts as changed
+	if err := s.inner.Set(ctx, id, secret); err != nil {
+		return err
+	}
+	s.changed(id, old, secret)
+
+	return nil
+}
+
+func (s *paceGuardStore) Delete(ctx context.Context, id credentials.AccountID) error {
+	old, _ := s.inner.Get(ctx, id)
+	if err := s.inner.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.changed(id, old, "")
+
+	return nil
+}
+
+// paceCredentialChanged reacts to one credential account changing value:
+// the owning instance's pace series measured the old credential's upstream
+// counter, so its history drops even though the adapter — whose identity
+// is the unchanged provider settings — keeps running. It runs on whatever
+// goroutine wrote the secret (the Settings save path), never on the UI
+// thread.
+func (a *App) paceCredentialChanged(account credentials.AccountID, oldSecret, newSecret string) {
+	if oldSecret == newSecret {
+		return // re-saving the same secret changes nothing upstream
+	}
+	inst, ok := a.instanceForAccount(account)
+	if !ok {
+		return // a first save for an instance the tracker has never fed
+	}
+	a.mu.Lock()
+	a.dropPaceHistoryLocked(inst.ID)
+	a.mu.Unlock()
+	if a.running.Load() {
+		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
+	}
+}
+
+// instanceForAccount resolves which configured instance owns a credential
+// account, via the registry's per-kind slot lists.
+func (a *App) instanceForAccount(account credentials.AccountID) (config.SourceInstance, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, inst := range a.instances {
+		def, ok := registry.Get(inst.Kind)
+		if !ok {
+			continue
+		}
+		for _, slot := range def.CredentialSlots {
+			if acc, err := credentials.AccountForInstance(inst.ID, slot); err == nil && acc == account {
+				return inst, true
+			}
+		}
+	}
+
+	return config.SourceInstance{}, false
 }
 
 // overrideStore layers typed-in credentials over a backing store.

@@ -65,6 +65,12 @@ that interval").
   both samples carry counts, the count delta is authoritative and is checked
   even when the quantized fraction is unchanged; never a negative burn rate.
 - **Limit changed** (value or nil↔non-nil) — series reset.
+- **Credential changed** — a swapped or removed keychain secret re-points the
+  running adapter at a different upstream counter (spend pace is per-key
+  usage; quota series are per account), so the instance's history drops even
+  though its provider settings — and therefore its adapter — are unchanged.
+  Re-saving the same secret keeps the history. Detected at the credential
+  store, at save time (Decision Log, 2026-10-25).
 - **`ResetAt` movement alone is never a discontinuity.** MiniMax derives the
   reset stamp from a relative duration and re-derives it every poll; Codex
   rolling-window deadlines move between requests. History is kept and the
@@ -98,6 +104,7 @@ and error handling are unaffected.
 | Count decrease, fraction unchanged | Discontinuity, Unavailable |
 | Fraction decrease (no counts) | Discontinuity, Unavailable |
 | Limit changed | Series reset, Collecting |
+| Credential changed / removed | History dropped, Collecting from the new credential |
 | ResetAt jitter / rolling deadline moves | History kept, latest ResetAt used |
 | Gap (failures, suspend, disable) | True average over endpoint timestamps |
 | Duplicate/stale notification | Not recorded (timestamp guard) |

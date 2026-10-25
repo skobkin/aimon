@@ -105,9 +105,14 @@ With the instance's window `w`:
   `CodexSnapshot` → `ObserveQuota`, `OpenRouterSnapshot` with `Key != nil` →
   `ObserveSpend(id, CollectedAt, Key.UsageTotal)`.
 - `applyInstances`: adapter rebuild (settings change) or instance removal →
-  `Tracker.Reset(id)`; pace-window-only change → `SetWindow` + coalesced
+  `Tracker.Reset(id)`, dropped only after `Manager.Apply` has waited out the
+  replaced loops (their final completion callback can still record against
+  the old runtime); pace-window-only change → `SetWindow` + coalesced
   re-render, adapter untouched. Interval-only / rename / enable-disable keep
-  history.
+  history. A changed credential keeps the adapter but still drops the
+  instance's history: the app wraps the credential store and resets the
+  owning instance on a changed-value write or deletion (same-value re-saves
+  keep history).
 - `MonitorController` gains `PaceStates() map[domain.InstanceID]pace.InstancePaces`;
   `rebuild()` threads the (read-only) map through `BuildOverview` /
   `BuildLocalTab` / `BuildRemoteTab` into the card builders. View models stay
