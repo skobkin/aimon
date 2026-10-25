@@ -175,7 +175,7 @@ func New() (*App, error) {
 		LoadInstances:        a.Instances,
 		SaveInstances:        a.SaveInstances,
 		CleanupCredentials:   a.cleanupCredentials,
-		Creds:                creds,
+		Creds:                a.creds,
 		TestConnection:       a.testConnection,
 		HideSensitiveInfo:    a.HideSensitiveInfo,
 		SetHideSensitiveInfo: a.SetHideSensitiveInfo,
