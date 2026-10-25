@@ -10,6 +10,23 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-25 — S7 review fix: idle requires a ≥ MinSpan comparison span
+
+Post-implementation review (MiniMax-M3.1-Flash) caught the 2026-10-24 idle
+rule misfiring on manual refreshes; this entry amends it from this date
+onward.
+
+1. **Idle is measured across a real span.** The idle verdict compares the
+   newest sample against the newest sample at least `MinSpan` (3 minutes)
+   older, not the adjacent pair. A manual refresh records a sample seconds
+   after the scheduled poll; that adjacent pair is flat for lack of time,
+   not for lack of usage, and the old rule zeroed the speed and collapsed
+   every projection until the next poll. Bursts still end promptly: with
+   1-minute polling, idle is reported within ~3 minutes of the last
+   consumption instead of ~1. Amends entry 2 of the 2026-10-24 entry;
+   `docs/S7_PACE.md` (edge table) and `docs/S7_IMPLEMENTATION_SPEC.md`
+   (estimation step 4) are updated in the same commit.
+
 ## 2026-10-24 — S7: usage pace (speed and end-of-window projection), implementation-time decisions
 
 Implementation of S7 / v0.7.0 per `docs/S7_PACE.md`, `docs/S7_AGENT_RULES.md`,

@@ -53,9 +53,9 @@ const (
 	StateCollecting State = iota
 	// StateActive: positive measured consumption.
 	StateActive
-	// StateIdle: the newest sample pair shows no consumption — the speed
-	// is forced to zero immediately so a finished burst cannot keep
-	// projecting a fake overage.
+	// StateIdle: the newest sample shows no consumption against the newest
+	// sample at least MinSpan older — the speed is forced to zero so a
+	// finished burst cannot keep projecting a fake overage.
 	StateIdle
 	// StateUnavailable: the first read after a discontinuity (usage
 	// decrease, limit change). The next recorded sample clears it.
@@ -404,22 +404,33 @@ func estimate(s *series, window time.Duration) Estimate {
 	}
 
 	dt := span.Hours() // > 0 by the MinSpan gate
-	prev := s.samples[n-2]
 
-	// Idle override: the newest pair flat means consumption has stopped.
-	// Counts compare exactly; fractions need the epsilon because providers
-	// quantize them to integer percent.
+	// Idle override: consumption has stopped when the newest sample equals
+	// the newest sample at least MinSpan older — not merely the adjacent
+	// pair. A sample recorded seconds after its predecessor (a manual
+	// refresh landing between polls) is flat for lack of time, not for
+	// lack of usage, and reading it as idle zeroed the speed and collapsed
+	// every projection until the next poll (DECISION_LOG 2026-10-25). The
+	// comparison anchor always exists: the endpoint gate above guarantees
+	// samples[start] is at least MinSpan older than newest. Counts compare
+	// exactly; fractions need the epsilon because providers quantize them
+	// to integer percent.
+	idlePrevIdx := n - 2
+	for idlePrevIdx >= 0 && newest.At.Sub(s.samples[idlePrevIdx].At) < MinSpan {
+		idlePrevIdx--
+	}
+	idlePrev := s.samples[idlePrevIdx]
 	idle := false
-	if newest.UsedCount != nil && prev.UsedCount != nil {
-		idle = absFloat(*newest.UsedCount-*prev.UsedCount) <= countEpsilon
+	if newest.UsedCount != nil && idlePrev.UsedCount != nil {
+		idle = absFloat(*newest.UsedCount-*idlePrev.UsedCount) <= countEpsilon
 	} else {
-		idle = absFloat(newest.Used-prev.Used) <= fracEpsilon
+		idle = absFloat(newest.Used-idlePrev.Used) <= fracEpsilon
 	}
 	if idle {
 		est.State = StateIdle
 		// The pair carried counts: report "0 units/h", not "0%/h", so the
 		// display stays consistent with the Active state's unit.
-		est.HasCount = newest.UsedCount != nil && prev.UsedCount != nil
+		est.HasCount = newest.UsedCount != nil && idlePrev.UsedCount != nil
 
 		return est
 	}

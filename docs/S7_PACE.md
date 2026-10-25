@@ -92,8 +92,9 @@ and error handling are unaffected.
 |---|---|
 | First sample of a series | Collecting |
 | In-window span < MinSpan (incl. flat pair) | Collecting |
-| Newest pair flat, coverage adequate | Idle, speed 0 |
-| Burst then flat | Idle at the first flat pair |
+| Newest sample flat against the newest sample ≥ MinSpan older | Idle, speed 0 |
+| Burst then flat | Idle within MinSpan of the last increase |
+| Sample seconds after its predecessor (manual refresh) | Never idle by itself; measured normally |
 | Count decrease, fraction unchanged | Discontinuity, Unavailable |
 | Fraction decrease (no counts) | Discontinuity, Unavailable |
 | Limit changed | Series reset, Collecting |

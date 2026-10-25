@@ -83,6 +83,37 @@ func TestInitialFlatSamplesBelowMinSpanStayCollecting(t *testing.T) {
 	}
 }
 
+// A manual refresh records a sample seconds after the scheduled poll: the
+// adjacent pair is flat for lack of time, not for lack of usage, and must
+// never read as idle. The pace keeps measuring until a full ≥ MinSpan span
+// ending at the newest sample is flat (DECISION_LOG 2026-10-25).
+func TestManualRefreshSampleNeverReadsIdle(t *testing.T) {
+	tr := NewTracker()
+	tr.SetWindow("mm", 20*time.Minute)
+	reset := at(300)
+	record(t, tr, "mm", 0, 0.10, nil, nil, "", &reset)
+	record(t, tr, "mm", 5, 0.15, nil, nil, "", &reset)
+
+	// Manual refresh 2 seconds after the scheduled poll, values unchanged.
+	record(t, tr, "mm", 5+2.0/60, 0.15, nil, nil, "", &reset)
+	est := one(t, tr, "mm")
+	if est.State != StateActive {
+		t.Fatalf("state after a manual refresh = %v, want Active", est.State)
+	}
+	if want := 0.05 / (302.0 / 3600); !near(est.SpeedFrac, want) {
+		t.Errorf("speed = %v, want the window measurement %v", est.SpeedFrac, want)
+	}
+
+	// Flat across a full MinSpan ends the burst: the newest sample is
+	// compared against the newest one at least MinSpan older (5m), not the
+	// 2s-younger manual-refresh sample.
+	record(t, tr, "mm", 8, 0.15, nil, nil, "", &reset)
+	est = one(t, tr, "mm")
+	if est.State != StateIdle || est.SpeedFrac != 0 {
+		t.Fatalf("flat over 3m: state = %v speed = %v, want Idle 0", est.State, est.SpeedFrac)
+	}
+}
+
 // Once coverage reaches MinSpan, a flat newest pair reports Idle with speed
 // zero immediately — a finished burst must not keep projecting an overage.
 func TestActiveToIdleTransition(t *testing.T) {

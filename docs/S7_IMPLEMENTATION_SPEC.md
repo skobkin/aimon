@@ -86,7 +86,10 @@ With the instance's window `w`:
 2. <2 samples → Collecting.
 3. Endpoint = oldest sample with `At ≥ newest.At − w`; span < MinSpan →
    Collecting (before any idle override).
-4. Newest pair flat (counts exact / fraction ≤ epsilon) → Idle: speeds 0.
+4. Newest sample flat against the newest sample at least MinSpan older
+   (counts exact / fraction ≤ epsilon) → Idle: speeds 0. A sample recorded
+   seconds after its predecessor (manual refresh) never reads idle by
+   itself.
 5. `dt ≤ 0` → Unavailable. Both endpoints with counts and `LimitNewest > 0`:
    `SpeedCount = Δcount/dt.Hours()`, `SpeedFrac = Δcount/LimitNewest/dt.Hours()`,
    `HasCount = true`; otherwise `SpeedFrac = Δfrac/dt.Hours()` (tiny
