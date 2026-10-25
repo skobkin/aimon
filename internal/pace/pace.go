@@ -414,7 +414,11 @@ func estimate(s *series, window time.Duration) Estimate {
 	// comparison anchor always exists: the endpoint gate above guarantees
 	// samples[start] is at least MinSpan older than newest. Counts compare
 	// exactly; fractions need the epsilon because providers quantize them
-	// to integer percent.
+	// to integer percent. The fallback only ever compares a consistently
+	// fraction-only pair: quotaSample carries UsedCount and Limit together
+	// or not at all, so a poll that loses its counts loses its limit too
+	// and reads as a limit change — a discontinuity that resets the series
+	// before estimation ever sees a mixed pair.
 	idlePrevIdx := n - 2
 	for idlePrevIdx >= 0 && newest.At.Sub(s.samples[idlePrevIdx].At) < MinSpan {
 		idlePrevIdx--
