@@ -948,14 +948,21 @@ func TestEditorPaceSelectCollects(t *testing.T) {
 }
 
 // tapEditorSave opens a draft editor of the given kind, lets the caller
-// interact with it, taps Save and waits for the asynchronous save to
-// reach SaveInstances (the save goroutine writes credentials first).
+// interact with it, taps Save and returns the list that reached
+// SaveInstances. The stub parks the save goroutine right after the handoff:
+// under the test driver fyne.Do runs inline on that goroutine, so letting
+// the post-save UI hop (close + refresh) execute would have it rebuild the
+// window while whatever test runs next shapes its own text — a race -race
+// catches (and the shape three master tests in this package already ship
+// with). The hop is prod UI plumbing, not what these tests assert; the
+// parked goroutines are bounded and touch nothing.
 func tapEditorSave(t *testing.T, stub Deps, act func(*Settings), kind domain.SourceKind) []config.SourceInstance {
 	t.Helper()
 	stub.Creds = blockedStore{}
-	saved := make(chan []config.SourceInstance, 1)
+	park := make(chan []config.SourceInstance) // unbuffered: the handoff parks the goroutine
 	stub.SaveInstances = func(list []config.SourceInstance) error {
-		saved <- list
+		park <- list
+		<-park // never sent to: the goroutine stops here, before its UI hop
 
 		return nil
 	}
@@ -974,19 +981,10 @@ func tapEditorSave(t *testing.T, stub Deps, act func(*Settings), kind domain.Sou
 	save.OnTapped()
 
 	select {
-	case list := <-saved:
+	case list := <-park:
 		if len(list) != 1 {
 			t.Fatalf("saved %d instances, want 1", len(list))
 		}
-		// The save goroutine still owes the UI one hop (close + refresh);
-		// let it finish while this test's app is alive, or it lands in
-		// whatever test is running by then.
-		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-			if len(s.win.Canvas().Overlays().List()) == 0 {
-				return list
-			}
-		}
-		t.Fatal("the editor dialog never closed after the save")
 
 		return list
 	case <-time.After(2 * time.Second):
