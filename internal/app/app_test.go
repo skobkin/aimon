@@ -516,3 +516,41 @@ func TestApplyInstancesPaceWindowRecompute(t *testing.T) {
 	a.applyInstances([]config.SourceInstance{narrow})
 	activeExists(pace.StateCollecting, "10m window: 30m-old endpoint left the window")
 }
+
+// An adapter rebuild resets the tracker — history included — but the pace
+// window is configuration, not history: the fresh tracker must come back
+// with the configured window instead of silently reverting to the default
+// while Settings keeps showing the chosen preset.
+func TestApplyInstancesRebuildKeepsPaceWindow(t *testing.T) {
+	a := paceTestApp()
+	defer a.mgr.Stop()
+	at := time.Unix(1770000000, 0)
+
+	zaiAt := func(baseURL string) config.SourceInstance {
+		inst := miniInst("mm", time.Hour)
+		inst.Kind = domain.KindZAI
+		inst.MiniMax = nil
+		inst.ZAI = &config.ZAISettings{BaseURL: baseURL}
+
+		return inst
+	}
+	a.applyInstances([]config.SourceInstance{zaiAt("https://api.z.ai")})
+	a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+	a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+
+	// A base-URL change rebuilds the adapter and drops the history.
+	a.applyInstances([]config.SourceInstance{zaiAt("https://bigmodel.cn")})
+	if _, ok := a.pace.States()["mm"]; ok {
+		t.Fatal("history survived an adapter rebuild")
+	}
+
+	// The fresh series must be measured with the configured 60m window: a
+	// 30m span fits it (Active), but not the 20m default (Collecting) —
+	// the reverted-window bug read exactly as the latter.
+	a.pace.ObserveQuota("mm", at, quotaSnapAt(at, 0.1).Windows)
+	a.pace.ObserveQuota("mm", at.Add(30*time.Minute), quotaSnapAt(at.Add(30*time.Minute), 0.2).Windows)
+	w := a.pace.States()["mm"].Windows["interval"]
+	if w.State != pace.StateActive {
+		t.Errorf("after rebuild: state = %v, want Active (60m window retained, not the 20m default)", w.State)
+	}
+}

@@ -550,8 +550,12 @@ func (a *App) applyInstancesLocked(list []config.SourceInstance) (map[domain.Ins
 		if !cached || !config.SameSettings(entry.settings, settings) {
 			// A new adapter means a new upstream identity: the pace
 			// history of the old one must never bleed into the new series
-			// (base-URL change, credential change, …).
+			// (base-URL change, credential change, …). Reset also drops
+			// the tracker's window, so the cached value goes with it —
+			// the sync below re-tells the tracker the configured window
+			// instead of silently reverting it to the default.
 			a.pace.Reset(inst.ID)
+			delete(a.paceWindows, inst.ID)
 			src, err := def.Build(inst, deps)
 			if err != nil {
 				a.log.Error("building source instance failed; instance skipped", "instance", string(inst.ID), "error", err)
