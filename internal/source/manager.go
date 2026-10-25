@@ -405,6 +405,14 @@ func (m *Manager) refreshOnce(l *loop) {
 	now := time.Now()
 	m.mu.Lock()
 	rt := m.runtimes[l.id]
+	if rt == nil {
+		// The loop was detached and its runtime deleted after this refresh
+		// passed its context check — Apply's removal path removes both. The
+		// result would be discarded anyway; leave without touching anything.
+		m.mu.Unlock()
+
+		return
+	}
 	rt.Refreshing = true
 	rt.LastAttemptAt = now
 	m.mu.Unlock()
