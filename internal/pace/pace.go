@@ -48,16 +48,16 @@ const (
 type State int
 
 const (
-	// StateCollecting: not enough covered history yet (fewer than two
+	// StateCollecting means not enough covered history yet (fewer than two
 	// samples, or the in-window span is below MinSpan).
 	StateCollecting State = iota
-	// StateActive: positive measured consumption.
+	// StateActive means positive measured consumption.
 	StateActive
-	// StateIdle: the newest sample shows no consumption against the newest
-	// sample at least MinSpan older — the speed is forced to zero so a
-	// finished burst cannot keep projecting a fake overage.
+	// StateIdle means the newest sample shows no consumption against the
+	// newest sample at least MinSpan older — the speed is forced to zero
+	// so a finished burst cannot keep projecting a fake overage.
 	StateIdle
-	// StateUnavailable: the first read after a discontinuity (usage
+	// StateUnavailable means the first read after a discontinuity (usage
 	// decrease, limit change). The next recorded sample clears it.
 	StateUnavailable
 )

@@ -463,7 +463,8 @@ func TestProjectRefusals(t *testing.T) {
 	tr.SetWindow("mm", 20*time.Minute)
 	record(t, tr, "mm", 0, 0.10, nil, nil, "", nil)
 	record(t, tr, "mm", 6, 0.16, nil, nil, "", nil)
-	if est := one(t, tr, "mm"); func() bool { _, ok := est.Project(at(5)); return ok }() {
+	est := one(t, tr, "mm")
+	if _, ok := est.Project(at(5)); ok {
 		t.Error("projection accepted without a reset time")
 	}
 
@@ -473,7 +474,8 @@ func TestProjectRefusals(t *testing.T) {
 	tr2.SetWindow("mm", 20*time.Minute)
 	record(t, tr2, "mm", 0, 0.10, nil, nil, "", &past)
 	record(t, tr2, "mm", 6, 0.16, nil, nil, "", &past)
-	if est := one(t, tr2, "mm"); func() bool { _, ok := est.Project(at(5)); return ok }() {
+	est = one(t, tr2, "mm")
+	if _, ok := est.Project(at(5)); ok {
 		t.Error("projection accepted with ResetAt ≤ LastAt")
 	}
 
@@ -482,11 +484,13 @@ func TestProjectRefusals(t *testing.T) {
 	tr3.SetWindow("mm", 20*time.Minute)
 	reset := at(300)
 	record(t, tr3, "mm", 0, 0.10, nil, nil, "", &reset)
-	if est := one(t, tr3, "mm"); func() bool { _, ok := est.Project(at(5)); return ok }() {
+	est = one(t, tr3, "mm")
+	if _, ok := est.Project(at(5)); ok {
 		t.Error("Collecting state projected")
 	}
 	record(t, tr3, "mm", 6, 0.05, nil, nil, "", &reset) // rollover
-	if est := one(t, tr3, "mm"); func() bool { _, ok := est.Project(at(5)); return ok }() {
+	est = one(t, tr3, "mm")
+	if _, ok := est.Project(at(5)); ok {
 		t.Error("Unavailable state projected")
 	}
 }
@@ -596,12 +600,15 @@ func TestStatesCopyIsDetached(t *testing.T) {
 func TestConcurrentAccess(t *testing.T) {
 	tr := NewTracker()
 	reset := at(300)
+	// Same IDs as before, without int→rune conversions (gosec G115);
+	// "c" stays deliberately shared with the Reset/SetWindow goroutine.
+	ids := [...]domain.InstanceID{"a", "b", "c", "d"}
 	var wg sync.WaitGroup
 	for w := 0; w < 4; w++ {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			id := domain.InstanceID(domain.InstanceID(rune('a' + n)))
+			id := ids[n]
 			tr.SetWindow(id, 20*time.Minute)
 			for i := 0; i < 200; i++ {
 				rec := domain.QuotaWindow{ID: "interval", UsedFraction: float64(i) / 1000, ResetAt: &reset}

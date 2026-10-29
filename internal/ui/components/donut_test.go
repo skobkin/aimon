@@ -280,6 +280,21 @@ func projectionCaption(col *fyne.Container) *widget.Label {
 	return nil
 }
 
+// countdownLabel returns the column's reset countdown label, the object
+// right under the donut.
+func countdownLabel(t *testing.T, col *fyne.Container) *widget.Label {
+	t.Helper()
+	if len(col.Objects) < 2 {
+		t.Fatalf("column has %d objects, want donut + countdown at least", len(col.Objects))
+	}
+	l, ok := col.Objects[1].(*widget.Label)
+	if !ok {
+		t.Fatalf("column object 1 = %T, want the countdown label", col.Objects[1])
+	}
+
+	return l
+}
+
 // A window without a reset time or projection — a just-reset 5h quota —
 // has the shortest column of all while its neighbor keeps full height (the
 // smoke-tested Z.AI scene). The rings must stay level: columns are
@@ -315,22 +330,23 @@ func TestQuotaOverviewBodyTopAlignsRaggedColumns(t *testing.T) {
 }
 
 // A four-digit projection ("≈1873% at reset") wraps its caption onto two
-// lines and grows its column; the neighbor's one-line column must keep the
+// lines and grows its column; the neighbor's shorter column must keep the
 // rings level (the second smoke-tested scene, a hard-burning week window).
+// The comparison column carries only a countdown: in CI's alpine image even
+// a two-digit caption wraps, so a short-caption sibling is not a stable
+// fixture. The precondition instead compares the wrapped caption against
+// the single-line countdown label — same theme, same per-line height, so
+// the comparison proves two lines on any font.
 func TestQuotaOverviewBodyTopAlignsWrappedProjectionCaption(t *testing.T) {
 	at := time.Unix(1770000000, 0)
-	reset5h := at.Add(1*time.Hour + 49*time.Minute)
 	resetWeek := at.Add(6*24*time.Hour + 10*time.Hour)
 	body, _ := NewQuotaOverviewBody(ui.QuotaOverviewVM{
 		HasData: true,
 		Windows: []ui.OverviewDonutVM{
+			// Pace not yet estimable (Collecting): only the countdown
+			// line under the donut.
 			{Label: "5h", PctText: "78%", Used: 0.78, Remaining: 0.22,
-				ResetText: "1h49m", ResetAt: &reset5h,
-				Pace: &ui.PaceVM{
-					State: pace.StateActive, SpeedText: "22.9%/h",
-					CanProject: true, ProjectedText: "≈122% at reset", Projected: 1.22,
-					ResetAt: &reset5h,
-				}},
+				ResetText: "1h49m", ResetAt: &resetWeek},
 			{Label: "week", PctText: "28%", Used: 0.28, Remaining: 0.72,
 				ResetText: "6d10h", ResetAt: &resetWeek,
 				Pace: &ui.PaceVM{
@@ -347,16 +363,20 @@ func TestQuotaOverviewBodyTopAlignsWrappedProjectionCaption(t *testing.T) {
 		t.Fatalf("columns = %d, want 2", len(cols))
 	}
 
-	// Precondition: the long caption really wraps onto two lines at the
-	// column's natural width — otherwise this fixture no longer exercises
-	// the wrapped-caption raggedness.
-	short, long := projectionCaption(cols[0]), projectionCaption(cols[1])
-	if short == nil || long == nil {
-		t.Fatalf("captions missing: %v / %v", short, long)
+	// Precondition: the week caption really wraps onto at least two lines
+	// while the countdown stays single-line — otherwise this fixture no
+	// longer exercises the wrapped-caption raggedness.
+	caption, countdown := projectionCaption(cols[1]), countdownLabel(t, cols[0])
+	if caption == nil {
+		t.Fatal("week caption missing")
 	}
-	if long.MinSize().Height <= short.MinSize().Height {
-		t.Fatalf("long caption min height %v not above short %v; the fixture stopped wrapping",
-			long.MinSize().Height, short.MinSize().Height)
+	if caption.MinSize().Height <= countdown.MinSize().Height {
+		t.Fatalf("week caption min height %v not above the one-line countdown %v; the fixture stopped wrapping",
+			caption.MinSize().Height, countdown.MinSize().Height)
+	}
+	if cols[0].MinSize().Height >= cols[1].MinSize().Height {
+		t.Fatalf("ragged fixture collapsed: countdown column min height %v, caption column %v",
+			cols[0].MinSize().Height, cols[1].MinSize().Height)
 	}
 	requireDonutsTopAligned(t, cols)
 }

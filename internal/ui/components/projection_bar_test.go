@@ -120,8 +120,6 @@ func TestProjectionBarRendererLayout(t *testing.T) {
 	})
 }
 
-func nearF(a, b float32) bool { return math.Abs(float64(a-b)) < 1e-6 }
-
 // The very first paint must be correct without a Refresh: Fyne's renderer
 // cache never refreshes a fresh renderer, so CreateRenderer already carries
 // the final colors and visibility.
