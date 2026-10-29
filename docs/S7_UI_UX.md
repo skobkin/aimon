@@ -45,8 +45,10 @@ caption. No speed text in Overview.
 ```
 
 Windows without a usable projection (no ResetAt, not Active/Idle) show
-nothing extra — the column keeps its current height content. Non-pace
-sources render exactly as before.
+nothing extra — the column simply ends shorter. Columns are top-aligned,
+so every ring sits level with its neighbor regardless of which optional
+lines (countdown, bar, caption) a window shows (DECISION_LOG 2026-10-29).
+Non-pace sources render exactly as before.
 
 ## ProjectionBar
 

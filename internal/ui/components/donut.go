@@ -150,12 +150,15 @@ func (r *donutRenderer) Refresh() {
 
 // NewQuotaOverviewBody builds the compact quota overview body with up to
 // two quota donut gauges. The available width is split into equal columns
-// (one per window, full width for a single one); each donut is centered in
-// its column at its natural size — a stretched cell would squash the ring
-// into an ellipse — with its reset countdown centered directly beneath it.
-// Windows without a reliable reset time show no countdown line at all. An
-// optional subtitle (the plan line of subscription kinds) is rendered once
-// above the grid.
+// (one per window, full width for a single one). Columns are top-aligned:
+// every ring starts at the same top edge and the optional lines (countdown,
+// projection bar, caption) extend the column downward, so a window showing
+// fewer lines keeps its ring level with its neighbor instead of floating to
+// the row's middle. Each column keeps its natural width, horizontally
+// centered — a stretched cell would squash the ring into an ellipse — via
+// the HBox + spacer cell, which hands the column its minimum width and the
+// full cell height. Windows without a reliable reset time show no countdown
+// line at all.
 //
 // The second return re-renders the countdown lines for a new time; it is
 // nil when no window shows a countdown. Bodies are never rebuilt for time:
@@ -207,7 +210,14 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 				}
 			})
 		}
-		cells = append(cells, container.New(layout.NewCenterLayout(), col))
+		// Top-align the column while keeping it horizontally centered at
+		// its natural size: the HBox hands the column its minimum width
+		// and the full cell height (the VBox then stacks from the top),
+		// and the spacers share the leftover width — the same idiom as
+		// the monitor's action row (monitor.go). CenterLayout centered
+		// the column on both axes, so a column with fewer or hidden
+		// lines floated its ring below the neighbor's.
+		cells = append(cells, container.NewHBox(layout.NewSpacer(), col, layout.NewSpacer()))
 	}
 	body := container.NewGridWithColumns(len(cells), cells...)
 	var tick func(now time.Time)

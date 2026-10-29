@@ -10,6 +10,39 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-29 — Overview donut columns are top-aligned
+
+First real S7 smoke use showed the two quota donut columns of one card
+sitting at different heights: a just-reset 5h window renders no countdown
+line and no pace rows, and a four-digit projection ("≈1873% at reset")
+wraps its caption onto two lines. Either ragged column floated its ring
+below the neighbor's.
+
+1. **Columns align at the top, not at the middle.** Each column was wrapped
+   in a CenterLayout cell inside the equal-height grid row, and CenterLayout
+   centers on both axes — the shorter column sat (tall − short)/2 lower, so
+   its ring floated below the neighbor's exactly when the columns differed.
+   The cell is now an HBox of two spacers around the column: the column
+   keeps its natural width and stays horizontally centered, the VBox stacks
+   from the cell's top, and because the rows above a column's first missing
+   line are all identical heights, the rings and every shared line stay
+   level in every reachable combination. Minimum widths are unchanged (the
+   spacers are skipped), so the fixed monitor window is unaffected. The
+   expiry tick's Hide/Show keeps working on the same objects; hiding lines
+   never re-floats a ring.
+2. **No reserved rows, no cross-column row grid.** Reserving a countdown
+   and a pace line in every column would spend dead space on windows that
+   have nothing to show there (S7_UI_UX says windows without the data show
+   nothing extra), and a full row-aligned grid — shared countdown, bar and
+   caption rows across columns — is visually identical to top alignment in
+   every reachable case except one rare transient (a projection whose own
+   reset line vanished), where it would show a blank slot instead of tight
+   packing. Fyne's grid layouts are uniform-cell anyway and cannot give
+   individual rows their own heights.
+
+Updates/supersedes: `docs/S7_UI_UX.md` (Overview section, "the column keeps
+its current height content") from this date onward.
+
 ## 2026-10-25 — S7 review fix: the projection display floors at zero
 
 1. **Projected usage cannot go below zero.** A count anchor turns negative
