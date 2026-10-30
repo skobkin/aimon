@@ -10,6 +10,35 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-30 — Settings window splits into Sources and General tabs
+
+The update-checks toggle gave the Settings window a third application-wide
+control block stacked above the source list, and the single scrolling
+column was starting to mix two unrelated kinds of content: per-source
+configuration and application-wide behavior. The window now uses two
+standard `container.AppTabs` tabs — the same tab grammar as the monitor's
+Overview/Local/Remote navigation:
+
+1. **Sources** keeps the instance list, the Add button, and the save
+   status line, unchanged.
+2. **General** holds the application-wide settings: the privacy masking
+   toggle, the keychain status line, and the update-checks toggle. The
+   keychain line goes with them rather than into Sources because it
+   reports the credential-store facility as a whole, not any one source,
+   and it has sat beside the privacy toggle since S1.
+3. **Label.** "General" over the user's first proposal "Other": in a
+   settings UI a General tab is the conventional counterpart to a
+   domain-specific tab, reads as "application-wide behavior" rather than
+   as leftovers, and keeps the tab's scope legible as its contents grow.
+   User-directed change, agreed on 2026-10-30.
+
+The last-used tab persists across Show; only the initial selection is
+forced, matching the monitor. Unselected tabs are not laid out.
+
+Updates/supersedes: `docs/UI_UX.md` §13 ("Settings window", the
+single-window sketch without application-wide settings) from this date
+onward.
+
 ## 2026-10-29 — Overview donut columns are top-aligned
 
 First real S7 smoke use showed the two quota donut columns of one card

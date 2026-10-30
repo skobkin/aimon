@@ -1,10 +1,11 @@
 // Package settings implements the Settings window: a CRUD list of the
 // configured source instances grouped Local/Remote, with an Add/Edit
-// editor dialog. All network and keychain work runs in background
-// goroutines; the UI thread only mutates widgets, and every background
-// result crosses back through fyne.Do. Configuration mutations all pass
-// through one guarded path (persist first, apply only on success), and at
-// most one is in flight at a time.
+// editor dialog, plus a General tab for the application-wide settings
+// (privacy masking, keychain status, update checks). All network and
+// keychain work runs in background goroutines; the UI thread only mutates
+// widgets, and every background result crosses back through fyne.Do.
+// Configuration mutations all pass through one guarded path (persist
+// first, apply only on success), and at most one is in flight at a time.
 package settings
 
 import (
@@ -100,6 +101,7 @@ type Settings struct {
 	keychain *widget.Label
 	privacy  *widget.Check
 	updates  *widget.Check
+	tabs     *container.AppTabs
 
 	// mutBusy gates configuration mutations: at most one SaveInstances is
 	// in flight. While one runs, every mutating control is disabled, so a
@@ -132,7 +134,7 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 	s.addBtn = widget.NewButtonWithIcon("Add source", theme.ContentAddIcon(), s.chooseKind)
 	s.listBox = container.NewVBox()
 
-	// The global privacy toggle sits above the source list: it is an
+	// The global privacy toggle lives in the General tab: it is an
 	// application-wide setting, not per-source configuration. Toggling
 	// persists immediately and re-renders visible sensitive values.
 	s.privacy = widget.NewCheck("Hide sensitive info", func(on bool) {
@@ -156,23 +158,32 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 	// from the button and wraps.
 	bottom := container.NewBorder(nil, nil, s.addBtn, nil, s.status)
 
-	content := container.NewBorder(
-		container.NewVBox(
-			widget.NewLabelWithStyle("Privacy", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			s.privacy,
-			s.keychain,
-			widget.NewLabelWithStyle("Updates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			s.updates,
-			widget.NewSeparator(),
-		),
+	// Two standard AppTabs — the monitor's grammar: everything about the
+	// source instances stays in Sources, every application-wide setting
+	// moves to General. The last-used tab persists across Show; like the
+	// monitor, only the initial selection is forced here.
+	sources := container.NewBorder(
+		nil,
 		container.NewVBox(widget.NewSeparator(), bottom),
 		nil, nil,
 		container.NewVScroll(s.listBox),
 	)
+	general := container.NewVBox(
+		widget.NewLabelWithStyle("Privacy", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		s.privacy,
+		s.keychain,
+		widget.NewLabelWithStyle("Updates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		s.updates,
+	)
+	s.tabs = container.NewAppTabs(
+		container.NewTabItem("Sources", sources),
+		container.NewTabItem("General", general),
+	)
+	s.tabs.SelectIndex(0)
 
 	win := a.NewWindow("Settings — AI Monitor")
 	win.SetIcon(resources.Icon())
-	win.SetContent(content)
+	win.SetContent(s.tabs)
 	win.Resize(fyne.NewSize(560, 620))
 	// Closing hides; the list is rebuilt from the stored configuration on
 	// the next Show.

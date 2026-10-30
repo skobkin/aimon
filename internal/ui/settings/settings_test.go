@@ -39,7 +39,8 @@ func labelByText(t *testing.T, obj fyne.CanvasObject, text string) *widget.Label
 // The status and keychain lines carry messages of unbounded length, so they
 // wrap. The status line must also get the width left over from the Add
 // button: in an HBox a wrapping label would be handed its minimum width and
-// collapse into a sliver.
+// collapse into a sliver. Each line is measured inside its own tab, because
+// AppTabs lays out only the selected tab's content.
 func TestSettingsStatusLinesWrapBesideTheAddButton(t *testing.T) {
 	stub := stubDeps()
 	stub.Creds = blockedStore{}
@@ -54,10 +55,12 @@ func TestSettingsStatusLinesWrapBesideTheAddButton(t *testing.T) {
 	}
 
 	s.status.SetText("Save failed: " + longStatusLine)
-	s.keychain.SetText(longStatusLine)
 	if w := s.status.Size().Width; w < 200 {
 		t.Errorf("status line width = %.0f after a long message, want the width left of the Add button", w)
 	}
+
+	s.tabs.SelectIndex(1)
+	s.keychain.SetText(longStatusLine)
 	if w := s.keychain.Size().Width; w < 200 {
 		t.Errorf("keychain line width = %.0f, want the full window width", w)
 	}
