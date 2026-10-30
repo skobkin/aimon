@@ -22,7 +22,9 @@ you use — without ever opening a browser tab.
   bounded in-memory history; the estimation window (10–60 minutes) is
   configurable per source.
 - Multiple instances per source: monitor several accounts or endpoints side by
-  side, each with its own poll interval.
+  side, each with its own poll interval. The Add dialog explains what each
+  kind monitors, existing instances can be duplicated with one click
+  (credentials are not copied), and reusing a name shows a soft hint.
 - Credentials are stored in the system keychain — never in config files or
   logs.
 - Update checks against the project's releases (automatic, or "Check for

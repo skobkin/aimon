@@ -5,6 +5,8 @@
 package settings
 
 import (
+	"strings"
+
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/registry"
@@ -49,6 +51,59 @@ func newDraft(kind domain.SourceKind) (config.SourceInstance, bool) {
 	}
 
 	return inst, true
+}
+
+// duplicateInstance builds the starting point for duplicating an existing
+// instance: a fresh instance ID — credential-free by construction, since
+// keychain accounts are keyed per instance ID — with the source's provider
+// settings, poll interval, pace window, and enabled flag, and a
+// " (copy)"-suffixed name. Nothing is persisted; the editor owns that.
+func duplicateInstance(inst config.SourceInstance) (config.SourceInstance, bool) {
+	draft, ok := newDraft(inst.Kind)
+	if !ok {
+		return config.SourceInstance{}, false
+	}
+	draft.Name = inst.Name + " (copy)"
+	draft.Enabled = inst.Enabled
+	draft.PollInterval = inst.PollInterval
+	draft.PaceWindow = inst.PaceWindow
+	if s, ok := inst.Settings(); ok {
+		switch v := s.(type) {
+		case config.AMDGPUWebSettings:
+			draft.AMDGPUWeb = &v
+		case config.LlamaSwapSettings:
+			draft.LlamaSwap = &v
+		case config.MiniMaxSettings:
+			draft.MiniMax = &v
+		case config.ZAISettings:
+			draft.ZAI = &v
+		case config.OpenRouterSettings:
+			draft.OpenRouter = &v
+		case config.HindsightSettings:
+			draft.Hindsight = &v
+		case config.CodexSettings:
+			draft.Codex = &v
+		}
+	}
+
+	return draft, true
+}
+
+// duplicateNameHint returns the editor's soft warning for a name that
+// case-insensitively collides with another configured instance. Duplicates
+// stay allowed: the hint is presentation, not validation.
+func duplicateNameHint(name string, self domain.InstanceID, instances []config.SourceInstance) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	for _, inst := range instances {
+		if inst.ID != self && strings.EqualFold(strings.TrimSpace(inst.Name), trimmed) {
+			return "Another source already uses this name."
+		}
+	}
+
+	return ""
 }
 
 func indexByID(list []config.SourceInstance, id domain.InstanceID) int {

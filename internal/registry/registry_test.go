@@ -46,6 +46,16 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 	}
 }
 
+// Every kind's chooser needs a description: the Add dialog shows it under
+// the Source type select, and an empty one would render a blank hint.
+func TestEveryKindHasDescription(t *testing.T) {
+	for _, d := range All() {
+		if strings.TrimSpace(d.Description) == "" {
+			t.Errorf("kind %q has an empty Description", d.Kind)
+		}
+	}
+}
+
 func TestDefinitionMetadata(t *testing.T) {
 	cases := []struct {
 		kind     domain.SourceKind

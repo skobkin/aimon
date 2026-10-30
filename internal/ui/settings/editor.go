@@ -110,6 +110,14 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 
 	e.name = widget.NewEntry()
 	e.name.SetText(inst.Name)
+	e.name.Validator = nameValidator
+	// Soft duplicate-name hint: presentation, not validation — duplicates
+	// stay allowed, the hint only makes the collision visible.
+	nameHint := wrappedLabel("", fyne.TextStyle{Italic: true})
+	nameHint.SetText(duplicateNameHint(inst.Name, inst.ID, s.deps.LoadInstances()))
+	e.name.OnChanged = func(text string) {
+		nameHint.SetText(duplicateNameHint(text, inst.ID, s.deps.LoadInstances()))
+	}
 	e.enabled = widget.NewCheck("", nil)
 	e.enabled.SetChecked(inst.Enabled)
 	e.interval = widget.NewSelect(intervalOptions(def.Intervals), nil)
@@ -124,6 +132,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	items := []*widget.FormItem{
 		widget.NewFormItem("Type", widget.NewLabel(def.DefaultName)), // kind is immutable
 		widget.NewFormItem("Name", e.name),
+		widget.NewFormItem("", nameHint),
 		widget.NewFormItem("Enabled", e.enabled),
 		widget.NewFormItem("Refresh every", e.interval),
 	}
@@ -632,6 +641,17 @@ func urlValidator(s string) error {
 	u, err := url.Parse(s)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return fmt.Errorf("must be an http(s) URL with a host")
+	}
+
+	return nil
+}
+
+// nameValidator rejects only a whitespace-only name; everything else is
+// the user's own free text. Duplicate names are not a validation error —
+// the editor shows a soft hint instead.
+func nameValidator(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("name must not be empty")
 	}
 
 	return nil

@@ -57,6 +57,10 @@ type Definition struct {
 	Category domain.Category
 	// DefaultName prefills a new instance's name in the Add editor.
 	DefaultName string
+	// Description is the one-line explanation shown under the Source type
+	// chooser, so picking a kind is an informed choice instead of a name
+	// guess.
+	Description string
 	// DefaultInterval and Intervals are the new-instance poll interval and
 	// the offered presets for the kind's category.
 	DefaultInterval time.Duration
@@ -107,6 +111,7 @@ var definitions = []Definition{
 		Kind:            domain.KindAMDGPUWeb,
 		Category:        domain.CategoryLocal,
 		DefaultName:     "amdgputop-web",
+		Description:     "Local AMD GPU telemetry (utilization, temperature, power) from an amdgputop-web endpoint.",
 		DefaultInterval: config.DefaultLocalInterval,
 		Intervals:       config.LocalIntervals,
 		WebLabel:        "AMDGPUTOP web UI",
@@ -142,6 +147,7 @@ var definitions = []Definition{
 		Kind:            domain.KindLlamaSwap,
 		Category:        domain.CategoryLocal,
 		DefaultName:     "llama-swap",
+		Description:     "Running models and service health of a llama-swap instance.",
 		DefaultInterval: config.DefaultLocalInterval,
 		Intervals:       config.LocalIntervals,
 		CredentialSlots: apiKeySlots, // optional: no stored key means unauthenticated
@@ -185,6 +191,7 @@ var definitions = []Definition{
 		Kind:            domain.KindHindsight,
 		Category:        domain.CategoryLocal,
 		DefaultName:     "Hindsight",
+		Description:     "Hindsight memory-service health, banks and activity rates.",
 		DefaultInterval: config.DefaultHindsightInterval,
 		Intervals:       config.HindsightIntervals,
 		CredentialSlots: apiKeySlots, // optional: no stored key means unauthenticated
@@ -220,6 +227,7 @@ var definitions = []Definition{
 		Kind:            domain.KindMiniMax,
 		Category:        domain.CategoryRemote,
 		DefaultName:     "MiniMax",
+		Description:     "MiniMax Token Plan quota windows.",
 		DefaultInterval: config.DefaultRemoteInterval,
 		Intervals:       config.RemoteIntervals,
 		CredentialSlots: apiKeySlots,
@@ -268,6 +276,7 @@ var definitions = []Definition{
 		Kind:            domain.KindZAI,
 		Category:        domain.CategoryRemote,
 		DefaultName:     "Z.AI / GLM",
+		Description:     "Z.AI / GLM Coding Plan quota windows.",
 		DefaultInterval: config.DefaultRemoteInterval,
 		Intervals:       config.RemoteIntervals,
 		CredentialSlots: apiKeySlots,
@@ -318,6 +327,7 @@ var definitions = []Definition{
 		Kind:            domain.KindOpenRouter,
 		Category:        domain.CategoryRemote,
 		DefaultName:     "OpenRouter",
+		Description:     "Account spend and per-key usage and limits.",
 		DefaultInterval: config.DefaultRemoteInterval,
 		Intervals:       config.RemoteIntervals,
 		CredentialSlots: openRouterSlots,
@@ -398,6 +408,7 @@ var definitions = []Definition{
 		Kind:            domain.KindCodex,
 		Category:        domain.CategoryRemote,
 		DefaultName:     "ChatGPT Codex",
+		Description:     "ChatGPT Codex plan usage, read through your own Codex CLI.",
 		DefaultInterval: config.DefaultCodexInterval,
 		Intervals:       config.CodexIntervals,
 		// No credential slots: the CLI owns the ChatGPT login, and AI

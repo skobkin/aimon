@@ -70,10 +70,12 @@ func TestSettingsStatusLinesWrapBesideTheAddButton(t *testing.T) {
 
 // A source's name is the user's own free text: a long one wraps inside its
 // row instead of widening the Settings window to the name's single line.
+// The name is long enough to dwarf the row's action cluster, so the list
+// width only stays below it if the name itself wraps.
 func TestSettingsListRowNameWraps(t *testing.T) {
 	stub := stubDeps()
 	stub.Creds = blockedStore{}
-	name := "amdgputop-web on the media box over the LAN"
+	name := "amdgputop-web on the media box over the LAN, second floor, rack B"
 	stub.LoadInstances = func() []config.SourceInstance {
 		return []config.SourceInstance{gpu("g1", name, "http://127.0.0.1:1")}
 	}
@@ -511,6 +513,185 @@ func TestSettingsAboutTabWithoutPathsAndStamps(t *testing.T) {
 				t.Errorf("dev build must not carry a %q row (got %q)", absent, l.Text)
 			}
 		})
+	}
+}
+
+// duplicateInstance rekeys and copies: fresh ID, suffixed name, the
+// source's interval/pace window/enabled flag, and its own settings block.
+func TestDuplicateInstanceCopiesAndRekeys(t *testing.T) {
+	inst := mm("m1", "MiniMax one", true)
+	inst.PollInterval = 5 * time.Minute
+	inst.PaceWindow = 45 * time.Minute
+
+	dup, ok := duplicateInstance(inst)
+	if !ok {
+		t.Fatal("a known kind must produce a duplicate draft")
+	}
+	if dup.ID == inst.ID || dup.ID == "" {
+		t.Errorf("duplicate ID = %q, want a fresh one", dup.ID)
+	}
+	if dup.Name != "MiniMax one (copy)" {
+		t.Errorf("duplicate name = %q", dup.Name)
+	}
+	if !dup.Enabled {
+		t.Error("the enabled flag must copy")
+	}
+	if dup.PollInterval != 5*time.Minute {
+		t.Errorf("duplicate interval = %v", dup.PollInterval)
+	}
+	if dup.PaceWindow != 45*time.Minute {
+		t.Errorf("duplicate pace window = %v", dup.PaceWindow)
+	}
+	if dup.MiniMax == nil {
+		t.Error("duplicate must carry the kind's settings block")
+	}
+
+	// Provider settings copy by value: the draft's block is its own.
+	g := gpu("g1", "GPU one", "http://127.0.0.1:49001")
+	dup2, _ := duplicateInstance(g)
+	if dup2.AMDGPUWeb == nil || dup2.AMDGPUWeb.BaseURL != "http://127.0.0.1:49001" {
+		t.Errorf("duplicate settings = %+v", dup2.AMDGPUWeb)
+	}
+
+	// Two duplicates of one source are independent drafts.
+	dup3, _ := duplicateInstance(g)
+	if dup3.ID == dup2.ID {
+		t.Error("each duplicate must get its own fresh ID")
+	}
+
+	// Disabled sources duplicate as disabled.
+	g.Enabled = false
+	dup4, _ := duplicateInstance(g)
+	if dup4.Enabled {
+		t.Error("the disabled flag must copy")
+	}
+
+	// An unknown kind has no draft to start from.
+	if _, ok := duplicateInstance(config.SourceInstance{Kind: domain.SourceKind("nope")}); ok {
+		t.Error("unknown kind must not produce a duplicate")
+	}
+}
+
+// The duplicate-name hint is soft: it names the collision (case- and
+// whitespace-insensitively, other instances only) and stays silent
+// otherwise.
+func TestDuplicateNameHint(t *testing.T) {
+	instances := interleaved()
+
+	if got := duplicateNameHint("miniMAX ONE", "g1", instances); got == "" {
+		t.Error("a case-insensitive collision with another instance must hint")
+	}
+	if got := duplicateNameHint("  MiniMax one  ", "m1", instances); got != "" {
+		t.Errorf("the instance's own name must not hint, got %q", got)
+	}
+	if got := duplicateNameHint("uniquely named", "g1", instances); got != "" {
+		t.Errorf("a unique name must not hint, got %q", got)
+	}
+	if got := duplicateNameHint("", "g1", instances); got != "" {
+		t.Errorf("an empty name must not hint, got %q", got)
+	}
+}
+
+func TestNameValidator(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantErr bool
+	}{
+		{"", true},
+		{"   ", true},
+		{"MiniMax", false},
+		{"  padded  ", false},
+	}
+	for _, c := range cases {
+		err := nameValidator(c.in)
+		if (err != nil) != c.wantErr {
+			t.Errorf("nameValidator(%q) err = %v, wantErr %v", c.in, err, c.wantErr)
+		}
+	}
+}
+
+// The duplicate row action opens the editor for a copy: the name entry
+// prefilled with the suffixed name, untouched configuration behind it.
+func TestDuplicateRowActionOpensEditorForCopy(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	stub.LoadInstances = func() []config.SourceInstance {
+		return []config.SourceInstance{mm("m1", "MiniMax one", true)}
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.duplicate("m1")
+
+	var nameEntry *widget.Entry
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			if e, ok := o.(*widget.Entry); ok && !e.Password && nameEntry == nil {
+				nameEntry = e
+			}
+		})
+	}
+	if nameEntry == nil {
+		t.Fatal("the duplicate editor did not open")
+	}
+	if nameEntry.Text != "MiniMax one (copy)" {
+		t.Errorf("editor name = %q, want the suffixed copy", nameEntry.Text)
+	}
+}
+
+// The Add dialog explains the selected kind: an empty hint before a
+// choice, the kind's description once one is selected.
+func TestChooseKindShowsDescription(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.chooseKind()
+
+	var sel *widget.Select
+	var desc *widget.Label
+	var form *widget.Form
+	for _, overlay := range s.win.Canvas().Overlays().List() {
+		walkCanvas(t, overlay, func(o fyne.CanvasObject) {
+			switch w := o.(type) {
+			case *widget.Select:
+				if sel == nil {
+					sel = w
+				}
+			case *widget.Form:
+				if form == nil {
+					form = w
+				}
+			case *widget.Label:
+				if w.TextStyle.Italic && desc == nil {
+					desc = w
+				}
+			}
+		})
+	}
+	if sel == nil || desc == nil || form == nil {
+		t.Fatal("the kind chooser dialog is missing the select, the form or the description label")
+	}
+	// The description must live outside the form: a form row shares the
+	// label column, which would wrap the text in the narrow right cell
+	// instead of across the dialog's full width.
+	descInForm := false
+	walkCanvas(t, form, func(o fyne.CanvasObject) {
+		if o == desc {
+			descInForm = true
+		}
+	})
+	if descInForm {
+		t.Error("the description must not be a form item; it would wrap in the form's label column")
+	}
+	if desc.Text != "" {
+		t.Errorf("description before any selection = %q, want empty", desc.Text)
+	}
+
+	sel.SetSelected("MiniMax")
+	if desc.Text != "MiniMax Token Plan quota windows." {
+		t.Errorf("description after selection = %q", desc.Text)
+	}
+	sel.SetSelected("OpenRouter")
+	if desc.Text != "Account spend and per-key usage and limits." {
+		t.Errorf("description after switching = %q", desc.Text)
 	}
 }
 

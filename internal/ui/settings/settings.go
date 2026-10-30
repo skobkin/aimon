@@ -11,12 +11,14 @@ package settings
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"net/url"
 	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -377,6 +379,7 @@ func (s *Settings) row(inst config.SourceInstance, instances []config.SourceInst
 	up := widget.NewButtonWithIcon("", theme.MoveUpIcon(), func() { s.move(inst.ID, MoveUp) })
 	down := widget.NewButtonWithIcon("", theme.MoveDownIcon(), func() { s.move(inst.ID, MoveDown) })
 	edit := widget.NewButton("Edit", func() { s.openEditor(inst.ID) })
+	dup := widget.NewButtonWithIcon("", theme.ContentCopyIcon(), func() { s.duplicate(inst.ID) })
 	del := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() { s.confirmDelete(inst) })
 
 	if !CanMoveUp(instances, inst.ID) {
@@ -387,7 +390,7 @@ func (s *Settings) row(inst config.SourceInstance, instances []config.SourceInst
 	}
 	check.OnChanged = func(on bool) { s.setEnabled(inst.ID, on) }
 
-	s.mutControls = append(s.mutControls, check, up, down, edit, del)
+	s.mutControls = append(s.mutControls, check, up, down, edit, dup, del)
 
 	// The name is the user's own free text and can be long: wrap it so a
 	// long name wraps inside the row instead of widening the window. The
@@ -396,13 +399,15 @@ func (s *Settings) row(inst config.SourceInstance, instances []config.SourceInst
 		wrappedLabel(inst.Name, fyne.TextStyle{Bold: true}),
 		widget.NewLabelWithStyle(kindName, fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 	)
-	actions := container.NewHBox(up, down, edit, del)
+	actions := container.NewHBox(up, down, edit, dup, del)
 
 	return container.NewBorder(nil, nil, check, actions, title)
 }
 
 // chooseKind is stage one of Add: pick the compiled kind, then the editor
-// opens with a fresh draft instance.
+// opens with a fresh draft instance. The kind's one-line description shows
+// under the chooser as soon as one is selected, so picking a kind is an
+// informed choice instead of a name guess.
 func (s *Settings) chooseKind() {
 	all := registry.All()
 	options := make([]string, 0, len(all))
@@ -411,19 +416,40 @@ func (s *Settings) chooseKind() {
 	}
 
 	kindSelect := widget.NewSelect(options, nil)
-	form := widget.NewForm(widget.NewFormItem("Source type", kindSelect))
-	dlg := dialog.NewCustomConfirm("Add source", "Continue", "Cancel", form, func(ok bool) {
-		if !ok || kindSelect.Selected == "" {
-			return
-		}
+	description := wrappedLabel("", fyne.TextStyle{Italic: true})
+	kindSelect.OnChanged = func(name string) {
 		for _, def := range all {
-			if def.DefaultName == kindSelect.Selected {
-				s.editDraft(def.Kind)
+			if def.DefaultName == name {
+				description.SetText(def.Description)
 
 				return
 			}
 		}
-	}, s.win)
+	}
+	form := widget.NewForm(
+		widget.NewFormItem("Source type", kindSelect),
+	)
+	// The description sits below the form, not in it: a form row shares
+	// the label column, so the text would wrap inside the narrow cell to
+	// the right of "Source type" instead of using the dialog's full width.
+	// The transparent spacer floors the dialog width — the form's own
+	// minimum is sized to the select's placeholder and would leave the
+	// select and the description cramped.
+	width := canvas.NewRectangle(color.Transparent)
+	width.SetMinSize(fyne.NewSize(360, 0))
+	dlg := dialog.NewCustomConfirm("Add source", "Continue", "Cancel",
+		container.NewVBox(form, description, width), func(ok bool) {
+			if !ok || kindSelect.Selected == "" {
+				return
+			}
+			for _, def := range all {
+				if def.DefaultName == kindSelect.Selected {
+					s.editDraft(def.Kind)
+
+					return
+				}
+			}
+		}, s.win)
 	dlg.Show()
 }
 
@@ -441,6 +467,24 @@ func (s *Settings) openEditor(id domain.InstanceID) {
 // editDraft opens the editor for a brand-new instance of the kind.
 func (s *Settings) editDraft(kind domain.SourceKind) {
 	draft, ok := newDraft(kind)
+	if !ok {
+		return
+	}
+	s.openEditorFor(draft, true)
+}
+
+// duplicate opens the editor for a fresh copy of an instance (the row
+// action): new ID, copied provider settings/interval/pace window, name
+// suffixed " (copy)". Credentials are not copied — keychain accounts are
+// keyed per instance ID, so the copy is credential-free by construction,
+// and nothing persists until the editor saves.
+func (s *Settings) duplicate(id domain.InstanceID) {
+	instances := s.deps.LoadInstances()
+	i := indexByID(instances, id)
+	if i < 0 {
+		return
+	}
+	draft, ok := duplicateInstance(instances[i])
 	if !ok {
 		return
 	}
