@@ -87,6 +87,11 @@ type App struct {
 	// the menu is rebuilt; nil on off-desktop runs.
 	updateItem atomic.Pointer[systray.MenuItem]
 
+	// notifier posts quota desktop notifications from its own worker
+	// goroutine; notifierUnsub detaches it from the manager.
+	notifier      *notifier
+	notifierUnsub func()
+
 	// loadErr records a failed document load from New; Run surfaces it.
 	// It is written once before any reader exists.
 	loadErr error
@@ -196,6 +201,20 @@ func New() (*App, error) {
 	a.creds = newPaceGuardStore(creds, a.paceCredentialChanged)
 	a.running.Store(true)
 
+	// The quota notifier: gating reads the repository at event time, send
+	// posts through the Fyne app (synchronous D-Bus on Linux — worker
+	// goroutine only), and the latch keep-set follows the enabled
+	// instances.
+	a.notifier = newNotifier(logger, notifierConfig{
+		Master:    repo.NotificationsEnabled,
+		Low:       repo.NotificationsQuotaLowEnabled,
+		Exhausted: repo.NotificationsQuotaExhaustedEnabled,
+		Send: func(title, content string) {
+			fa.SendNotification(fyne.NewNotification(title, content))
+		},
+		Known: a.enabledInstanceIDs,
+	})
+
 	a.monitor = monitor.NewMonitor(fa, a, a.done)
 	a.settings = settings.NewSettings(fa, settings.Deps{
 		LoadInstances:        a.Instances,
@@ -206,8 +225,14 @@ func New() (*App, error) {
 		HideSensitiveInfo:    a.HideSensitiveInfo,
 		SetHideSensitiveInfo: a.SetHideSensitiveInfo,
 
-		CheckUpdatesAutomatically:    a.CheckUpdatesAutomatically,
-		SetCheckUpdatesAutomatically: a.SetCheckUpdatesAutomatically,
+		CheckUpdatesAutomatically:             a.CheckUpdatesAutomatically,
+		SetCheckUpdatesAutomatically:          a.SetCheckUpdatesAutomatically,
+		NotificationsEnabled:                  a.NotificationsEnabled,
+		SetNotificationsEnabled:               a.SetNotificationsEnabled,
+		NotificationsQuotaLowEnabled:          a.NotificationsQuotaLowEnabled,
+		SetNotificationsQuotaLowEnabled:       a.SetNotificationsQuotaLowEnabled,
+		NotificationsQuotaExhaustedEnabled:    a.NotificationsQuotaExhaustedEnabled,
+		SetNotificationsQuotaExhaustedEnabled: a.SetNotificationsQuotaExhaustedEnabled,
 		DiscoverGPUs: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
@@ -240,6 +265,7 @@ func New() (*App, error) {
 		a.recordPace(id)
 		a.uiUpdate.schedule(fyne.Do, a.monitor.OnStatesChanged)
 	})
+	a.notifierUnsub = a.mgr.Subscribe(a.notifyQuotaEvent)
 	a.monitor.StartTicker()
 
 	return a, nil
@@ -499,6 +525,53 @@ func (a *App) recordPaceSnapshot(id domain.InstanceID, inst config.SourceInstanc
 	}
 }
 
+// notifyQuotaEvent collects one completed refresh into a notification
+// event: the manager-loop half of the notifier. Mirrors recordPace's
+// shape — resolve the instance and its runtime, keep only quota snapshots
+// (the two quota kinds every donut shows), and hand the rest to the
+// notifier worker through its bounded queue. Only quota windows are
+// observed; GPU, llama-swap, Hindsight and OpenRouter snapshots never
+// notify.
+func (a *App) notifyQuotaEvent(id domain.InstanceID) {
+	if !a.running.Load() {
+		return
+	}
+	inst, ok := a.instanceByID(id)
+	if !ok {
+		return
+	}
+	rt, ok := a.mgr.States()[id]
+	if !ok || rt.LastError != nil || rt.Snapshot == nil {
+		return
+	}
+	var windows []domain.QuotaWindow
+	switch snap := rt.Snapshot.(type) {
+	case domain.QuotaSnapshot:
+		windows = snap.Windows
+	case domain.CodexSnapshot:
+		windows = snap.Windows
+	default:
+		return
+	}
+	a.notifier.Enqueue(inst.Name, id, windows)
+}
+
+// enabledInstanceIDs returns the enabled configured instances as a set —
+// the notifier's latch keep-set: disabled or removed instances must not
+// hold notification state.
+func (a *App) enabledInstanceIDs() map[domain.InstanceID]struct{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	set := make(map[domain.InstanceID]struct{}, len(a.instances))
+	for _, inst := range a.instances {
+		if inst.Enabled {
+			set[inst.ID] = struct{}{}
+		}
+	}
+
+	return set
+}
+
 // instanceByID resolves one configured instance under the instances lock.
 func (a *App) instanceByID(id domain.InstanceID) (config.SourceInstance, bool) {
 	a.mu.RLock()
@@ -519,6 +592,35 @@ func (a *App) instanceByID(id domain.InstanceID) (config.SourceInstance, bool) {
 func (a *App) SetHideSensitiveInfo(hide bool) {
 	a.repo.SetHideSensitiveInfo(hide)
 	a.monitor.OnStatesChanged()
+}
+
+// NotificationsEnabled reports the stored master "Desktop notifications"
+// preference; the Settings window reads it through Deps. The notifier
+// reads the same preference directly at event time.
+func (a *App) NotificationsEnabled() bool { return a.repo.NotificationsEnabled() }
+
+// SetNotificationsEnabled persists the master preference. The notifier's
+// event-time read picks the change up without any restart plumbing.
+func (a *App) SetNotificationsEnabled(on bool) { a.repo.SetNotificationsEnabled(on) }
+
+// NotificationsQuotaLowEnabled reports the "Quota window low" event
+// toggle; the Settings window reads it through Deps.
+func (a *App) NotificationsQuotaLowEnabled() bool { return a.repo.NotificationsQuotaLowEnabled() }
+
+// SetNotificationsQuotaLowEnabled persists the "Quota window low" event
+// toggle.
+func (a *App) SetNotificationsQuotaLowEnabled(on bool) { a.repo.SetNotificationsQuotaLowEnabled(on) }
+
+// NotificationsQuotaExhaustedEnabled reports the "Quota window exhausted"
+// event toggle; the Settings window reads it through Deps.
+func (a *App) NotificationsQuotaExhaustedEnabled() bool {
+	return a.repo.NotificationsQuotaExhaustedEnabled()
+}
+
+// SetNotificationsQuotaExhaustedEnabled persists the "Quota window
+// exhausted" event toggle.
+func (a *App) SetNotificationsQuotaExhaustedEnabled(on bool) {
+	a.repo.SetNotificationsQuotaExhaustedEnabled(on)
 }
 
 // RefreshAll implements monitor.MonitorController.
@@ -755,6 +857,15 @@ func (a *App) quit() {
 	}
 	a.log.Info("quitting")
 	a.unsub()
+	// The notifier's worker posts through the Fyne app; stop it before the
+	// event loop quits. Its own subscription detaches first so the manager
+	// cannot enqueue behind Close.
+	if a.notifierUnsub != nil {
+		a.notifierUnsub()
+	}
+	if a.notifier != nil {
+		a.notifier.Close()
+	}
 	close(a.done)
 	a.mgr.Cancel()
 	// Stopped before the event loop quits so the auto-update handler's final

@@ -33,6 +33,11 @@ you use — without ever opening a browser tab.
   menu has a matching "About" entry, `aimon --version` prints the same
   identity in a terminal, and the log itself is written to
   `<config>/fyne/com.skobkin.aimonitor/logs/aimon.log` (1 MiB rotating).
+- Desktop notifications for quota windows — "low" (entering the red band,
+  ≤10% remaining) and "exhausted" (0% remaining), edge-triggered so each
+  transition notifies once. Each event has its own toggle in Settings
+  (plus a master switch); notification text carries percentages only,
+  never absolute amounts.
 - Optional masking of sensitive values such as spending, for screenshots and
   shared screens.
 - Sources are independent: one failing or disabled source never breaks the

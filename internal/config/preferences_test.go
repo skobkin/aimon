@@ -128,6 +128,54 @@ func TestCheckUpdatesAutomaticallyPreference(t *testing.T) {
 	}
 }
 
+// The notification preferences default to enabled (all three, inverted
+// storage like privacy and update checks) and persist both ways: master
+// switch first, then the two per-event toggles.
+func TestNotificationsPreferences(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	if !repo.NotificationsEnabled() {
+		t.Error("absent master preference must default to notifications enabled")
+	}
+	if !repo.NotificationsQuotaLowEnabled() {
+		t.Error("absent quota-low preference must default to enabled")
+	}
+	if !repo.NotificationsQuotaExhaustedEnabled() {
+		t.Error("absent quota-exhausted preference must default to enabled")
+	}
+
+	repo.SetNotificationsEnabled(false)
+	if repo.NotificationsEnabled() {
+		t.Error("persisted master=false must read back false")
+	}
+	if v := prefs.Bool(keyNotificationsDisabled); !v {
+		t.Errorf("storing enabled=false must write notifications.disabled=true, got %v", v)
+	}
+
+	repo.SetNotificationsQuotaLowEnabled(false)
+	if repo.NotificationsQuotaLowEnabled() {
+		t.Error("persisted quota-low=false must read back false")
+	}
+	if v := prefs.Bool(keyNotificationsQuotaLowDisabled); !v {
+		t.Errorf("storing quota-low enabled=false must write the disabled key, got %v", v)
+	}
+
+	repo.SetNotificationsQuotaExhaustedEnabled(false)
+	if repo.NotificationsQuotaExhaustedEnabled() {
+		t.Error("persisted quota-exhausted=false must read back false")
+	}
+
+	// Round-trip back on; the inverted storage of each key follows its own
+	// state.
+	repo.SetNotificationsEnabled(true)
+	repo.SetNotificationsQuotaLowEnabled(true)
+	repo.SetNotificationsQuotaExhaustedEnabled(true)
+	if !repo.NotificationsEnabled() || !repo.NotificationsQuotaLowEnabled() || !repo.NotificationsQuotaExhaustedEnabled() {
+		t.Error("toggling all three back on must persist")
+	}
+}
+
 func keysOf(p *memPreferences) []string {
 	out := make([]string, 0, len(p.data))
 	for k := range p.data {

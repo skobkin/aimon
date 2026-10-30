@@ -75,6 +75,18 @@ type Deps struct {
 	// SetCheckUpdatesAutomatically persists the preference and starts or
 	// stops periodic checks accordingly. It runs on the UI thread.
 	SetCheckUpdatesAutomatically func(bool)
+	// NotificationsEnabled / SetNotificationsEnabled report and persist the
+	// master "Desktop notifications" preference.
+	NotificationsEnabled    func() bool
+	SetNotificationsEnabled func(bool)
+	// NotificationsQuotaLowEnabled / SetNotificationsQuotaLowEnabled
+	// report and persist the "Quota window low" event toggle.
+	NotificationsQuotaLowEnabled    func() bool
+	SetNotificationsQuotaLowEnabled func(bool)
+	// NotificationsQuotaExhaustedEnabled / SetNotificationsQuotaExhaustedEnabled
+	// report and persist the "Quota window exhausted" event toggle.
+	NotificationsQuotaExhaustedEnabled    func() bool
+	SetNotificationsQuotaExhaustedEnabled func(bool)
 	// DiscoverGPUs lists the amdgputop-web GPUs at a base URL (the
 	// amdgputop-web connection test doubles as discovery).
 	DiscoverGPUs func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error)
@@ -103,14 +115,17 @@ type Settings struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	listBox   *fyne.Container
-	addBtn    *widget.Button
-	status    *widget.Label
-	keychain  *widget.Label
-	privacy   *widget.Check
-	updates   *widget.Check
-	tabs      *container.AppTabs
-	aboutItem *container.TabItem
+	listBox         *fyne.Container
+	addBtn          *widget.Button
+	status          *widget.Label
+	keychain        *widget.Label
+	privacy         *widget.Check
+	updates         *widget.Check
+	notifs          *widget.Check
+	notifsLow       *widget.Check
+	notifsExhausted *widget.Check
+	tabs            *container.AppTabs
+	aboutItem       *container.TabItem
 
 	// mutBusy gates configuration mutations: at most one SaveInstances is
 	// in flight. While one runs, every mutating control is disabled, so a
@@ -161,6 +176,26 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		}
 	})
 
+	// The notification toggles follow the same immediate-apply contract.
+	// The master switch silences every event; the two event checks each
+	// silence exactly one kind. They apply to the notifier's next event —
+	// the notifier reads the preferences at event time.
+	s.notifs = widget.NewCheck("Desktop notifications", func(on bool) {
+		if s.deps.SetNotificationsEnabled != nil {
+			s.deps.SetNotificationsEnabled(on)
+		}
+	})
+	s.notifsLow = widget.NewCheck("Quota window low", func(on bool) {
+		if s.deps.SetNotificationsQuotaLowEnabled != nil {
+			s.deps.SetNotificationsQuotaLowEnabled(on)
+		}
+	})
+	s.notifsExhausted = widget.NewCheck("Quota window exhausted", func(on bool) {
+		if s.deps.SetNotificationsQuotaExhaustedEnabled != nil {
+			s.deps.SetNotificationsQuotaExhaustedEnabled(on)
+		}
+	})
+
 	// The status line sits in a Border's centre, not an HBox: an HBox hands
 	// out minimum widths, so a wrapping label would be squeezed to a sliver
 	// the moment a long message arrived. Here it takes the width left over
@@ -184,6 +219,10 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		s.keychain,
 		widget.NewLabelWithStyle("Updates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		s.updates,
+		widget.NewLabelWithStyle("Notifications", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		s.notifs,
+		s.notifsLow,
+		s.notifsExhausted,
 	)
 	s.aboutItem = s.aboutTab()
 	s.tabs = container.NewAppTabs(
@@ -216,6 +255,15 @@ func (s *Settings) Show() {
 	}
 	if s.deps.CheckUpdatesAutomatically != nil {
 		s.updates.SetChecked(s.deps.CheckUpdatesAutomatically())
+	}
+	if s.deps.NotificationsEnabled != nil {
+		s.notifs.SetChecked(s.deps.NotificationsEnabled())
+	}
+	if s.deps.NotificationsQuotaLowEnabled != nil {
+		s.notifsLow.SetChecked(s.deps.NotificationsQuotaLowEnabled())
+	}
+	if s.deps.NotificationsQuotaExhaustedEnabled != nil {
+		s.notifsExhausted.SetChecked(s.deps.NotificationsQuotaExhaustedEnabled())
 	}
 	s.refresh()
 	s.probeKeychain()

@@ -35,13 +35,27 @@ var (
 	colorHealthy  = color.RGBA{R: 0x4C, G: 0xAF, B: 0x50, A: 0xFF} // green
 )
 
+// Quota threshold bands, shared by every quota presentation (linear bars,
+// donut gauges) and by the desktop notifier's edge-triggered events, so a
+// notification fires exactly when its card turns red.
+const (
+	// CriticalThreshold: at or below this remaining fraction quota
+	// presentation turns red — and the notifier fires its "quota window
+	// low" event (re-arming above LowThreshold).
+	CriticalThreshold = 0.10
+	// LowThreshold: at or below this remaining fraction quota presentation
+	// turns orange; the notifier re-arms its "low" event above it.
+	LowThreshold = 0.20
+)
+
 // ThresholdColor maps a remaining fraction onto the threshold color:
-// <=0.10 red, <=0.20 orange, <=0.50 amber, else green.
+// <=CriticalThreshold red, <=LowThreshold orange, <=0.50 amber, else
+// green.
 func ThresholdColor(remaining float64) color.Color {
 	switch {
-	case remaining <= 0.10:
+	case remaining <= CriticalThreshold:
 		return colorCritical
-	case remaining <= 0.20:
+	case remaining <= LowThreshold:
 		return colorLow
 	case remaining <= 0.50:
 		return colorWarning

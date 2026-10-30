@@ -347,6 +347,54 @@ func TestSettingsUpdatesCheckSyncsAndPersists(t *testing.T) {
 	}
 }
 
+// The notification checks follow the same immediate-apply contract as the
+// privacy and update checks: sync from the preferences on Show, persist
+// each toggle through Deps on change.
+func TestSettingsNotificationChecksSyncAndPersist(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	state := map[string]bool{"master": true, "low": true, "exhausted": true}
+	var calls []string
+	stub.NotificationsEnabled = func() bool { return state["master"] }
+	stub.SetNotificationsEnabled = func(on bool) {
+		calls = append(calls, "master")
+		state["master"] = on
+	}
+	stub.NotificationsQuotaLowEnabled = func() bool { return state["low"] }
+	stub.SetNotificationsQuotaLowEnabled = func(on bool) {
+		calls = append(calls, "low")
+		state["low"] = on
+	}
+	stub.NotificationsQuotaExhaustedEnabled = func() bool { return state["exhausted"] }
+	stub.SetNotificationsQuotaExhaustedEnabled = func(on bool) {
+		calls = append(calls, "exhausted")
+		state["exhausted"] = on
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+
+	s.Show()
+	if !s.notifs.Checked || !s.notifsLow.Checked || !s.notifsExhausted.Checked {
+		t.Error("Show must sync all three notification checks from the preferences")
+	}
+
+	state["master"], state["low"], state["exhausted"] = false, false, false
+	s.Show()
+	if s.notifs.Checked || s.notifsLow.Checked || s.notifsExhausted.Checked {
+		t.Error("Show must reload the notification preferences")
+	}
+
+	// Show's own sync calls fired the setters too; only the explicit
+	// toggles from here on are asserted — each check toggled from the
+	// state Show left it in.
+	calls = nil
+	s.notifs.SetChecked(true)
+	s.notifsLow.SetChecked(true)
+	s.notifsExhausted.SetChecked(true)
+	if len(calls) != 3 || calls[0] != "master" || calls[1] != "low" || calls[2] != "exhausted" {
+		t.Errorf("toggles reached %v, want each check's own setter", calls)
+	}
+}
+
 // The mutation gate: at most one configuration mutation may be in flight;
 // a second entry while one runs is rejected until the first leaves.
 func TestMutationGateSingleFlight(t *testing.T) {

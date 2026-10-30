@@ -39,6 +39,17 @@ const (
 	// the default must be "checks on", so false/absent means automatic
 	// checks run and true means they are skipped.
 	keyUpdatesSkipAutomaticChecks = "updates.skip-automatic-checks"
+	// keyNotificationsDisabled backs the master "Desktop notifications"
+	// preference as an INVERTED bool: the default must be "on", so
+	// false/absent means notifications may fire and true means they are
+	// off. The two per-event keys below narrow it further, same pattern.
+	keyNotificationsDisabled = "notifications.disabled"
+	// keyNotificationsQuotaLowDisabled backs the "Quota window low" event
+	// toggle, inverted for the same default-on reason.
+	keyNotificationsQuotaLowDisabled = "notifications.quota-low.disabled"
+	// keyNotificationsQuotaExhaustedDisabled backs the "Quota window
+	// exhausted" event toggle, inverted for the same default-on reason.
+	keyNotificationsQuotaExhaustedDisabled = "notifications.quota-exhausted.disabled"
 )
 
 // sourceSchemaVersion is the dynamic source document format this build
@@ -212,6 +223,43 @@ func (r *Repository) CheckUpdatesAutomatically() bool {
 // automatically" preference.
 func (r *Repository) SetCheckUpdatesAutomatically(on bool) {
 	r.prefs.SetBool(keyUpdatesSkipAutomaticChecks, !on)
+}
+
+// NotificationsEnabled reports the master "Desktop notifications"
+// preference. It defaults to true: absent and false both mean desktop
+// notifications may fire; the per-event toggles below narrow it further.
+func (r *Repository) NotificationsEnabled() bool {
+	return !r.prefs.Bool(keyNotificationsDisabled)
+}
+
+// SetNotificationsEnabled persists the master "Desktop notifications"
+// preference.
+func (r *Repository) SetNotificationsEnabled(on bool) {
+	r.prefs.SetBool(keyNotificationsDisabled, !on)
+}
+
+// NotificationsQuotaLowEnabled reports the "Quota window low" event
+// toggle. It defaults to true.
+func (r *Repository) NotificationsQuotaLowEnabled() bool {
+	return !r.prefs.Bool(keyNotificationsQuotaLowDisabled)
+}
+
+// SetNotificationsQuotaLowEnabled persists the "Quota window low" event
+// toggle.
+func (r *Repository) SetNotificationsQuotaLowEnabled(on bool) {
+	r.prefs.SetBool(keyNotificationsQuotaLowDisabled, !on)
+}
+
+// NotificationsQuotaExhaustedEnabled reports the "Quota window exhausted"
+// event toggle. It defaults to true.
+func (r *Repository) NotificationsQuotaExhaustedEnabled() bool {
+	return !r.prefs.Bool(keyNotificationsQuotaExhaustedDisabled)
+}
+
+// SetNotificationsQuotaExhaustedEnabled persists the "Quota window
+// exhausted" event toggle.
+func (r *Repository) SetNotificationsQuotaExhaustedEnabled(on bool) {
+	r.prefs.SetBool(keyNotificationsQuotaExhaustedDisabled, !on)
 }
 
 func recordToInstance(rec sourceRecord) (SourceInstance, error) {

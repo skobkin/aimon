@@ -10,6 +10,57 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-30 — Quota desktop notifications with per-event toggles
+
+Desktop notifications were originally out of scope
+(`docs/ARCHITECTURE.md` §14 "notifications/alerts"). A user-directed
+review (2026-10-30) trimmed the proposed six event kinds to the quota
+pair — the only events the app can state as facts about a plan window —
+and this entry supersedes §14 for exactly that pair:
+
+1. **The two shipped events** (each its own Settings checkbox, master
+   switch above them, all default-on):
+   - **Quota window low** — a window's remaining fraction entered the red
+     band (≤ `components.CriticalThreshold`, the same 10% constant the
+     donuts color red with). Re-arms when the fraction climbs above
+     `components.LowThreshold` (20%) or the window resets.
+   - **Quota window exhausted** — remaining reached zero. Re-arms on
+     window reset, or when the fraction refills past the red band.
+2. **Edge-triggered with visible latches.** Every window of every quota
+   snapshot (MiniMax, Z.AI, Codex — the windows the donuts show) carries
+   per-event latch state owned by the notifier worker. Gating decides
+   audibility only: a silenced event still arms its edge, so enabling it
+   mid-band never retro-fires. A snapshot starting already in-band trips
+   once at startup — accepted. A window absent from a snapshot, or an
+   instance disabled or removed, drops its latches. Rolling windows can
+   refill mid-generation, so the fraction leaving its band re-arms
+   without waiting for a reset marker (providers that expose no ResetAt
+   would otherwise latch forever).
+3. **Delivery.** The manager loop goroutine only enqueues into a bounded
+   channel (drop with a warning on overflow — notifications are
+   disposable, the next poll re-evaluates); one worker goroutine posts
+   through `fyne.App.SendNotification`, which is a synchronous D-Bus call
+   on Linux and must never run on a manager loop or the UI thread.
+4. **Privacy, structural.** Notification text carries the instance name,
+   the window name, fixed state words, and whole percentages only — never
+   absolute money or token counts — so the shell's notification log
+   cannot leak what the hide-sensitive preference masks. Sub-one-percent
+   remaining says "<1% remaining" rather than rounding up. The notifier
+   never reads `internal/pace`: no pace-projection alerts (S7 ban
+   stands).
+5. **Declined events** (proposed and rejected in the same review): source
+   unavailable/recovered, the Codex rate-limit flag, and the OpenRouter
+   key limit — each is either already visible as a card state or riskier
+   noise-wise; they are not implemented, and the notifier observes only
+   `domain.QuotaSnapshot`/`domain.CodexSnapshot` windows.
+
+Settings → General gains a Notifications heading (master + the two event
+checks, immediate persist, reload on Show). Preferences keys
+`notifications.disabled`, `notifications.quota-low.disabled`,
+`notifications.quota-exhausted.disabled` (inverted storage, default on).
+
+Updates/supersedes: `docs/ARCHITECTURE.md` §14 from this date onward.
+
 ## 2026-10-30 — Settings gains an About tab; file logging; version at launch
 
 Answering "which build am I running, and where does the app keep its
