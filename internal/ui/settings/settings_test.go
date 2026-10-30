@@ -695,6 +695,127 @@ func TestChooseKindShowsDescription(t *testing.T) {
 	}
 }
 
+// The import body validates before anything else: a bad document reports
+// and never reaches the commit path, a valid one asks first, and only an
+// affirmative answer commits through the guarded save path. An empty
+// document is valid (the zero-source import).
+func TestSettingsImportDocument(t *testing.T) {
+	doc := `{"schema_version":1,"sources":[{"id":"m1","kind":"minimax","name":"Imported","enabled":true,"poll_interval":"1m","minimax":{}}]}`
+
+	t.Run("bad document reports and stops", func(t *testing.T) {
+		s, savedCh := importTestSettings(t)
+		var report string
+		asked := false
+		s.importDocument("{not json",
+			func([]config.SourceInstance, func()) { asked = true },
+			func(msg string) { report = msg })
+		if report == "" {
+			t.Error("a parse failure must report")
+		}
+		if asked {
+			t.Error("a parse failure must not ask to commit")
+		}
+		select {
+		case list := <-savedCh:
+			t.Errorf("a parse failure must not save: %+v", list)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("valid document asks then commits", func(t *testing.T) {
+		s, savedCh := importTestSettings(t)
+		var gotList []config.SourceInstance
+		var commit func()
+		asked := make(chan struct{})
+		s.importDocument(doc,
+			func(list []config.SourceInstance, commitFunc func()) {
+				gotList = list
+				commit = commitFunc
+				close(asked)
+			},
+			func(msg string) { t.Errorf("a valid document must not report a failure: %s", msg) })
+
+		select {
+		case <-asked:
+		case <-time.After(2 * time.Second):
+			t.Fatal("import never asked to commit")
+		}
+		if len(gotList) != 1 || gotList[0].Name != "Imported" {
+			t.Fatalf("ask received %+v", gotList)
+		}
+
+		commit()
+		select {
+		case list := <-savedCh:
+			if len(list) != 1 || list[0].ID != "m1" {
+				t.Errorf("committed %+v", list)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("commit never saved")
+		}
+	})
+
+	t.Run("declined commit saves nothing", func(t *testing.T) {
+		s, savedCh := importTestSettings(t)
+		s.importDocument(doc,
+			func([]config.SourceInstance, func()) {}, // user declines: never commits
+			func(msg string) { t.Errorf("a valid document must not report a failure: %s", msg) })
+		select {
+		case list := <-savedCh:
+			t.Errorf("a declined import saved %+v", list)
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	t.Run("empty document imports zero sources", func(t *testing.T) {
+		s, savedCh := importTestSettings(t)
+		s.importDocument(`{"schema_version":1,"sources":[]}`,
+			func(list []config.SourceInstance, commit func()) {
+				commit()
+			},
+			func(string) { t.Error("an empty document must not report a failure") })
+		select {
+		case list := <-savedCh:
+			if len(list) != 0 {
+				t.Errorf("empty import saved %+v, want zero sources", list)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("empty import never saved")
+		}
+	})
+}
+
+// exportDocument renders the stored document verbatim, or the minimal
+// valid document when nothing is stored — so an export always imports
+// back.
+func TestExportDocumentBody(t *testing.T) {
+	if got := exportDocument(""); got != "{\n  \"schema_version\": 1\n}" {
+		t.Errorf("empty export = %q", got)
+	}
+	raw := "{\n  \"schema_version\": 1,\n  \"sources\": []\n}"
+	if got := exportDocument(raw); got != raw {
+		t.Errorf("stored export = %q, want verbatim", got)
+	}
+}
+
+// importTestSettings wires a Settings whose saves funnel into a channel:
+// mutate persists on a background goroutine, so tests synchronize on the
+// channel instead of sleeping. SaveInstances is replaced before
+// NewSettings because Deps is stored by value.
+func importTestSettings(t *testing.T) (*Settings, <-chan []config.SourceInstance) {
+	t.Helper()
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	savedCh := make(chan []config.SourceInstance, 4)
+	stub.SaveInstances = func(list []config.SourceInstance) error {
+		savedCh <- list
+
+		return nil
+	}
+
+	return NewSettings(test.NewTempApp(t), stub), savedCh
+}
+
 func TestURLValidator(t *testing.T) {
 	cases := []struct {
 		in      string

@@ -10,6 +10,30 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-30 — Secret-free configuration export/import
+
+The Settings General tab gains an Export/Import pair for the source
+configuration document. This entry records why the feature is safe and
+what its edges are:
+
+1. **Secret-free by construction, guarded structurally.** The export
+   payload is exactly the stored `sources.document` JSON
+   (`Repository.SourceDocument()`), whose schema has no credential field
+   — secrets live only in the keychain, keyed by instance ID. A test
+   walks the exported document of one populated record per kind and
+   rejects any credential-shaped key, so a future schema change cannot
+   silently add a leak path.
+2. **Import is validate-then-commit.** A picked file is parsed with the
+   same gatekeeper the load path uses (`ParseSourceDocument`); a failure
+   reports and stops with the stored document untouched. A valid document
+   asks for confirmation before replacing the list, through the single
+   guarded mutation path. A colliding ID replaces that instance (its
+   keychain accounts keep matching by ID); credentials of instances
+   absent from the import are never touched.
+3. **Empty states are explicit.** Exporting with nothing configured
+   writes the minimal valid document (`schema_version` 1, no sources);
+   importing the zero-source document is valid and clears the list.
+
 ## 2026-10-30 — Quota desktop notifications with per-event toggles
 
 Desktop notifications were originally out of scope

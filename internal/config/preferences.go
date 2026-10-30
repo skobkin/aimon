@@ -147,6 +147,13 @@ func (r *Repository) LoadInstances() ([]SourceInstance, error) {
 		return nil, nil
 	}
 
+	return parseSourceDocument(raw)
+}
+
+// parseSourceDocument decodes and validates one stored document. This is
+// the shared body of LoadInstances and the exported import path: schema
+// check, per-record decode, whole-list validation.
+func parseSourceDocument(raw string) ([]SourceInstance, error) {
 	var doc sourceDocument
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		return nil, fmt.Errorf("parse source document: %w", err)
@@ -168,6 +175,24 @@ func (r *Repository) LoadInstances() ([]SourceInstance, error) {
 	}
 
 	return list, nil
+}
+
+// ParseSourceDocument validates and decodes a source document that came
+// from outside the repository (the Settings import path). Same contract as
+// the document handling of LoadInstances: a malformed, unsupported, or
+// invalid document is an error naming the reason; nothing is persisted
+// here.
+func ParseSourceDocument(raw string) ([]SourceInstance, error) {
+	return parseSourceDocument(raw)
+}
+
+// SourceDocument returns the raw stored source document — the exact JSON
+// LoadInstances consumes — empty when none is stored. It carries no
+// credential material by construction (secrets live only in the keychain,
+// and this schema has no field that could hold one), so exporting it can
+// never leak a secret.
+func (r *Repository) SourceDocument() string {
+	return r.prefs.String(keySourceDocument)
 }
 
 // SaveInstances validates and writes the dynamic source document. An

@@ -1,7 +1,12 @@
 package config
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
+
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
 
 // memPreferences is a map-backed fake of the Fyne preferences surface the
@@ -126,6 +131,126 @@ func TestCheckUpdatesAutomaticallyPreference(t *testing.T) {
 	if !repo.CheckUpdatesAutomatically() {
 		t.Error("skip-automatic-checks=false must read as enabled")
 	}
+}
+
+// SourceDocument exposes exactly the stored JSON, and an export→import
+// round-trip reconstructs the same instance list. An empty store exposes
+// "" (the export path substitutes the minimal document).
+func TestSourceDocumentRoundTrip(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	if got := repo.SourceDocument(); got != "" {
+		t.Errorf("SourceDocument on an empty store = %q, want empty", got)
+	}
+
+	list := []SourceInstance{
+		{
+			ID:           "gpu-a",
+			Kind:         domain.KindAMDGPUWeb,
+			Name:         "GPU A",
+			Enabled:      true,
+			PollInterval: 30 * time.Second,
+			AMDGPUWeb:    &AMDGPUWebSettings{BaseURL: "http://127.0.0.1:49001", SelectedGPUID: "amdgpu0"},
+		},
+		{
+			ID:           "mm-1",
+			Kind:         domain.KindMiniMax,
+			Name:         "MiniMax A",
+			Enabled:      false,
+			PollInterval: time.Minute,
+			MiniMax:      &MiniMaxSettings{},
+		},
+	}
+	if err := repo.SaveInstances(list); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	raw := repo.SourceDocument()
+	if raw == "" || raw != prefs.String(keySourceDocument) {
+		t.Fatal("SourceDocument must expose exactly the stored JSON")
+	}
+	back, err := ParseSourceDocument(raw)
+	if err != nil {
+		t.Fatalf("ParseSourceDocument: %v", err)
+	}
+	if len(back) != len(list) || back[0].Name != "GPU A" || back[1].Name != "MiniMax A" {
+		t.Errorf("round-trip = %+v, want the saved list", back)
+	}
+	if back[0].AMDGPUWeb == nil || back[0].AMDGPUWeb.SelectedGPUID != "amdgpu0" {
+		t.Errorf("round-trip lost provider settings: %+v", back[0])
+	}
+}
+
+// ParseSourceDocument is the load path's gatekeeper: bad JSON, a foreign
+// schema version, and invalid instance lists are all rejected with a
+// reason.
+func TestParseSourceDocumentRejects(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"bad json", "{not json"},
+		{"wrong schema", `{"schema_version":99,"sources":[]}`},
+		{"unknown kind", `{"schema_version":1,"sources":[{"id":"x","kind":"nope","name":"X","enabled":true,"poll_interval":"1m"}]}`},
+		{"bad interval", `{"schema_version":1,"sources":[{"id":"x","kind":"minimax","name":"X","enabled":true,"poll_interval":"nope"}]}`},
+	}
+	for _, c := range cases {
+		if _, err := ParseSourceDocument(c.raw); err == nil {
+			t.Errorf("%s: ParseSourceDocument accepted the document", c.name)
+		}
+	}
+
+	// An empty source list is the valid zero-source document.
+	if _, err := ParseSourceDocument(`{"schema_version":1,"sources":[]}`); err != nil {
+		t.Errorf("empty document rejected: %v", err)
+	}
+}
+
+// The exported document carries no credential-shaped field names. This is
+// a structural guard over the secret-free claim: if a future schema adds a
+// field that could hold a secret, this test fails the export feature
+// before it can leak.
+func TestSourceDocumentHasNoCredentialFields(t *testing.T) {
+	// One record per kind, every provider block populated.
+	list := []SourceInstance{
+		{ID: "g", Kind: domain.KindAMDGPUWeb, Name: "G", Enabled: true, PollInterval: 30 * time.Second, AMDGPUWeb: &AMDGPUWebSettings{BaseURL: "http://h", SelectedGPUID: "gpu0"}},
+		{ID: "l", Kind: domain.KindLlamaSwap, Name: "L", Enabled: true, PollInterval: 30 * time.Second, LlamaSwap: &LlamaSwapSettings{BaseURL: "http://h"}},
+		{ID: "h", Kind: domain.KindHindsight, Name: "H", Enabled: true, PollInterval: 30 * time.Second, Hindsight: &HindsightSettings{BaseURL: "http://h", WebUIURL: "http://h/ui"}},
+		{ID: "m", Kind: domain.KindMiniMax, Name: "M", Enabled: true, PollInterval: time.Minute, MiniMax: &MiniMaxSettings{}},
+		{ID: "z", Kind: domain.KindZAI, Name: "Z", Enabled: true, PollInterval: time.Minute, ZAI: &ZAISettings{BaseURL: "http://h"}},
+		{ID: "o", Kind: domain.KindOpenRouter, Name: "O", Enabled: true, PollInterval: time.Minute, OpenRouter: &OpenRouterSettings{}},
+		{ID: "c", Kind: domain.KindCodex, Name: "C", Enabled: true, PollInterval: time.Minute, Codex: &CodexSettings{Executable: "codex", Mode: CodexModePersistent, Env: []EnvOverride{{Name: "EDITOR", Value: "vi"}}}},
+	}
+	repo := NewRepository(newMemPreferences())
+	if err := repo.SaveInstances(list); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	var walk func(v any)
+	walk = func(v any) {
+		switch val := v.(type) {
+		case map[string]any:
+			for k, sub := range val {
+				lk := strings.ToLower(k)
+				for _, banned := range []string{"secret", "token", "password", "apikey", "api_key", "credential"} {
+					if strings.Contains(lk, banned) {
+						t.Errorf("document field %q looks credential-shaped", k)
+					}
+				}
+				walk(sub)
+			}
+		case []any:
+			for _, sub := range val {
+				walk(sub)
+			}
+		}
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(repo.SourceDocument()), &doc); err != nil {
+		t.Fatalf("stored document is not valid JSON: %v", err)
+	}
+	walk(doc)
 }
 
 // The notification preferences default to enabled (all three, inverted

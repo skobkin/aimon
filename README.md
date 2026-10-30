@@ -26,7 +26,9 @@ you use — without ever opening a browser tab.
   kind monitors, existing instances can be duplicated with one click
   (credentials are not copied), and reusing a name shows a soft hint.
 - Credentials are stored in the system keychain — never in config files or
-  logs.
+  logs. The source configuration itself can be exported to a JSON file and
+  imported back on another machine (credentials are not included and are not
+  affected by an import).
 - Update checks against the project's releases (automatic, or "Check for
   updates…" in the tray menu) with a release-notes dialog and a direct link
   to the download.

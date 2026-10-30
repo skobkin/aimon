@@ -10,8 +10,10 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image/color"
+	"io"
 	"net/url"
 	"path/filepath"
 	"sync/atomic"
@@ -97,6 +99,10 @@ type Deps struct {
 	// preferences.json) and the current log file. Nil in tests that do
 	// not care; the About tab then shows Unavailable.
 	ConfigPaths func() (settingsDir, logFile string)
+	// SourceDocument returns the raw stored source document — the exact
+	// JSON the import path consumes and the export path writes — empty
+	// when none is stored. Secret-free by construction.
+	SourceDocument func() string
 
 	// Done closes when the app begins quitting; background goroutines
 	// bail out instead of touching the UI during teardown.
@@ -126,6 +132,8 @@ type Settings struct {
 	notifs          *widget.Check
 	notifsLow       *widget.Check
 	notifsExhausted *widget.Check
+	exportBtn       *widget.Button
+	importBtn       *widget.Button
 	tabs            *container.AppTabs
 	aboutItem       *container.TabItem
 
@@ -198,6 +206,12 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		}
 	})
 
+	// The Configuration buttons move the secret-free source document in
+	// and out of the app. Export is read-only; import ends in the guarded
+	// mutation path, so it is disabled while another save is in flight.
+	s.exportBtn = widget.NewButton("Export…", s.exportConfiguration)
+	s.importBtn = widget.NewButton("Import…", s.importConfiguration)
+
 	// The status line sits in a Border's centre, not an HBox: an HBox hands
 	// out minimum widths, so a wrapping label would be squeezed to a sliver
 	// the moment a long message arrived. Here it takes the width left over
@@ -225,6 +239,8 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		s.notifs,
 		s.notifsLow,
 		s.notifsExhausted,
+		widget.NewLabelWithStyle("Configuration", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewHBox(s.exportBtn, s.importBtn),
 	)
 	s.aboutItem = s.aboutTab()
 	s.tabs = container.NewAppTabs(
@@ -541,6 +557,99 @@ func (s *Settings) cleanupCredentials(inst config.SourceInstance) {
 	}
 }
 
+// exportConfiguration writes the stored source document to a user-chosen
+// file. The document is secret-free by construction — credentials live
+// only in the keychain and the schema has no field that could hold one —
+// so the exported file can never leak a secret. An empty configuration
+// exports the minimal valid document, so a file always imports back.
+func (s *Settings) exportConfiguration() {
+	if s.deps.SourceDocument == nil {
+		return
+	}
+	dlg := dialog.NewFileSave(func(w fyne.URIWriteCloser, err error) {
+		if err != nil {
+			s.status.SetText("Export failed: " + err.Error())
+
+			return
+		}
+		if w == nil {
+			return // the chooser was canceled
+		}
+		defer func() { _ = w.Close() }()
+		if _, werr := w.Write([]byte(exportDocument(s.deps.SourceDocument()))); werr != nil {
+			s.status.SetText("Export failed: " + werr.Error())
+
+			return
+		}
+		s.status.SetText("Configuration exported.")
+	}, s.win)
+	dlg.SetFileName("aimon-sources.json")
+	dlg.Show()
+}
+
+// exportDocument renders the exported file body: the raw stored document,
+// or the minimal valid document when nothing is stored.
+func exportDocument(raw string) string {
+	if raw == "" {
+		return "{\n  \"schema_version\": 1\n}"
+	}
+
+	return raw
+}
+
+// importConfiguration reads a user-chosen file, validates it as a source
+// document, and — only after an explicit confirmation — replaces the
+// stored configuration through the guarded mutation path.
+func (s *Settings) importConfiguration() {
+	dialog.NewFileOpen(func(r fyne.URIReadCloser, err error) {
+		if err != nil {
+			s.status.SetText("Import failed: " + err.Error())
+
+			return
+		}
+		if r == nil {
+			return // the chooser was canceled
+		}
+		defer func() { _ = r.Close() }()
+		raw, rerr := io.ReadAll(r)
+		if rerr != nil {
+			s.status.SetText("Import failed: " + rerr.Error())
+
+			return
+		}
+		s.importDocument(string(raw),
+			func(list []config.SourceInstance, commit func()) {
+				dialog.NewConfirm("Import source configuration",
+					"Replace current source configuration? Credentials are not included and are not affected.",
+					func(ok bool) {
+						if ok {
+							commit()
+						}
+					}, s.win).Show()
+			},
+			func(msg string) { dialog.NewError(errors.New(msg), s.win).Show() })
+	}, s.win).Show()
+}
+
+// importDocument is the dialog-independent body of the import path:
+// validate first — a failure reports and stops before anything is written,
+// and the stored document stays untouched. On success ask runs with the
+// parsed candidate and the commit closure (capturing it); committing goes
+// through the guarded mutation path. A colliding ID replaces that
+// instance (its keychain accounts keep matching); credentials of absent
+// instances are never touched.
+func (s *Settings) importDocument(raw string, ask func(list []config.SourceInstance, commit func()), report func(string)) {
+	list, err := config.ParseSourceDocument(raw)
+	if err != nil {
+		report(err.Error())
+
+		return
+	}
+	ask(list, func() {
+		s.mutate(func() ([]config.SourceInstance, error) { return list, nil }, nil)
+	})
+}
+
 // mutate is the single guarded configuration mutation path. The candidate
 // derivation runs on the UI thread (it reads the authoritative list); the
 // persist runs on a background goroutine. On success the list is rebuilt
@@ -596,8 +705,10 @@ func (s *Settings) setMutating(busy bool) {
 	}
 	if busy {
 		s.addBtn.Disable()
+		s.importBtn.Disable()
 	} else {
 		s.addBtn.Enable()
+		s.importBtn.Enable()
 	}
 }
 

@@ -237,7 +237,9 @@ func New() (*App, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
 		ConfigPaths: func() (string, string) { return storageRoot, logPath },
-		Done:        a.done,
+
+		SourceDocument: a.SourceDocument,
+		Done:           a.done,
 	})
 
 	// Wayland has no per-window icon: the compositor draws the taskbar
@@ -328,6 +330,10 @@ func (a *App) Run() {
 func storageRootPath(fa fyne.App) string {
 	return fa.Storage().RootURI().Path()
 }
+
+// SourceDocument returns the raw stored (secret-free) source document for
+// the Settings export/import paths; empty when none is stored.
+func (a *App) SourceDocument() string { return a.repo.SourceDocument() }
 
 // setupTray installs the tray icon and menu. Without a desktop driver
 // (off-desktop run) the monitor window shows at startup instead.
