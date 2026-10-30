@@ -22,6 +22,7 @@ type SensitiveValue struct {
 	text     string      // the real value; never modified by masking
 	hidden   func() bool // the global privacy predicate
 	revealed bool        // pointer is currently over the widget
+	onHover  func(bool)  // optional reveal reporter (see SetHoverCallback)
 }
 
 // maskText is the fixed concealment string. It is intentionally constant,
@@ -40,6 +41,16 @@ func NewSensitiveValue(text string, hidden func() bool) *SensitiveValue {
 	v.ExtendBaseWidget(v)
 
 	return v
+}
+
+// SetHoverCallback wires an optional reveal reporter, called with true on
+// MouseIn and false on MouseOut. The monitor uses it to remember which row
+// is hovered, so a tree rebuild restores the reveal: Fyne recomputes hover
+// only when the pointer moves, so the replacement widget would re-mask a
+// value the pointer is still over. UI thread only, like the hover events
+// that drive it.
+func (v *SensitiveValue) SetHoverCallback(fn func(revealed bool)) {
+	v.onHover = fn
 }
 
 // SetText replaces the real value.
@@ -68,12 +79,18 @@ func (v *SensitiveValue) DisplayText() string {
 // MouseIn implements desktop.Hoverable: hovering reveals the real value.
 func (v *SensitiveValue) MouseIn(*desktop.MouseEvent) {
 	v.revealed = true
+	if v.onHover != nil {
+		v.onHover(true)
+	}
 	v.Refresh()
 }
 
 // MouseOut implements desktop.Hoverable: leaving re-masks immediately.
 func (v *SensitiveValue) MouseOut() {
 	v.revealed = false
+	if v.onHover != nil {
+		v.onHover(false)
+	}
 	v.Refresh()
 }
 

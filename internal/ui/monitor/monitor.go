@@ -63,6 +63,15 @@ type Monitor struct {
 	// hops through fyne.Do), so no locking is needed.
 	tickFns []func(now time.Time)
 
+	// revealKey carries which sensitive money row is currently hovered,
+	// keyed "instance\x00label". Fyne recomputes hover only when the
+	// pointer moves, so after a rebuild swaps in a fresh SensitiveValue
+	// under a stationary pointer the new widget restores the reveal from
+	// this key; the hover-out of the replaced widget clears it (also on
+	// the UI thread, with the same no-locking reasoning as tickFns).
+	// Deliberately not reset by rebuild — resetting is the defect.
+	revealKey string
+
 	mu      sync.Mutex
 	visible bool
 }
@@ -338,7 +347,7 @@ func (m *Monitor) overviewCardBody(c ui.OverviewCardVM, tick *[]func(now time.Ti
 
 		return body
 	case ui.OverviewSpend:
-		return components.NewSpendOverviewBody(c.Spend, m.ctrl.HideSensitiveInfo)
+		return components.NewSpendOverviewBody(c.Spend, m.sensitiveRows(c.Instance))
 	case ui.OverviewService:
 		return components.NewServiceOverviewBody(c.Service)
 	default:
@@ -454,7 +463,7 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 
 		return box
 	case ui.KindSpend:
-		return components.NewSpendDetailBody(c.Spend, m.ctrl.HideSensitiveInfo)
+		return components.NewSpendDetailBody(c.Spend, m.sensitiveRows(c.Instance))
 	case ui.KindService:
 		body, ticks := components.NewServiceDetailBody(c.Service, time.Now())
 		*tick = append(*tick, ticks...)
@@ -462,6 +471,51 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		return body
 	default:
 		return noDataYet()
+	}
+}
+
+// revealKeyFor is the revealKey format for one sensitive row.
+func revealKeyFor(inst domain.InstanceID, label string) string {
+	return string(inst) + "\x00" + label
+}
+
+// sensitiveRows builds the per-card SensitiveRows: predicates read the
+// monitor's reveal key so the row under a stationary pointer stays revealed
+// across rebuilds, and hover reports maintain that key.
+func (m *Monitor) sensitiveRows(inst domain.InstanceID) components.SensitiveRows {
+	return perCardRows{m: m, inst: inst}
+}
+
+type perCardRows struct {
+	m    *Monitor
+	inst domain.InstanceID
+}
+
+func (p perCardRows) Hidden(label string) func() bool {
+	key := revealKeyFor(p.inst, label)
+
+	return func() bool {
+		return p.m.ctrl.HideSensitiveInfo() && p.m.revealKey != key
+	}
+}
+
+// Hover records which row the pointer entered. On leave, the key is only
+// cleared when it still names this row (a fast move into another row may
+// have replaced it) and the tree is refreshed so the live widget — a
+// different SensitiveValue after a rebuild — re-masks.
+func (p perCardRows) Hover(label string, revealed bool) {
+	key := revealKeyFor(p.inst, label)
+	if revealed {
+		p.m.revealKey = key
+
+		return
+	}
+	if p.m.revealKey != key {
+		return
+	}
+	p.m.revealKey = ""
+	if c := p.m.win.Content(); c != nil {
+		c.Refresh()
 	}
 }
 

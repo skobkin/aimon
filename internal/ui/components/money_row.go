@@ -19,13 +19,53 @@ func neutralText(s string) *canvas.Text {
 	return t
 }
 
+// SensitiveRows hands the spend bodies their per-row privacy predicates and
+// receives hover reports from the masked values. The monitor implements it
+// with per-row reveal tracking, so a tree rebuild restores the reveal of
+// the row the pointer is still over (Fyne recomputes hover only on pointer
+// movement); StaticSensitiveRows provides the plain-predicate behavior for
+// callers without rebuild-tracking.
+type SensitiveRows interface {
+	// Hidden returns the privacy predicate ("concealed") for one row label.
+	Hidden(label string) func() bool
+	// Hover reports that the pointer entered or left the row's value.
+	Hover(label string, revealed bool)
+}
+
+// staticRows adapts one bare privacy predicate for every row.
+type staticRows func() bool
+
+// StaticSensitiveRows wraps a bare privacy predicate (nil = never hide)
+// as a SensitiveRows without per-row reveal tracking.
+func StaticSensitiveRows(hidden func() bool) SensitiveRows {
+	if hidden == nil {
+		hidden = func() bool { return false }
+	}
+
+	return staticRows(hidden)
+}
+
+func (s staticRows) Hidden(string) func() bool { return func() bool { return s() } }
+
+func (s staticRows) Hover(string, bool) {}
+
+// sensitiveValueFor builds one row's masked value wired to rows: the
+// predicate comes from the row label and hover transitions are reported
+// back so the owner can carry the reveal across rebuilds.
+func sensitiveValueFor(vm ui.MoneyMetricVM, rows SensitiveRows) *SensitiveValue {
+	v := NewSensitiveValue(vm.Text, rows.Hidden(vm.Label))
+	v.SetHoverCallback(func(revealed bool) { rows.Hover(vm.Label, revealed) })
+
+	return v
+}
+
 // NewMoneyRow builds one "Label ……… $x.xx" line. Sensitive rows render
 // their value through SensitiveValue so the global privacy preference
 // conceals them until hover; plain rows mirror NewMetricRow.
-func NewMoneyRow(vm ui.MoneyMetricVM, hidden func() bool) fyne.CanvasObject {
+func NewMoneyRow(vm ui.MoneyMetricVM, rows SensitiveRows) fyne.CanvasObject {
 	var value fyne.CanvasObject
 	if vm.Sensitive {
-		value = NewSensitiveValue(vm.Text, hidden)
+		value = sensitiveValueFor(vm, rows)
 	} else {
 		value = neutralText(vm.Text)
 	}
@@ -40,20 +80,20 @@ func NewMoneyRow(vm ui.MoneyMetricVM, hidden func() bool) fyne.CanvasObject {
 // NewSpendOverviewBody builds an OpenRouter overview card's compact body:
 // usage money rows, the optional key-limit bar, and the Balance row when
 // account data exists (S4 UI/UX §4–7).
-func NewSpendOverviewBody(vm ui.SpendOverviewVM, hidden func() bool) fyne.CanvasObject {
+func NewSpendOverviewBody(vm ui.SpendOverviewVM, rows SensitiveRows) fyne.CanvasObject {
 	if !vm.HasData {
 		return noDataLabel()
 	}
 
 	body := container.NewVBox()
 	for _, row := range vm.Usage {
-		body.Add(NewMoneyRow(row, hidden))
+		body.Add(NewMoneyRow(row, rows))
 	}
 	if vm.Limit != nil {
 		body.Add(spendLimitBlock(vm.Limit, false))
 	}
 	if vm.Balance != nil {
-		body.Add(NewMoneyRow(*vm.Balance, hidden))
+		body.Add(NewMoneyRow(*vm.Balance, rows))
 	}
 
 	return body
@@ -63,14 +103,14 @@ func NewSpendOverviewBody(vm ui.SpendOverviewVM, hidden func() bool) fyne.Canvas
 // section (Today/Week/Month/Total), the optional limit block with its raw
 // amount line, and an Account section when Management-key data exists
 // (S4 UI/UX §8–10).
-func NewSpendDetailBody(vm ui.SpendVM, hidden func() bool) fyne.CanvasObject {
+func NewSpendDetailBody(vm ui.SpendVM, rows SensitiveRows) fyne.CanvasObject {
 	if !vm.HasData {
 		return noDataLabel()
 	}
 
 	body := container.NewVBox(NewSectionLabel("Usage"))
 	for _, row := range vm.Usage {
-		body.Add(NewMoneyRow(row, hidden))
+		body.Add(NewMoneyRow(row, rows))
 	}
 	// The derived spend speed ("Pace  $1.24/h") follows the usage rows
 	// through the same monetary masking as every other money value; it has
@@ -81,7 +121,7 @@ func NewSpendDetailBody(vm ui.SpendVM, hidden func() bool) fyne.CanvasObject {
 			Label:     "Pace",
 			Text:      vm.Pace.SpeedText,
 			Sensitive: true,
-		}, hidden))
+		}, rows))
 	}
 	if vm.Limit != nil {
 		body.Add(spendLimitBlock(vm.Limit, true))
@@ -89,7 +129,7 @@ func NewSpendDetailBody(vm ui.SpendVM, hidden func() bool) fyne.CanvasObject {
 	if len(vm.Account) > 0 {
 		body.Add(NewSectionLabel("Account"))
 		for _, row := range vm.Account {
-			body.Add(NewMoneyRow(row, hidden))
+			body.Add(NewMoneyRow(row, rows))
 		}
 	}
 

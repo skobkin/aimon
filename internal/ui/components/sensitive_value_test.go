@@ -112,7 +112,7 @@ func TestSensitiveValueGeometryStableAcrossReveal(t *testing.T) {
 
 func TestNewMoneyRowSensitiveRowsUseSensitiveValue(t *testing.T) {
 	sensitive := ui.MoneyMetricVM{Label: "Balance", Text: "$73.42", Sensitive: true}
-	row := NewMoneyRow(sensitive, func() bool { return true })
+	row := NewMoneyRow(sensitive, StaticSensitiveRows(func() bool { return true }))
 
 	values := sensitiveValuesIn(t, row)
 	if len(values) != 1 {
@@ -123,8 +123,53 @@ func TestNewMoneyRowSensitiveRowsUseSensitiveValue(t *testing.T) {
 	}
 
 	plain := ui.MoneyMetricVM{Label: "Today", Text: "$0.42"}
-	if sv := sensitiveValuesIn(t, NewMoneyRow(plain, nil)); len(sv) != 0 {
+	if sv := sensitiveValuesIn(t, NewMoneyRow(plain, StaticSensitiveRows(nil))); len(sv) != 0 {
 		t.Error("a non-sensitive row must not build a SensitiveValue")
+	}
+}
+
+// StaticSensitiveRows: the bare predicate drives every row and hover
+// reports are ignored — the standalone behavior, no rebuild tracking.
+func TestStaticSensitiveRowsPredicateAndHover(t *testing.T) {
+	hidden := true
+	rows := StaticSensitiveRows(func() bool { return hidden })
+
+	row := NewMoneyRow(ui.MoneyMetricVM{Label: "Balance", Text: "$73.42", Sensitive: true}, rows)
+	value := sensitiveValuesIn(t, row)[0]
+	if !value.Masked() {
+		t.Error("row must start masked under the enabled predicate")
+	}
+
+	hidden = false
+	if value.Masked() {
+		t.Error("the predicate must be read live, not baked in at build time")
+	}
+
+	rows.Hover("Balance", true)
+	if value.Masked() {
+		t.Error("static rows must not track hover state")
+	}
+}
+
+// The hover callback reports both transitions so the monitor can carry the
+// reveal across rebuilds.
+func TestSensitiveValueHoverCallback(t *testing.T) {
+	v := hiddenSensitive("$73.42")
+	var reports []bool
+	v.SetHoverCallback(func(revealed bool) { reports = append(reports, revealed) })
+
+	v.MouseIn(&desktop.MouseEvent{})
+	v.MouseOut()
+	if len(reports) != 2 || reports[0] != true || reports[1] != false {
+		t.Errorf("hover reports = %v, want [true false]", reports)
+	}
+
+	// Without a callback the hover behavior is unchanged.
+	plain := hiddenSensitive("$1.00")
+	plain.MouseIn(&desktop.MouseEvent{})
+	plain.MouseOut()
+	if plain.DisplayText() != maskText {
+		t.Errorf("unhooked value after hover = %q", plain.DisplayText())
 	}
 }
 
@@ -150,7 +195,7 @@ func TestSpendBodiesShape(t *testing.T) {
 
 	detail := NewSpendDetailBody(ui.SpendVM{
 		Usage: usage, Account: account, Limit: limit, HasData: true,
-	}, isHidden)
+	}, StaticSensitiveRows(isHidden))
 	if sv := sensitiveValuesIn(t, detail); len(sv) != 3 {
 		t.Errorf("detail masked values = %d, want the three account rows", len(sv))
 	}
@@ -168,7 +213,7 @@ func TestSpendBodiesShape(t *testing.T) {
 		Limit:   limit,
 		Balance: &account[0],
 		HasData: true,
-	}, isHidden)
+	}, StaticSensitiveRows(isHidden))
 	if sv := sensitiveValuesIn(t, overview); len(sv) != 1 {
 		t.Errorf("overview masked values = %d, want only Balance", len(sv))
 	}
@@ -179,10 +224,10 @@ func TestSpendBodiesShape(t *testing.T) {
 		t.Error("overview body must show the limit bar label")
 	}
 
-	if !containsLabelText(t, NewSpendDetailBody(ui.SpendVM{}, nil), noDataYet) {
+	if !containsLabelText(t, NewSpendDetailBody(ui.SpendVM{}, StaticSensitiveRows(nil)), noDataYet) {
 		t.Error("no-data detail must show the placeholder")
 	}
-	if !containsLabelText(t, NewSpendOverviewBody(ui.SpendOverviewVM{}, nil), noDataYet) {
+	if !containsLabelText(t, NewSpendOverviewBody(ui.SpendOverviewVM{}, StaticSensitiveRows(nil)), noDataYet) {
 		t.Error("no-data overview must show the placeholder")
 	}
 }
@@ -247,7 +292,7 @@ func TestSpendDetailPaceRow(t *testing.T) {
 		HasData: true,
 		Usage:   []ui.MoneyMetricVM{{Label: "Today", Text: "$0.42"}},
 		Pace:    &ui.PaceVM{State: pace.StateActive, SpeedText: "$1.24/h"},
-	}, isHidden)
+	}, StaticSensitiveRows(isHidden))
 	if !containsLabelText(t, detail, "Pace") {
 		t.Error("detail body lacks the Pace row")
 	}
@@ -264,7 +309,7 @@ func TestSpendDetailPaceRow(t *testing.T) {
 		HasData: true,
 		Usage:   []ui.MoneyMetricVM{{Label: "Today", Text: "$0.42"}},
 		Pace:    &ui.PaceVM{State: pace.StateActive, SpeedText: "$1.24/h"},
-	}, func() bool { return false })
+	}, StaticSensitiveRows(func() bool { return false }))
 	for _, v := range sensitiveValuesIn(t, open) {
 		if v.DisplayText() != "$1.24/h" {
 			t.Errorf("revealed pace value = %q", v.DisplayText())
@@ -276,7 +321,7 @@ func TestSpendDetailPaceRow(t *testing.T) {
 		HasData: true,
 		Usage:   []ui.MoneyMetricVM{{Label: "Today", Text: "$0.42"}},
 		Pace:    &ui.PaceVM{State: pace.StateCollecting},
-	}, isHidden)
+	}, StaticSensitiveRows(isHidden))
 	if containsLabelText(t, collecting, "Pace") {
 		t.Error("collecting pace must not render a money row")
 	}

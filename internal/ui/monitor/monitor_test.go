@@ -8,6 +8,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
@@ -15,6 +16,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/ui/components"
 )
 
 // stubCtrl is the minimal controller for building the real window. The
@@ -116,6 +118,96 @@ func TestRemoteTabRendersSpendBody(t *testing.T) {
 }
 
 const balanceMask = "$•••••"
+
+// sensitiveValuesIn walks the container and returns its SensitiveValue
+// widgets (renderer descent via flatten, as everywhere in this file).
+func sensitiveValuesIn(t *testing.T, box *fyne.Container) []*components.SensitiveValue {
+	t.Helper()
+	var out []*components.SensitiveValue
+	for _, o := range flatten(t, box.Objects) {
+		if v, ok := o.(*components.SensitiveValue); ok {
+			out = append(out, v)
+		}
+	}
+
+	return out
+}
+
+func findSensitiveByText(t *testing.T, box *fyne.Container, text string) *components.SensitiveValue {
+	t.Helper()
+	for _, v := range sensitiveValuesIn(t, box) {
+		if v.Text() == text {
+			return v
+		}
+	}
+
+	return nil
+}
+
+// A rebuild replaces the hovered SensitiveValue with a fresh widget, and
+// Fyne recomputes hover only when the pointer moves — so without carried
+// state the value would snap back to its mask until the next mouse move.
+// The reveal key must restore the reveal on the new widget and the
+// hover-out of the replaced widget must re-mask the live one.
+func TestSensitiveRevealSurvivesRebuild(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &statefulCtrl{hidden: true}
+	m := NewMonitor(app, ctrl, done)
+	m.rebuild()
+
+	old := findSensitiveByText(t, m.remoteBox, "$73.42")
+	if old == nil {
+		t.Fatal("no Balance value found in the remote tab")
+	}
+	if old.DisplayText() != balanceMask {
+		t.Fatalf("Balance starts unmasked: %q", old.DisplayText())
+	}
+
+	// Hovering reveals and records the row key.
+	old.MouseIn(&desktop.MouseEvent{})
+	if old.DisplayText() != "$73.42" {
+		t.Fatalf("hover did not reveal Balance: %q", old.DisplayText())
+	}
+
+	// The rebuild swaps in a new widget; the key must keep it revealed.
+	m.rebuild()
+	fresh := findSensitiveByText(t, m.remoteBox, "$73.42")
+	if fresh == nil {
+		t.Fatal("rebuild lost the Balance value")
+	}
+	if fresh == old {
+		t.Fatal("rebuild did not replace the widget; test proves nothing")
+	}
+	if fresh.DisplayText() != "$73.42" {
+		t.Errorf("the replacement widget re-masked a hovered value: %q", fresh.DisplayText())
+	}
+	if got := findCanvasText(t, m.remoteBox, "$73.42"); got == nil {
+		t.Error("the rendered text is not the revealed value after rebuild")
+	}
+
+	// The replaced widget still receives the hover-out (Fyne tracks hover
+	// by object identity): it clears the key and re-masks the live widget.
+	old.MouseOut()
+	if fresh.DisplayText() != balanceMask {
+		t.Errorf("hover-out of the replaced widget left the live value revealed: %q", fresh.DisplayText())
+	}
+	if got := findCanvasText(t, m.remoteBox, balanceMask); got == nil {
+		t.Error("the rendered text did not return to the mask")
+	}
+
+	// Hovering a different row must not unmask Balance.
+	fresh2 := findSensitiveByText(t, m.remoteBox, "$105.89")
+	if fresh2 == nil {
+		t.Fatal("no Purchased credits value found")
+	}
+	fresh2.MouseIn(&desktop.MouseEvent{})
+	if got := findSensitiveByText(t, m.remoteBox, "$73.42"); got.DisplayText() != balanceMask {
+		t.Errorf("hovering another row unmasked Balance: %q", got.DisplayText())
+	}
+}
 
 // incompatibleCLIMessage is the authored Codex setup guidance carried by a
 // config-category failure — the footer behind the report of a monitor
