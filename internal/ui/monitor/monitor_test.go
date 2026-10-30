@@ -8,8 +8,10 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"git.skobk.in/skobkin/aimonitor/internal/config"
@@ -686,6 +688,175 @@ func TestServiceAgeRowsAgeInPlace(t *testing.T) {
 	}
 	if !slices.Contains(allTexts(t, m.localBox), "4m ago") {
 		t.Error("tick did not age the Last write row")
+	}
+}
+
+// Tapping an Overview card selects the card's detail tab and scrolls the
+// card to the top of the tab: with two local sources, the second tile
+// must land its matching detail card at the viewport top.
+func TestOverviewCardTapDrillsDownToLocalDetail(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	m := NewMonitor(app, &stalePairCtrl{}, done)
+	m.win.Resize(fyne.NewSize(540, 220)) // small viewport: the scroll must actually move
+	m.Show()
+	if m.tabs.SelectedIndex() != 0 {
+		t.Fatalf("overview tab not selected initially: %d", m.tabs.SelectedIndex())
+	}
+
+	tile := findTapCardFor(t, m.overviewBox, "inference server.lan")
+	if tile == nil {
+		t.Fatal("the stale local card is not tappable")
+	}
+	test.Tap(tile)
+
+	if got := m.tabs.SelectedIndex(); got != 1 {
+		t.Fatalf("tap selected tab %d, want Local (1)", got)
+	}
+
+	// The scrolled content box sits at -offset, placing the target card at
+	// the viewport top: box y = -(the preceding cards' heights + padding).
+	// Child positions stay box-relative, so the box's own position is the
+	// scroll signal.
+	m.win.Resize(fyne.NewSize(540, 220)) // force the layout pass
+	expected := m.localBox.Objects[0].MinSize().Height + theme.Padding()
+	if pos := m.localBox.Position().Y; pos < -expected-2 || pos > -expected+2 {
+		t.Errorf("content box y = %.1f, want ~-%.1f (target card at viewport top)", pos, expected)
+	}
+}
+
+// The same drill-down for a remote card, which is the first card of its
+// tab: offset 0 — the tap still must select the Remote tab.
+func TestOverviewCardTapDrillsDownToRemoteDetail(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	m := NewMonitor(app, &quotaCtrl{}, done)
+	m.win.Resize(fyne.NewSize(540, 220))
+	m.Show()
+
+	tile := findTapCardFor(t, m.overviewBox, "MiniMax")
+	if tile == nil {
+		t.Fatal("the MiniMax overview card is not tappable")
+	}
+	test.Tap(tile)
+
+	if got := m.tabs.SelectedIndex(); got != 2 {
+		t.Fatalf("tap selected tab %d, want Remote (2)", got)
+	}
+	m.win.Resize(fyne.NewSize(540, 220))
+	if pos := m.remoteBox.Position().Y; pos < -2 || pos > 2 {
+		t.Errorf("first remote card y = %.1f, want ~0 (offset 0)", pos)
+	}
+}
+
+func findTapCardFor(t *testing.T, box *fyne.Container, title string) *tapCard {
+	t.Helper()
+	for _, o := range flatten(t, box.Objects) {
+		if tile, ok := o.(*tapCard); ok && slices.Contains(allTexts(t, tile.card), title) {
+			return tile
+		}
+	}
+
+	return nil
+}
+
+// The wrapper must not change the card's geometry: MinSize is the card's,
+// so the overview grid and the top-alignment invariant stay untouched.
+func TestTapCardKeepsCardGeometry(t *testing.T) {
+	test.NewTempApp(t)
+
+	card := widget.NewCard("Title", "Subtitle", widget.NewLabel("body"))
+	tile := newTapCard(card, nil)
+	if got, want := tile.MinSize(), card.MinSize(); got != want {
+		t.Errorf("tile min size = %v, want the card's %v", got, want)
+	}
+}
+
+// The hover highlight appears on MouseIn and disappears on MouseOut, and
+// the highlight rectangle itself is never measured into MinSize.
+func TestTapCardHoverHighlight(t *testing.T) {
+	test.NewTempApp(t)
+
+	card := widget.NewCard("Title", "", widget.NewLabel("body"))
+	tile := newTapCard(card, nil)
+	if !tile.highlight.Hidden {
+		t.Fatal("the highlight must start hidden")
+	}
+
+	tile.MouseIn(&desktop.MouseEvent{})
+	if tile.highlight.Hidden {
+		t.Error("MouseIn must show the highlight")
+	}
+	if got, want := tile.MinSize(), card.MinSize(); got != want {
+		t.Errorf("hovering changed the tile min size: %v vs %v", got, want)
+	}
+
+	tile.MouseOut()
+	if !tile.highlight.Hidden {
+		t.Error("MouseOut must hide the highlight")
+	}
+}
+
+// An interactive child of the wrapped card must win the tap over the tile:
+// Fyne's hit-test matches the wrapper first and the descendant last, so the
+// button receives the click and the drill-down does not fire. Tapping the
+// card's non-interactive area still drills down.
+func TestTapCardChildButtonTakesPrecedence(t *testing.T) {
+	app := test.NewTempApp(t)
+	firedButton, firedTile := false, false
+
+	btn := widget.NewButton("go", func() { firedButton = true })
+	tile := newTapCard(widget.NewCard("Title", "Sub", btn), func() { firedTile = true })
+	win := app.NewWindow("tap")
+	win.SetContent(tile)
+	win.Resize(fyne.NewSize(300, 200))
+	win.Show()
+
+	// Dead-center on the button: the button wins.
+	btnPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(btn)
+	center := btnPos.Add(fyne.NewPos(btn.MinSize().Width/2, btn.MinSize().Height/2))
+	test.TapCanvas(win.Canvas(), center)
+	if !firedButton {
+		t.Error("the inner button did not receive the tap")
+	}
+	if firedTile {
+		t.Error("the tile must not fire when an inner button is tapped")
+	}
+
+	// The card's title corner: no interactive child there, the tile fires.
+	cardPos := fyne.CurrentApp().Driver().AbsolutePositionForObject(tile.card)
+	test.TapCanvas(win.Canvas(), cardPos.Add(fyne.NewPos(4, 4)))
+	if !firedTile {
+		t.Error("tapping the non-interactive card area must drill down")
+	}
+}
+
+// The queued drill-down offset applies clamped once the scroller knows its
+// viewport, and waits (instead of being zeroed) while the scroller is
+// unsized — a tab switched inside a tap handler is laid out at frame time.
+func TestDetailScrollPendingAppliesWhenSized(t *testing.T) {
+	test.NewTempApp(t)
+
+	box := container.NewVBox(widget.NewLabel("a"), widget.NewLabel("b"), widget.NewLabel("c"))
+	d := newDetailScroll(box)
+	d.Resize(fyne.NewSize(100, 40))
+
+	d.scrollToY(1000) // far past the tail: must clamp, not overscroll
+	if d.hasPending {
+		t.Fatal("pending must be consumed once the viewport size is known")
+	}
+	if want := box.MinSize().Height - 40; d.scroll.Offset.Y < want-1 {
+		t.Errorf("offset = %v, want clamped to ~%v", d.scroll.Offset.Y, want)
+	}
+
+	unsized := newDetailScroll(container.NewVBox(widget.NewLabel("x")))
+	unsized.scrollToY(10)
+	if !unsized.hasPending {
+		t.Fatal("an unsized scroller must retain the pending offset for the retry")
 	}
 }
 

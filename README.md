@@ -12,7 +12,8 @@ you use — without ever opening a browser tab.
 ## Features
 
 - Compact borderless monitor window launched from the tray, with Overview,
-  Local and Remote tabs.
+  Local and Remote tabs. Overview cards are clickable: tapping one jumps to
+  that source's full detail card.
 - Usage pace for subscription quotas: how fast a quota window is burning
   ("Pace 3.4%/h") and where the usage is heading by the window's reset
   ("≈68% at reset", with a red overflow segment when the projection passes

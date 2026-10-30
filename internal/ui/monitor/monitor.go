@@ -2,10 +2,12 @@ package monitor
 
 import (
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
@@ -54,6 +56,16 @@ type Monitor struct {
 	overviewBox *fyne.Container
 	localBox    *fyne.Container
 	remoteBox   *fyne.Container
+
+	// tabs and the two detail scrolls are the drill-down targets: an
+	// Overview tap selects the matching tab and scrolls the card into view.
+	// localIDs/remoteIDs mirror the card order of the last rebuild (UI
+	// thread only, like tickFns — written by rebuild, read by taps).
+	tabs         *container.AppTabs
+	localScroll  *detailScroll
+	remoteScroll *detailScroll
+	localIDs     []domain.InstanceID
+	remoteIDs    []domain.InstanceID
 
 	refreshBtn *widget.Button
 
@@ -106,12 +118,15 @@ func NewMonitor(a fyne.App, ctrl MonitorController, done <-chan struct{}) *Monit
 	m.refreshBtn = widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), m.onRefresh)
 	settingsBtn := widget.NewButtonWithIcon("", theme.SettingsIcon(), ctrl.OpenSettings)
 
+	m.localScroll = newDetailScroll(m.localBox)
+	m.remoteScroll = newDetailScroll(m.remoteBox)
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Overview", container.NewVScroll(m.overviewBox)),
-		container.NewTabItem("Local", container.NewVScroll(m.localBox)),
-		container.NewTabItem("Remote", container.NewVScroll(m.remoteBox)),
+		container.NewTabItem("Local", m.localScroll),
+		container.NewTabItem("Remote", m.remoteScroll),
 	)
 	tabs.SelectIndex(0)
+	m.tabs = tabs
 
 	// No chrome row: the actions float over the tab content, top-right
 	// (the tab strip only reaches mid-width, so they sit in its empty
@@ -249,8 +264,12 @@ func (m *Monitor) rebuild() {
 	var tick []func(now time.Time)
 
 	m.rebuildOverview(ui.BuildOverview(instances, states, paces, now), states, &tick)
-	replaceObjects(m.localBox, m.tabObjects(ui.BuildLocalTab(instances, states, paces, now), instances, states, "No local sources enabled.", &tick)...)
-	replaceObjects(m.remoteBox, m.tabObjects(ui.BuildRemoteTab(instances, states, paces, now), instances, states, "No remote sources enabled.", &tick)...)
+	localObjs, localIDs := m.tabObjects(ui.BuildLocalTab(instances, states, paces, now), instances, states, "No local sources enabled.", &tick)
+	remoteObjs, remoteIDs := m.tabObjects(ui.BuildRemoteTab(instances, states, paces, now), instances, states, "No remote sources enabled.", &tick)
+	m.localIDs = localIDs
+	m.remoteIDs = remoteIDs
+	replaceObjects(m.localBox, localObjs...)
+	replaceObjects(m.remoteBox, remoteObjs...)
 
 	m.tickFns = tick
 }
@@ -260,6 +279,11 @@ func (m *Monitor) rebuild() {
 // run on the UI thread. Data-dependent content is intentionally untouched:
 // it changes only with a new snapshot, which triggers a rebuild instead.
 func (m *Monitor) updateTimeTexts(now time.Time) {
+	// A drill-down offset queued while the target tab was still unsized is
+	// applied here, on the first tick after its layout — the retry path of
+	// detailScroll.applyPending (normally it applies immediately).
+	m.localScroll.applyPending()
+	m.remoteScroll.applyPending()
 	for _, tick := range m.tickFns {
 		tick(now)
 	}
@@ -292,13 +316,13 @@ func (m *Monitor) overviewRow(cards []ui.OverviewCardVM, states map[domain.Insta
 	for i := 0; i < len(cards); i += 2 {
 		if i+1 < len(cards) {
 			objs = append(objs, container.NewGridWithColumns(2,
-				overviewSourceCard(cards[i], states[cards[i].Instance], m.overviewCardBody(cards[i], tick), tick),
-				overviewSourceCard(cards[i+1], states[cards[i+1].Instance], m.overviewCardBody(cards[i+1], tick), tick),
+				m.overviewTile(cards[i], states, tick),
+				m.overviewTile(cards[i+1], states, tick),
 			))
 
 			continue
 		}
-		objs = append(objs, overviewSourceCard(cards[i], states[cards[i].Instance], m.overviewCardBody(cards[i], tick), tick))
+		objs = append(objs, m.overviewTile(cards[i], states, tick))
 	}
 
 	return objs
@@ -322,6 +346,217 @@ func overviewSourceCard(vm ui.OverviewCardVM, rt domain.Runtime, body fyne.Canva
 
 	return widget.NewCard("", "", container.NewVBox(header, body))
 }
+
+// overviewTile builds one Overview card as a tappable tile: the standard
+// card renders identically, the wrapper adds drill-down navigation and the
+// hover highlight that advertises it.
+func (m *Monitor) overviewTile(c ui.OverviewCardVM, states map[domain.InstanceID]domain.Runtime, tick *[]func(now time.Time)) fyne.CanvasObject {
+	card := overviewSourceCard(c, states[c.Instance], m.overviewCardBody(c, tick), tick)
+
+	return newTapCard(card, func() { m.showDetail(c.Instance) })
+}
+
+// tapCard wraps one Overview card in a minimal widget that is tappable and
+// hoverable without changing the card's look. It must be a real widget:
+// Fyne's hit-test walk descends only into containers and widgets, so a
+// plain wrapper struct would be invisible to it and starve any interactive
+// child; as a widget, the walk matches this wrapper first and any Tappable
+// descendant last — the child wins, which is exactly the precedence an
+// Overview card must keep for future interactive children.
+type tapCard struct {
+	widget.BaseWidget
+
+	card      fyne.CanvasObject
+	highlight *canvas.Rectangle
+	onTap     func()
+}
+
+func newTapCard(card fyne.CanvasObject, onTap func()) *tapCard {
+	t := &tapCard{
+		card:      card,
+		highlight: canvas.NewRectangle(theme.Color(theme.ColorNameHover)),
+		onTap:     onTap,
+	}
+	t.highlight.Hide()
+	t.ExtendBaseWidget(t)
+
+	return t
+}
+
+func (t *tapCard) Tapped(*fyne.PointEvent) {
+	if t.onTap != nil {
+		t.onTap()
+	}
+}
+
+// MouseIn/MouseMoved/MouseOut implement desktop.Hoverable: the highlight
+// advertises the tile as clickable the way Fyne buttons advertise
+// themselves. The rectangle is stretched by the renderer and never
+// measured, so the card's geometry is untouched.
+func (t *tapCard) MouseIn(*desktop.MouseEvent) {
+	t.highlight.Show()
+}
+
+func (t *tapCard) MouseMoved(*desktop.MouseEvent) {}
+
+func (t *tapCard) MouseOut() {
+	t.highlight.Hide()
+}
+
+func (t *tapCard) CreateRenderer() fyne.WidgetRenderer {
+	return &tapCardRenderer{t: t}
+}
+
+type tapCardRenderer struct {
+	t *tapCard
+}
+
+func (r *tapCardRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.t.highlight, r.t.card}
+}
+
+func (r *tapCardRenderer) Layout(size fyne.Size) {
+	r.t.highlight.Move(fyne.NewPos(0, 0))
+	r.t.highlight.Resize(size)
+	r.t.card.Move(fyne.NewPos(0, 0))
+	r.t.card.Resize(size)
+}
+
+// MinSize is the card's own: the highlight is never measured.
+func (r *tapCardRenderer) MinSize() fyne.Size {
+	return r.t.card.MinSize()
+}
+
+func (r *tapCardRenderer) Refresh() {
+	r.t.highlight.FillColor = theme.Color(theme.ColorNameHover)
+	r.t.highlight.Refresh()
+	r.t.card.Refresh()
+}
+
+func (r *tapCardRenderer) Destroy() {}
+
+// showDetail navigates from an Overview tap to the card's detail tab and
+// scrolls the card to the top of the tab. UI thread only.
+func (m *Monitor) showDetail(id domain.InstanceID) {
+	switch m.categoryOf(id) {
+	case domain.CategoryLocal:
+		m.tabs.SelectIndex(1)
+		m.scrollToCard(m.localBox, m.localScroll, slices.Index(m.localIDs, id))
+	case domain.CategoryRemote:
+		m.tabs.SelectIndex(2)
+		m.scrollToCard(m.remoteBox, m.remoteScroll, slices.Index(m.remoteIDs, id))
+	default:
+		// Unknown instance: it was removed between render and tap; the
+		// next rebuild fixes the tree, so there is nothing to navigate to.
+	}
+}
+
+// categoryOf resolves an instance's category from the configured list.
+func (m *Monitor) categoryOf(id domain.InstanceID) domain.Category {
+	for _, inst := range m.ctrl.Instances() {
+		if inst.ID == id {
+			return inst.Kind.Category()
+		}
+	}
+
+	return ""
+}
+
+// scrollToCard queues the scroll offset placing child i of the (VBox) box
+// at the top of the viewport: the sum of the preceding children's minimum
+// heights plus the theme padding between each pair (VBox pads only between
+// children). Minimum sizes are intrinsic, so this works while the target
+// tab is still unselected — AppTabs lays out only the active tab. The
+// scroller applies the offset (clamped to the content) at its next layout.
+func (m *Monitor) scrollToCard(box *fyne.Container, scroll *detailScroll, i int) {
+	if scroll == nil || i < 0 || i >= len(box.Objects) {
+		return
+	}
+	offset := float32(0)
+	for k := 0; k < i; k++ {
+		offset += box.Objects[k].MinSize().Height
+	}
+	offset += float32(i) * theme.Padding()
+	scroll.scrollToY(offset)
+}
+
+// detailScroll wraps the detail tab scroller to carry one queued offset: an
+// offset set directly after a tab switch is unreliable — the scroller
+// zeroes it while neither it nor its content has been laid out yet
+// (updateOffset clamps everything to the current, still-zero sizes). The
+// queued offset is applied in the wrapper's layout pass, once the real
+// viewport size is known, and clamped so the tail cannot overscroll.
+type detailScroll struct {
+	widget.BaseWidget
+
+	scroll     *container.Scroll
+	pending    float32
+	hasPending bool
+}
+
+func newDetailScroll(box *fyne.Container) *detailScroll {
+	d := &detailScroll{scroll: container.NewVScroll(box)}
+	d.ExtendBaseWidget(d)
+
+	return d
+}
+
+func (d *detailScroll) scrollToY(y float32) {
+	d.pending = y
+	d.hasPending = true
+	d.applyPending()
+	d.Refresh()
+}
+
+// applyPending consumes the queued offset when the scroller knows its
+// viewport size; it is retried from the monitor ticker (updateTimeTexts)
+// because a tab switched inside a tap handler is laid out at frame time,
+// and the scroller zeroes offsets set while its content is unsized.
+func (d *detailScroll) applyPending() {
+	if !d.hasPending || d.scroll.Size().Height <= 0 {
+		return
+	}
+	offset := d.pending
+	if max := d.scroll.Content.MinSize().Height - d.scroll.Size().Height; offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	d.hasPending = false
+	if d.scroll.Offset.Y == offset {
+		return
+	}
+	d.scroll.Offset = fyne.NewPos(0, offset)
+	d.scroll.Refresh()
+}
+
+func (d *detailScroll) CreateRenderer() fyne.WidgetRenderer {
+	return &detailScrollRenderer{d: d}
+}
+
+type detailScrollRenderer struct {
+	d *detailScroll
+}
+
+func (r *detailScrollRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.d.scroll}
+}
+
+func (r *detailScrollRenderer) Layout(size fyne.Size) {
+	r.d.scroll.Resize(size)
+}
+
+func (r *detailScrollRenderer) MinSize() fyne.Size {
+	return r.d.scroll.MinSize()
+}
+
+func (r *detailScrollRenderer) Refresh() {
+	r.d.scroll.Refresh()
+	r.d.applyPending()
+}
+
+func (r *detailScrollRenderer) Destroy() {}
 
 // setLabelStatus writes a freshness label, skipping the refresh when the
 // rendered text is unchanged.
@@ -357,11 +592,13 @@ func (m *Monitor) overviewCardBody(c ui.OverviewCardVM, tick *[]func(now time.Ti
 
 // tabObjects renders one detail tab: the cards with per-instance web UI
 // buttons, or the empty state when the category has no enabled instances.
-func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, emptyText string, tick *[]func(now time.Time)) []fyne.CanvasObject {
+// It also returns the card order, which is the drill-down scroll index.
+func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstance, states map[domain.InstanceID]domain.Runtime, emptyText string, tick *[]func(now time.Time)) ([]fyne.CanvasObject, []domain.InstanceID) {
 	if len(cards) == 0 {
-		return []fyne.CanvasObject{components.NewEmptyState(emptyText, m.ctrl.OpenSettings)}
+		return []fyne.CanvasObject{components.NewEmptyState(emptyText, m.ctrl.OpenSettings)}, nil
 	}
 	objs := make([]fyne.CanvasObject, 0, len(cards))
+	ids := make([]domain.InstanceID, 0, len(cards))
 	for _, c := range cards {
 		body := m.cardBody(c, tick)
 		if label, target, ok := webLink(c, instances); ok {
@@ -374,9 +611,10 @@ func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstanc
 			})
 		}
 		objs = append(objs, card)
+		ids = append(ids, c.Instance)
 	}
 
-	return objs
+	return objs, ids
 }
 
 // webLink resolves a card's provider web UI from its configured instance;

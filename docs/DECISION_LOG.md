@@ -10,6 +10,39 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-30 — Overview cards are tappable and drill down to their detail card
+
+The Overview is the glance surface, but it dead-ended: reading a card's
+failure footer, raw counts, or full metric set meant manually picking the
+Local/Remote tab and scrolling to find the card. Overview cards are now
+tappable and navigate to their matching detail card (tab select + scroll to
+top of the tab).
+
+1. **Interaction, not a new grammar.** The standard `widget.Card` renders
+   identically inside a minimal wrapper widget; the wrapper adds only
+   `fyne.Tappable` and a hover highlight (`theme.ColorNameHover` rectangle
+   behind the card, shown on `MouseIn`) that advertises clickability the
+   same way Fyne buttons advertise themselves. Card geometry, the 2-per-row
+   grid, and the 2026-10-29 top-alignment invariant are untouched (the
+   highlight is never measured). The wrapper must be a real widget: Fyne's
+   hit-test descends only into containers/widgets, and a Tappable descendant
+   always out-matches the wrapper — inner buttons keep precedence.
+2. **Scroll, not just tab select.** With several sources the target card
+   can sit below the fold, which would defeat the feature. The offset is
+   derived from the preceding cards' minimum heights (VBox pads only
+   between children) and applied through a small scroller wrapper that
+   queues the offset until the freshly selected tab has been laid out —
+   the scroller otherwise zeroes offsets set while its content is unsized.
+   Worst case (first tick after the tap) the queued offset is applied by
+   the ticker.
+3. **Scope.** Only Overview cards are tappable; the empty state and section
+   labels are not. Overview stays footer-free and non-telemetry.
+
+User-directed change (interaction approved 2026-10-30). Updates/supersedes:
+`docs/UI_UX.md` §16 ("custom navigation controls" prohibition, for this
+wrapper only) and the S2 non-interactive Overview reading, from this date
+onward.
+
 ## 2026-10-30 — Settings window splits into Sources and General tabs
 
 The update-checks toggle gave the Settings window a third application-wide
