@@ -29,6 +29,10 @@ you use — without ever opening a browser tab.
   logs. The source configuration itself can be exported to a JSON file and
   imported back on another machine (credentials are not included and are not
   affected by an import).
+- Session conveniences: an optional "Show monitor window at startup"
+  preference, a "Start on login" toggle (writes a freedesktop autostart
+  entry; removed again when switched off), and a single-instance guard that
+  quietly exits a second launch.
 - Update checks against the project's releases (automatic, or "Check for
   updates…" in the tray menu) with a release-notes dialog and a direct link
   to the download.

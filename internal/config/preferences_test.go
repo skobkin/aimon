@@ -301,6 +301,28 @@ func TestNotificationsPreferences(t *testing.T) {
 	}
 }
 
+// ShowMonitorOnStartup defaults to false (tray-first: the app starts
+// hidden) and is plain-stored — true must write the key as true.
+func TestShowMonitorOnStartupPreference(t *testing.T) {
+	prefs := newMemPreferences()
+	repo := NewRepository(prefs)
+
+	if repo.ShowMonitorOnStartup() {
+		t.Error("absent startup preference must default to hidden")
+	}
+	repo.SetShowMonitorOnStartup(true)
+	if !repo.ShowMonitorOnStartup() {
+		t.Error("persisted true must read back true")
+	}
+	if v := prefs.Bool(keyStartupShowMonitor); !v {
+		t.Errorf("storing true must write startup.show-monitor=true, got %v", v)
+	}
+	repo.SetShowMonitorOnStartup(false)
+	if repo.ShowMonitorOnStartup() {
+		t.Error("persisted false must read back false")
+	}
+}
+
 func keysOf(p *memPreferences) []string {
 	out := make([]string, 0, len(p.data))
 	for k := range p.data {

@@ -233,6 +233,11 @@ func New() (*App, error) {
 		SetNotificationsQuotaLowEnabled:       a.SetNotificationsQuotaLowEnabled,
 		NotificationsQuotaExhaustedEnabled:    a.NotificationsQuotaExhaustedEnabled,
 		SetNotificationsQuotaExhaustedEnabled: a.SetNotificationsQuotaExhaustedEnabled,
+
+		ShowMonitorOnStartup:    a.ShowMonitorOnStartup,
+		SetShowMonitorOnStartup: a.SetShowMonitorOnStartup,
+		AutostartState:          a.AutostartState,
+		SetAutostart:            a.SetAutostart,
 		DiscoverGPUs: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
@@ -311,8 +316,13 @@ func (a *App) Run() {
 	a.applyInstances(a.Instances())
 	// First run (no document ever saved): open Settings once the loop is
 	// up, so the app is not just a tray icon with nothing configured.
-	if !a.repo.HasDocument() {
+	// Otherwise the "show monitor at startup" preference decides — the
+	// tray-first default stays hidden.
+	switch {
+	case !a.repo.HasDocument():
 		a.fyneApp.Lifecycle().SetOnStarted(a.settings.Show)
+	case a.repo.ShowMonitorOnStartup():
+		a.fyneApp.Lifecycle().SetOnStarted(a.monitor.Show)
 	}
 	a.startUpdateChecks()
 	a.fyneApp.Run()
@@ -628,6 +638,14 @@ func (a *App) NotificationsQuotaExhaustedEnabled() bool {
 func (a *App) SetNotificationsQuotaExhaustedEnabled(on bool) {
 	a.repo.SetNotificationsQuotaExhaustedEnabled(on)
 }
+
+// ShowMonitorOnStartup reports the "Show monitor window at startup"
+// preference; the Settings window reads it through Deps.
+func (a *App) ShowMonitorOnStartup() bool { return a.repo.ShowMonitorOnStartup() }
+
+// SetShowMonitorOnStartup persists the "Show monitor window at startup"
+// preference.
+func (a *App) SetShowMonitorOnStartup(on bool) { a.repo.SetShowMonitorOnStartup(on) }
 
 // RefreshAll implements monitor.MonitorController.
 func (a *App) RefreshAll() { a.mgr.RefreshAll() }

@@ -91,6 +91,17 @@ type Deps struct {
 	// report and persist the "Quota window exhausted" event toggle.
 	NotificationsQuotaExhaustedEnabled    func() bool
 	SetNotificationsQuotaExhaustedEnabled func(bool)
+	// ShowMonitorOnStartup / SetShowMonitorOnStartup report and persist the
+	// "Show monitor window at startup" preference.
+	ShowMonitorOnStartup    func() bool
+	SetShowMonitorOnStartup func(bool)
+	// AutostartState reports (present, supported): whether the start-on-login
+	// entry currently exists and whether autostart is meaningful for this
+	// binary (the control is disabled when it is not).
+	AutostartState func() (present, supported bool)
+	// SetAutostart writes or removes the start-on-login entry. It performs
+	// a filesystem write and reports its error.
+	SetAutostart func(bool) error
 	// DiscoverGPUs lists the amdgputop-web GPUs at a base URL (the
 	// amdgputop-web connection test doubles as discovery).
 	DiscoverGPUs func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error)
@@ -132,6 +143,9 @@ type Settings struct {
 	notifs          *widget.Check
 	notifsLow       *widget.Check
 	notifsExhausted *widget.Check
+	startupShow     *widget.Check
+	autostart       *widget.Check
+	startupHint     *widget.Label
 	exportBtn       *widget.Button
 	importBtn       *widget.Button
 	tabs            *container.AppTabs
@@ -206,6 +220,28 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		}
 	})
 
+	// The startup toggles follow the same immediate-apply contract. Start
+	// on login is a filesystem write, so its failure is surfaced in the
+	// hint line under the toggle instead of being dropped.
+	s.startupShow = widget.NewCheck("Show monitor window at startup", func(on bool) {
+		if s.deps.SetShowMonitorOnStartup != nil {
+			s.deps.SetShowMonitorOnStartup(on)
+		}
+	})
+	s.autostart = widget.NewCheck("Start on login", func(on bool) {
+		if s.deps.SetAutostart == nil {
+			return
+		}
+		if err := s.deps.SetAutostart(on); err != nil {
+			s.startupHint.SetText("Autostart: " + err.Error())
+			s.startupHint.Show()
+		}
+	})
+	s.startupHint = widget.NewLabel("")
+	s.startupHint.TextStyle = fyne.TextStyle{Italic: true}
+	s.startupHint.Wrapping = fyne.TextWrapWord
+	s.startupHint.Hide()
+
 	// The Configuration buttons move the secret-free source document in
 	// and out of the app. Export is read-only; import ends in the guarded
 	// mutation path, so it is disabled while another save is in flight.
@@ -239,6 +275,10 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		s.notifs,
 		s.notifsLow,
 		s.notifsExhausted,
+		widget.NewLabelWithStyle("Startup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		s.startupShow,
+		s.autostart,
+		s.startupHint,
 		widget.NewLabelWithStyle("Configuration", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(s.exportBtn, s.importBtn),
 	)
@@ -282,6 +322,21 @@ func (s *Settings) Show() {
 	}
 	if s.deps.NotificationsQuotaExhaustedEnabled != nil {
 		s.notifsExhausted.SetChecked(s.deps.NotificationsQuotaExhaustedEnabled())
+	}
+	if s.deps.ShowMonitorOnStartup != nil {
+		s.startupShow.SetChecked(s.deps.ShowMonitorOnStartup())
+	}
+	if s.deps.AutostartState != nil {
+		present, supported := s.deps.AutostartState()
+		s.autostart.SetChecked(present)
+		if supported {
+			s.autostart.Enable()
+			s.startupHint.Hide()
+		} else {
+			s.autostart.Disable()
+			s.startupHint.SetText("Autostart is unavailable for development binaries.")
+			s.startupHint.Show()
+		}
 	}
 	s.refresh()
 	s.probeKeychain()

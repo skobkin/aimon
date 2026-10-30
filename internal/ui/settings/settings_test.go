@@ -397,6 +397,67 @@ func TestSettingsNotificationChecksSyncAndPersist(t *testing.T) {
 	}
 }
 
+// The Startup toggles: Show syncs the show-monitor check from the
+// preference and the autostart check from the entry's actual presence; an
+// unsupported binary disables the autostart check with the hint shown;
+// toggling persists through the setters.
+func TestSettingsStartupControls(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	present, supported := true, true
+	startupState := true
+	var autostartCalls []bool
+	stub.ShowMonitorOnStartup = func() bool { return startupState }
+	stub.SetShowMonitorOnStartup = func(on bool) { startupState = on }
+	stub.AutostartState = func() (bool, bool) { return present, supported }
+	stub.SetAutostart = func(on bool) error {
+		autostartCalls = append(autostartCalls, on)
+		present = on
+
+		return nil
+	}
+	s := NewSettings(test.NewTempApp(t), stub)
+
+	// Supported and present: check on and enabled, hint hidden.
+	s.Show()
+	if !s.startupShow.Checked || !s.autostart.Checked {
+		t.Error("Show must sync the startup checks from the app state")
+	}
+	if s.autostart.Disabled() {
+		t.Error("a supported binary must leave the autostart check enabled")
+	}
+	if s.startupHint.Visible() {
+		t.Error("the hint must stay hidden for a supported binary")
+	}
+
+	// Unsupported: check disabled and explained, presence still reported.
+	present, supported = true, false
+	s.Show()
+	if !s.autostart.Disabled() {
+		t.Error("an unsupported binary must disable the autostart check")
+	}
+	if !s.startupHint.Visible() {
+		t.Error("the hint must explain a disabled autostart check")
+	}
+
+	// Back to supported-but-absent, then toggle both: each reaches its own
+	// setter (Show's sync fires them too, so only explicit toggles count).
+	present, supported = false, true
+	s.Show()
+	autostartCalls = nil
+	s.startupShow.SetChecked(true)
+	s.autostart.SetChecked(true)
+	if !startupState {
+		t.Error("the show-monitor toggle must persist")
+	}
+	if len(autostartCalls) != 1 || !autostartCalls[0] {
+		t.Errorf("autostart toggle reached %v, want [true]", autostartCalls)
+	}
+	if !s.autostart.Checked {
+		t.Error("a successful SetAutostart must leave the check on")
+	}
+}
+
 // The mutation gate: at most one configuration mutation may be in flight;
 // a second entry while one runs is rejected until the first leaves.
 func TestMutationGateSingleFlight(t *testing.T) {

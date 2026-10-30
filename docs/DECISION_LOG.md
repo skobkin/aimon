@@ -10,6 +10,34 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-31 — Startup bundle: show-on-startup preference, user-asked autostart entry, single-instance lock
+
+This entry extends the 2026-08-29 Wayland app-id entry's "nothing is
+auto-installed from Go code" rule with one deliberate, user-asked
+exception, and records the new startup-time behaviors:
+
+1. **Show on startup.** The tray-first default (start hidden) is now a
+   stored preference (`startup.show-monitor`, default off). First-run
+   behavior is unchanged: no stored document opens Settings. With a
+   document, the preference decides whether the monitor window opens.
+2. **Start on login.** The Settings General toggle writes or removes
+   `<UserConfigDir>/autostart/aimon.desktop` (freedesktop autostart,
+   `Exec=` quoted, `Icon=com.skobkin.aimonitor`). This is the exception
+   to the nothing-auto-installed rule: the file is written only when the
+   user switches the toggle on, and removed when it is switched off —
+   the check reflects the entry's actual presence on every Show, never a
+   stored mirror of it. The toggle is disabled with an explanation for
+   ephemeral Go binaries (`go run`/`go test` builds would point the entry
+   at a file that vanishes).
+3. **Single-instance lock.** A second launch exits quietly with status
+   zero before any GUI initialization, behind an exclusive
+   `flock` on `<UserConfigDir>/aimon/aimon.lock` (`LOCK_EX|LOCK_NB`;
+   Unix only — other platforms run unguarded). An unresolvable config
+   directory or unusable lock file degrades to running unguarded: a
+   missing lock is a cosmetic regression, not a data hazard. The lock
+   file persisting on disk is normal; the kernel releases the flock when
+   the process dies.
+
 ## 2026-10-30 — Secret-free configuration export/import
 
 The Settings General tab gains an Export/Import pair for the source

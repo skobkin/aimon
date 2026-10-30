@@ -21,6 +21,14 @@ func main() {
 		return
 	}
 
+	// The single-instance guard runs before any Fyne/GUI initialization.
+	// A second launch is a user mistake (double-click, restart loop), not
+	// an application error, so the loser exits quietly with status zero.
+	if err := app.AcquireSingleInstanceLock(); err != nil {
+		fmt.Fprintln(os.Stderr, "aimon: another instance is already running")
+		os.Exit(0)
+	}
+
 	a, err := app.New()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "aimon:", err)
