@@ -10,6 +10,45 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-30 — Settings gains an About tab; file logging; version at launch
+
+Answering "which build am I running, and where does the app keep its
+files?" required outside tools (the package manager, `journalctl` or a
+terminal). The Settings window gains a third **About** tab (Sources /
+General / About — extends the tab-split entry above), and the app gains
+durable, self-describing logging:
+
+1. **About tab, not a dialog.** The user directed a third Settings tab
+   over a tray dialog: no new window kind, the identity lives next to the
+   settings it describes. Contents: app icon and name, version (buildinfo,
+   `dev` for non-release builds), commit and build date when the release
+   build stamped them, and two `widget.Hyperlink` rows — the settings
+   directory (Fyne's per-app storage root, holding `preferences.json`) and
+   the log file — whose `file://` URLs open the file manager through the
+   same `OpenURL` path the tray Web UIs use. The tab is built once; its
+   content is fixed for the process lifetime.
+2. **File logging with 1 MiB rotation.** Logs move from stderr-only to
+   `<storage root>/logs/aimon.log`, mirrored to stderr in a MultiWriter so
+   journal/terminal capture keeps working. At open time a log over 1 MiB
+   rotates to `aimon.log.old` (one generation; a fresh `aimon.log`
+   appends). Any failure in the path degrades to stderr-only with a stderr
+   note — logging never blocks startup. A failed rotation appends to the
+   oversized file rather than losing logging.
+3. **Version at launch.** The first log line carries name, version,
+   commit, and build date — the same values the About tab and `aimon
+   --version` show — so a user-reported log identifies the build without
+   further questions.
+4. **Tray.** The menu gains "About AI Monitor" (opens Settings on the
+   About tab), and the tray tooltip becomes the versioned
+   `"<AppName> <Version>"`.
+5. **`aimon --version`.** Prints the same one-line identity and exits
+   before any Fyne/GUI initialization; goreleaser now stamps the commit
+   into both release builds alongside version and build date.
+
+Updates/supersedes: extends the 2026-10-30 tab-split entry with the third
+tab; extends `docs/ARCHITECTURE.md` §12 (Logging) with the log destination
+and rotation contract from this date onward.
+
 ## 2026-10-30 — Detail card headers gain an icon-only per-source refresh action
 
 Until now the only manual refresh was global (`RefreshAll`): retrying one

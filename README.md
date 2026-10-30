@@ -28,6 +28,11 @@ you use — without ever opening a browser tab.
 - Update checks against the project's releases (automatic, or "Check for
   updates…" in the tray menu) with a release-notes dialog and a direct link
   to the download.
+- An About tab in Settings with the version, commit and build date, and
+  clickable shortcuts to the settings directory and the log file; the tray
+  menu has a matching "About" entry, `aimon --version` prints the same
+  identity in a terminal, and the log itself is written to
+  `<config>/fyne/com.skobkin.aimonitor/logs/aimon.log` (1 MiB rotating).
 - Optional masking of sensitive values such as spending, for screenshots and
   shared screens.
 - Sources are independent: one failing or disabled source never breaks the

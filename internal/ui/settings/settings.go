@@ -11,6 +11,8 @@ package settings
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"git.skobk.in/skobkin/aimonitor/internal/buildinfo"
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
@@ -75,6 +78,11 @@ type Deps struct {
 	// DiscoverGPUs lists the amdgputop-web GPUs at a base URL (the
 	// amdgputop-web connection test doubles as discovery).
 	DiscoverGPUs func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error)
+	// ConfigPaths reports the two on-disk locations the About tab links
+	// to: the settings directory (the Fyne storage root, holding
+	// preferences.json) and the current log file. Nil in tests that do
+	// not care; the About tab then shows Unavailable.
+	ConfigPaths func() (settingsDir, logFile string)
 
 	// Done closes when the app begins quitting; background goroutines
 	// bail out instead of touching the UI during teardown.
@@ -95,13 +103,14 @@ type Settings struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	listBox  *fyne.Container
-	addBtn   *widget.Button
-	status   *widget.Label
-	keychain *widget.Label
-	privacy  *widget.Check
-	updates  *widget.Check
-	tabs     *container.AppTabs
+	listBox   *fyne.Container
+	addBtn    *widget.Button
+	status    *widget.Label
+	keychain  *widget.Label
+	privacy   *widget.Check
+	updates   *widget.Check
+	tabs      *container.AppTabs
+	aboutItem *container.TabItem
 
 	// mutBusy gates configuration mutations: at most one SaveInstances is
 	// in flight. While one runs, every mutating control is disabled, so a
@@ -160,7 +169,8 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 
 	// Two standard AppTabs — the monitor's grammar: everything about the
 	// source instances stays in Sources, every application-wide setting
-	// moves to General. The last-used tab persists across Show; like the
+	// moves to General, and About carries the fixed build identity and
+	// on-disk paths. The last-used tab persists across Show; like the
 	// monitor, only the initial selection is forced here.
 	sources := container.NewBorder(
 		nil,
@@ -175,9 +185,11 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		widget.NewLabelWithStyle("Updates", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		s.updates,
 	)
+	s.aboutItem = s.aboutTab()
 	s.tabs = container.NewAppTabs(
 		container.NewTabItem("Sources", sources),
 		container.NewTabItem("General", general),
+		s.aboutItem,
 	)
 	s.tabs.SelectIndex(0)
 
@@ -209,6 +221,61 @@ func (s *Settings) Show() {
 	s.probeKeychain()
 	s.win.Show()
 	s.win.RequestFocus()
+}
+
+// ShowAboutTab reveals the window with the About tab selected: the tray
+// menu's "About" entry. The tab is selected before Show so the window
+// never flashes the last-used tab.
+func (s *Settings) ShowAboutTab() {
+	s.tabs.Select(s.aboutItem)
+	s.Show()
+}
+
+// aboutTab builds the About tab: the application identity (icon, name,
+// version, commit, build date) and the two clickable on-disk paths —
+// click opens the file manager there, through the same OpenURL path the
+// tray Web UIs use. Everything on it is fixed for the process lifetime
+// (stamped at link time or fixed by the storage root), so it is built
+// once and never refreshed.
+func (s *Settings) aboutTab() *container.TabItem {
+	settingsDir, logFile := "", ""
+	if s.deps.ConfigPaths != nil {
+		settingsDir, logFile = s.deps.ConfigPaths()
+	}
+	rows := []fyne.CanvasObject{
+		container.NewHBox(
+			widget.NewIcon(resources.Icon()),
+			widget.NewLabelWithStyle(buildinfo.AppName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		),
+		widget.NewLabel("Version: " + buildinfo.Version),
+	}
+	// Commit and build date exist only in release builds; a dev build
+	// shows what it is instead of empty lines.
+	if buildinfo.Commit != "" {
+		rows = append(rows, widget.NewLabel("Commit: "+buildinfo.Commit))
+	}
+	if buildinfo.BuildDate != "" {
+		rows = append(rows, widget.NewLabel("Built: "+buildinfo.BuildDate))
+	}
+	rows = append(rows,
+		widget.NewSeparator(),
+		container.NewHBox(widget.NewLabel("Settings:"), pathLink(settingsDir)),
+		container.NewHBox(widget.NewLabel("Logs:"), pathLink(logFile)),
+	)
+
+	return container.NewTabItem("About", container.NewVBox(rows...))
+}
+
+// pathLink renders one About-tab path: a standard hyperlink whose file
+// URL opens the file manager there, or Unavailable when the app could not
+// determine it. The URL is built from the path components (Scheme/Path),
+// so escaping stays correct for exotic directory names.
+func pathLink(path string) fyne.CanvasObject {
+	if path == "" {
+		return widget.NewLabel("Unavailable")
+	}
+
+	return widget.NewHyperlink(path, &url.URL{Scheme: "file", Path: filepath.ToSlash(path)})
 }
 
 // refresh rebuilds the instance list grouped by category, in configured

@@ -62,9 +62,13 @@ func appMetadata() fyne.AppMetadata {
 
 // App is the running application.
 type App struct {
-	fyneApp  fyne.App
-	deskApp  desktop.App
-	log      *slog.Logger
+	fyneApp fyne.App
+	deskApp desktop.App
+	log     *slog.Logger
+	// logFile backs the file half of the log writer; nil means logging
+	// fell back to stderr-only. It closes only after the event loop has
+	// returned (Run), so the final "stopped" line still lands in it.
+	logFile  *os.File
 	client   *http.Client
 	creds    credentials.Store
 	repo     *config.Repository
@@ -143,16 +147,26 @@ type adapterEntry struct {
 // A failed configuration load is recorded, not fatal: Run reports it and
 // continues with zero sources, leaving the stored document untouched.
 func New() (*App, error) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-
 	fa := fyneapp.NewWithID(appID)
 	// Nothing injects the metadata from outside, so it is set here: without
 	// it the fyne.Do migration flag and the version would be missing and
 	// every start would log the not-migrated warning.
 	fyneapp.SetMetadata(appMetadata())
 	fa.SetIcon(resources.Icon())
+
+	// File logging lives in the app storage root, so the Fyne app must
+	// exist first (the storage root is what names the log directory).
+	// stderr stays in the writer chain; a failed log file degrades to
+	// stderr-only and never blocks startup.
+	storageRoot := storageRootPath(fa)
+	logWriter, logFile, logPath := fileLogWriter(storageRoot)
+	logger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	// The first log line carries the exact build being run (the About tab
+	// and --version show the same values).
+	logger.Info("starting", "app", buildinfo.AppName, "version", buildinfo.Version,
+		"commit", buildinfo.Commit, "buildDate", buildinfo.BuildDate)
 
 	repo := config.NewRepository(fa.Preferences())
 	instances, loadErr := repo.LoadInstances()
@@ -164,6 +178,7 @@ func New() (*App, error) {
 	a := &App{
 		fyneApp:     fa,
 		log:         logger,
+		logFile:     logFile,
 		client:      client,
 		creds:       creds,
 		repo:        repo,
@@ -196,7 +211,8 @@ func New() (*App, error) {
 		DiscoverGPUs: func(ctx context.Context, baseURL string) ([]domain.GPUInfo, error) {
 			return amdgpuweb.New(baseURL, "", client, logger).Discover(ctx)
 		},
-		Done: a.done,
+		ConfigPaths: func() (string, string) { return storageRoot, logPath },
+		Done:        a.done,
 	})
 
 	// Wayland has no per-window icon: the compositor draws the taskbar
@@ -232,8 +248,6 @@ func New() (*App, error) {
 // Run starts the configured sources and the event loop, then joins the
 // source goroutines after the loop returns.
 func (a *App) Run() {
-	a.log.Info("starting", "app", appID, "version", a.fyneApp.Metadata().Version, "build_date", buildinfo.BuildDate)
-
 	// Fyne's own SIGINT/SIGTERM handling quits only the event loop; with
 	// no window ever focused it also skips unregistering the tray icon,
 	// and Run would then block forever in Wait with the pollers still
@@ -276,6 +290,17 @@ func (a *App) Run() {
 	a.fyneApp.Run()
 	a.mgr.Wait()
 	a.log.Info("stopped")
+	if a.logFile != nil {
+		_ = a.logFile.Close() // nothing left to do with a close error here
+	}
+}
+
+// storageRootPath returns the app's persistent storage directory as a
+// filesystem path — Fyne's per-app config root (~/.config/fyne/<appID> on
+// Linux), which holds preferences.json and, since file logging, the log
+// directory.
+func storageRootPath(fa fyne.App) string {
+	return fa.Storage().RootURI().Path()
 }
 
 // setupTray installs the tray icon and menu. Without a desktop driver
@@ -316,7 +341,7 @@ func (a *App) setupTray() {
 		// SetSystemTrayIcon handles SVG→PNG conversion and calls
 		// systray.SetIcon internally.
 		desk.SetSystemTrayIcon(resources.Icon())
-		systray.SetTooltip("AI Monitor")
+		systray.SetTooltip(buildinfo.AppName + " " + buildinfo.Version)
 
 		// Some XDG systray implementations crash without a title.
 		title := a.fyneApp.Metadata().Name
@@ -374,6 +399,7 @@ func (a *App) rebuildTrayMenu() {
 	if a.checkingUpdates.Load() {
 		mUpdates.Disable()
 	}
+	mAbout := systray.AddMenuItem("About "+buildinfo.AppName, "")
 	systray.AddSeparator()
 	mQuit := systray.AddMenuItem("Quit", "")
 
@@ -395,6 +421,11 @@ func (a *App) rebuildTrayMenu() {
 	go func() {
 		for range mUpdates.ClickedCh {
 			fyne.Do(a.checkForUpdates)
+		}
+	}()
+	go func() {
+		for range mAbout.ClickedCh {
+			fyne.Do(a.settings.ShowAboutTab)
 		}
 	}()
 	go func() {

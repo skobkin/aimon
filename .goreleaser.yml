@@ -24,6 +24,7 @@ builds:
       - -s -w -buildid=
       - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.Version={{ .Version }}
       - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.BuildDate={{ .Date }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.Commit={{ .Commit }}
 
   - id: aimon-windows
     main: ./cmd/aimon
@@ -42,6 +43,7 @@ builds:
       - -s -w -H=windowsgui -buildid=
       - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.Version={{ .Version }}
       - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.BuildDate={{ .Date }}
+      - -X git.skobk.in/skobkin/aimonitor/internal/buildinfo.Commit={{ .Commit }}
 
 archives:
   - formats:

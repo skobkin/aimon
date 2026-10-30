@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 
+	"git.skobk.in/skobkin/aimonitor/internal/buildinfo"
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 )
@@ -358,6 +360,109 @@ func TestMutationGateSingleFlight(t *testing.T) {
 	s.mutBusy.Store(false)
 	if !s.mutBusy.CompareAndSwap(false, true) {
 		t.Error("the gate must reopen after the mutation finished")
+	}
+}
+
+// findHyperlinks collects every hyperlink in the object tree.
+func findHyperlinks(t *testing.T, obj fyne.CanvasObject) []*widget.Hyperlink {
+	t.Helper()
+	var out []*widget.Hyperlink
+	var walk func(fyne.CanvasObject)
+	walk = func(o fyne.CanvasObject) {
+		switch c := o.(type) {
+		case *widget.Hyperlink:
+			out = append(out, c)
+		case fyne.Widget:
+			for _, child := range test.TempWidgetRenderer(t, c).Objects() {
+				walk(child)
+			}
+		case *fyne.Container:
+			for _, child := range c.Objects {
+				walk(child)
+			}
+		}
+	}
+	walk(obj)
+
+	return out
+}
+
+// The About tab carries the fixed build identity and the two clickable
+// on-disk paths; ShowAboutTab selects it for the tray's About entry.
+func TestSettingsAboutTabShowsBuildAndPaths(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	stub.ConfigPaths = func() (string, string) {
+		return "/home/tester/.config/fyne/com.skobkin.aimonitor",
+			"/home/tester/.config/fyne/com.skobkin.aimonitor/logs/aimon.log"
+	}
+	// Release builds stamp these at link time; the tab must render both.
+	commit, date := buildinfo.Commit, buildinfo.BuildDate
+	buildinfo.Commit, buildinfo.BuildDate = "abc1234", "2026-10-30T12:00:00Z"
+	t.Cleanup(func() { buildinfo.Commit, buildinfo.BuildDate = commit, date })
+
+	s := NewSettings(test.NewTempApp(t), stub)
+
+	s.ShowAboutTab()
+	if got := s.tabs.Selected(); got != s.aboutItem {
+		t.Fatalf("ShowAboutTab selected %v, want the About tab", got)
+	}
+
+	content := s.aboutItem.Content
+	for _, want := range []string{
+		"Version: " + buildinfo.Version,
+		"Commit: abc1234",
+		"Built: 2026-10-30T12:00:00Z",
+		"Settings:",
+		"Logs:",
+	} {
+		if labelByText(t, content, want) == nil {
+			t.Errorf("About tab is missing the label %q", want)
+		}
+	}
+	wantLinks := map[string]bool{
+		"file:///home/tester/.config/fyne/com.skobkin.aimonitor":                false,
+		"file:///home/tester/.config/fyne/com.skobkin.aimonitor/logs/aimon.log": false,
+	}
+	for _, l := range findHyperlinks(t, content) {
+		if _, ok := wantLinks[l.URL.String()]; ok {
+			wantLinks[l.URL.String()] = true
+		}
+	}
+	for u, seen := range wantLinks {
+		if !seen {
+			t.Errorf("About tab is missing the hyperlink %s", u)
+		}
+	}
+}
+
+// Without a ConfigPaths provider the tab degrades to Unavailable instead
+// of dead links — and a dev build shows no empty commit/build rows.
+func TestSettingsAboutTabWithoutPathsAndStamps(t *testing.T) {
+	stub := stubDeps() // ConfigPaths nil; buildinfo stamps empty in tests
+	stub.Creds = blockedStore{}
+	s := NewSettings(test.NewTempApp(t), stub)
+	s.tabs.Select(s.aboutItem)
+
+	content := s.aboutItem.Content
+	if got := len(findHyperlinks(t, content)); got != 0 {
+		t.Errorf("found %d hyperlinks, want none without paths", got)
+	}
+	unavailable := 0
+	walkCanvas(t, content, func(o fyne.CanvasObject) {
+		if l, ok := o.(*widget.Label); ok && l.Text == "Unavailable" {
+			unavailable++
+		}
+	})
+	if unavailable != 2 {
+		t.Errorf("found %d Unavailable labels, want one per path row", unavailable)
+	}
+	for _, absent := range []string{"Commit: ", "Built: "} {
+		walkCanvas(t, content, func(o fyne.CanvasObject) {
+			if l, ok := o.(*widget.Label); ok && strings.HasPrefix(l.Text, absent) {
+				t.Errorf("dev build must not carry a %q row (got %q)", absent, l.Text)
+			}
+		})
 	}
 }
 
