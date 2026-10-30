@@ -493,6 +493,11 @@ func (a *App) SetHideSensitiveInfo(hide bool) {
 // RefreshAll implements monitor.MonitorController.
 func (a *App) RefreshAll() { a.mgr.RefreshAll() }
 
+// RefreshOne implements monitor.MonitorController: the detail card's
+// per-source refresh action. The manager coalesces it with any in-flight
+// poll of that instance.
+func (a *App) RefreshOne(id domain.InstanceID) { a.mgr.Refresh(id) }
+
 // OpenSettings implements monitor.MonitorController.
 func (a *App) OpenSettings() { a.settings.Show() }
 

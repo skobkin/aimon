@@ -18,6 +18,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
+	"git.skobk.in/skobkin/aimonitor/internal/ui"
 	"git.skobk.in/skobkin/aimonitor/internal/ui/components"
 )
 
@@ -30,9 +31,10 @@ func (stubCtrl) States() map[domain.InstanceID]domain.Runtime { return nil }
 func (stubCtrl) PaceStates() map[domain.InstanceID]pace.InstancePaces {
 	return nil
 }
-func (stubCtrl) RefreshAll()             {}
-func (stubCtrl) OpenSettings()           {}
-func (stubCtrl) HideSensitiveInfo() bool { return true }
+func (stubCtrl) RefreshAll()                  {}
+func (stubCtrl) RefreshOne(domain.InstanceID) {}
+func (stubCtrl) OpenSettings()                {}
+func (stubCtrl) HideSensitiveInfo() bool      { return true }
 
 // The actions overlay must keep its buttons at their natural height: a
 // Stack stretches its children to the full window size and an HBox then
@@ -59,7 +61,8 @@ func TestActionsOverlayKeepsButtonHeight(t *testing.T) {
 // the tab dispatchers exercise their spend bodies.
 type statefulCtrl struct {
 	stubCtrl
-	hidden bool
+	hidden    bool
+	refreshed []domain.InstanceID
 }
 
 func (c *statefulCtrl) Instances() []config.SourceInstance {
@@ -86,6 +89,8 @@ func (c *statefulCtrl) States() map[domain.InstanceID]domain.Runtime {
 }
 
 func (c *statefulCtrl) HideSensitiveInfo() bool { return c.hidden }
+
+func (c *statefulCtrl) RefreshOne(id domain.InstanceID) { c.refreshed = append(c.refreshed, id) }
 
 // The Remote tab renders an OpenRouter card through NewSpendDetailBody:
 // usage text visible even while privacy hides account values.
@@ -832,6 +837,86 @@ func TestTapCardChildButtonTakesPrecedence(t *testing.T) {
 	test.TapCanvas(win.Canvas(), cardPos.Add(fyne.NewPos(4, 4)))
 	if !firedTile {
 		t.Error("tapping the non-interactive card area must drill down")
+	}
+}
+
+// iconButtons collects the icon-only (textless) buttons of the tree; the
+// per-source refresh action is the only one inside a detail tab.
+func iconButtons(t *testing.T, box *fyne.Container) []*widget.Button {
+	t.Helper()
+	var out []*widget.Button
+	for _, o := range flatten(t, box.Objects) {
+		if b, ok := o.(*widget.Button); ok && b.Text == "" {
+			out = append(out, b)
+		}
+	}
+
+	return out
+}
+
+// Every detail card header carries an icon-only per-source refresh button:
+// tapping it refreshes just that instance and briefly disables the button
+// as feedback, mirroring the global refresh button.
+func TestDetailCardRefreshButtonRefreshesOneInstance(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	ctrl := &statefulCtrl{hidden: true}
+	m := NewMonitor(app, ctrl, done)
+	m.Show()
+	m.tabs.SelectIndex(2) // the Remote tab, where the OpenRouter card lives
+	m.win.Resize(fyne.NewSize(540, 660))
+
+	btns := iconButtons(t, m.remoteBox)
+	if len(btns) != 1 {
+		t.Fatalf("remote tab has %d icon-only buttons, want one per card", len(btns))
+	}
+	if btns[0].Disabled() {
+		t.Fatal("the refresh button must start enabled")
+	}
+	test.Tap(btns[0])
+	if got := ctrl.refreshed; len(got) != 1 || got[0] != "or-1" {
+		t.Fatalf("RefreshOne calls = %v, want [or-1]", got)
+	}
+	if !btns[0].Disabled() {
+		t.Error("the button must disable briefly as refresh feedback")
+	}
+}
+
+// The Overview cards carry no refresh action: the per-source refresh lives
+// in the detail headers only.
+func TestOverviewHasNoPerSourceRefreshButtons(t *testing.T) {
+	app := test.NewApp()
+	done := make(chan struct{})
+	defer close(done)
+
+	m := NewMonitor(app, &stalePairCtrl{}, done)
+	m.Show()
+
+	if btns := iconButtons(t, m.overviewBox); len(btns) != 0 {
+		t.Errorf("overview has %d icon-only buttons, want none", len(btns))
+	}
+}
+
+// The header action must stay compact: the card grows by no more than the
+// icon plus padding — no new row, no text chrome — and the freshness label
+// stays rightmost in the header.
+func TestRefreshButtonHeaderStaysCompact(t *testing.T) {
+	test.NewTempApp(t)
+
+	vm := ui.CardVM{Instance: "x", Title: "OpenRouter", Status: "1s ago"}
+	body := widget.NewLabel("body")
+	withAction, _ := components.NewSourceCardWithHeaderAction(vm, body,
+		widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), nil))
+	plain, _ := components.NewSourceCard(vm, body)
+
+	growth := withAction.MinSize().Width - plain.MinSize().Width
+	if growth <= 0 {
+		t.Error("the header action added no width; it is missing")
+	}
+	if max := theme.IconInlineSize() + 6*theme.Padding(); growth > max {
+		t.Errorf("header grew %.1f wider than the icon budget %.1f", growth, max)
 	}
 }
 

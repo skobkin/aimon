@@ -25,8 +25,22 @@ import (
 // The second return sets the freshness label; the monitor's ticker calls
 // it once a second while visible instead of rebuilding the card.
 func NewSourceCard(vm ui.CardVM, body fyne.CanvasObject) (fyne.CanvasObject, func(status string)) {
+	return NewSourceCardWithHeaderAction(vm, body, nil)
+}
+
+// NewSourceCardWithHeaderAction is NewSourceCard with an optional action
+// control in the header's right slot, ahead of the freshness label (the
+// monitor's per-source refresh button; nil renders identically to
+// NewSourceCard). The label keeps its natural width in the right slot, so
+// an icon-sized action adds no header height: the two-line bold title
+// already drives it.
+func NewSourceCardWithHeaderAction(vm ui.CardVM, body fyne.CanvasObject, action fyne.CanvasObject) (fyne.CanvasObject, func(status string)) {
 	status := widget.NewLabel(vm.Status)
-	header := container.NewBorder(nil, nil, nil, status,
+	var trailing fyne.CanvasObject = status
+	if action != nil {
+		trailing = container.NewHBox(action, status)
+	}
+	header := container.NewBorder(nil, nil, nil, trailing,
 		NewWrappedLabel(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	)
 

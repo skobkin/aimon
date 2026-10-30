@@ -10,6 +10,29 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-10-30 — Detail card headers gain an icon-only per-source refresh action
+
+Until now the only manual refresh was global (`RefreshAll`): retrying one
+stale source — a restarted llama-swap, an expired key — re-polled every
+enabled source, including rate-sensitive remote quota APIs, for zero
+benefit. Each Local/Remote detail card header now ends with an icon-only
+refresh button wired to `Manager.Refresh(id)`, which already existed with
+`RefreshAll`'s coalescing (no duplicate in-flight polls) and is documented
+safe to call from a UI callback.
+
+1. **Compactness.** The action is the standard icon-button idiom (no text,
+   no importance chrome), sits ahead of the freshness label in the header's
+   right slot, and adds no header height: the two-line bold title already
+   drives it. Tests bound the card's width growth to the icon budget.
+2. **Feedback.** The button disables for one second, mirroring the global
+   refresh button; the result arrives through the normal state-change
+   rebuild. Overview cards carry no action — per-source refresh lives in
+   the detail headers only.
+3. **Charter.** Refresh is a read, not a control operation (D13 intact).
+
+Updates/supersedes: extends the documented card chrome (`docs/UI_UX.md` §5,
+which showed only the global refresh) from this date onward.
+
 ## 2026-10-30 — Overview cards are tappable and drill down to their detail card
 
 The Overview is the glance surface, but it dead-ended: reading a card's

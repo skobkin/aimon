@@ -33,6 +33,9 @@ type MonitorController interface {
 	// read-only map, recomputed per rebuild.
 	PaceStates() map[domain.InstanceID]pace.InstancePaces
 	RefreshAll()
+	// RefreshOne triggers an immediate refresh of one instance, with the
+	// same coalescing as RefreshAll (no duplicate in-flight polls).
+	RefreshOne(id domain.InstanceID)
 	OpenSettings()
 	// HideSensitiveInfo reports the global privacy preference: account-level
 	// monetary values render masked until hovered while it is set.
@@ -435,6 +438,29 @@ func (r *tapCardRenderer) Refresh() {
 
 func (r *tapCardRenderer) Destroy() {}
 
+// refreshOneButton builds the detail header's per-source refresh action:
+// icon-only, the same idiom as the Settings row actions and the monitor's
+// floating buttons, with the global refresh button's disable-for-1s
+// feedback. Re-enabling a button that a rebuild has already detached is
+// harmless.
+func (m *Monitor) refreshOneButton(id domain.InstanceID) fyne.CanvasObject {
+	btn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), nil)
+	btn.OnTapped = func() {
+		m.ctrl.RefreshOne(id)
+		btn.Disable()
+		time.AfterFunc(time.Second, func() {
+			select {
+			case <-m.done:
+				return
+			default:
+			}
+			fyne.Do(btn.Enable)
+		})
+	}
+
+	return btn
+}
+
 // showDetail navigates from an Overview tap to the card's detail tab and
 // scrolls the card to the top of the tab. UI thread only.
 func (m *Monitor) showDetail(id domain.InstanceID) {
@@ -604,7 +630,7 @@ func (m *Monitor) tabObjects(cards []ui.CardVM, instances []config.SourceInstanc
 		if label, target, ok := webLink(c, instances); ok {
 			body = withWebUILink(body, "Open "+label, target)
 		}
-		card, setStatus := components.NewSourceCard(c, body)
+		card, setStatus := components.NewSourceCardWithHeaderAction(c, body, m.refreshOneButton(c.Instance))
 		if rt, ok := states[c.Instance]; ok {
 			*tick = append(*tick, func(now time.Time) {
 				setStatus(ui.FreshnessText(rt, now))
