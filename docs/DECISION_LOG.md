@@ -10,6 +10,40 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-01 — Notification fixes: once-per-generation latching, "quota window reset" event
+
+Follow-up to the 2026-10-30 notification entry, driven by real-world
+behavior (repeating "weekly: 5% remaining" popups) and user direction:
+
+1. **Once per window generation.** "Low" and "exhausted" now fire once
+   per window generation and re-arm only when the window resets. The
+   previous rules — exact `ResetAt` equality and band-exit re-arming —
+   repeated notifications in practice: MiniMax reports a
+   remaining-milliseconds countdown, so its `ResetAt` is re-derived from
+   the observation time every poll and jitters by seconds, tripping the
+   old exact-equality reset detection on every poll; independently, a
+   fraction wobbling around a band edge re-armed mid-window. `ResetAt`
+   is now anchored at the first observation of a generation and compared
+   with a 5-minute jitter tolerance (`resetJitterTolerance`); windows
+   whose provider exposes no reset time keep the band-exit re-arm as
+   their only fallback. A window that flickers out of a snapshot keeps
+   its latch for up to 3 consecutive absences (`vanishGrace`) before its
+   state drops.
+2. **"Quota window reset" event.** A third per-event toggle (default on,
+   `notifications.quota-reset.disabled`, inverted storage) notifies once
+   when a window generation ends — the warned quota is back. It fires
+   only when the ended generation saw usage (`UsedFraction > 0` at some
+   observation); an untouched window resets silently. A provider gaining
+   or losing the reset-time field is not a rollover and never fires.
+   Gating stays audibility-only: a silenced rollover still re-arms the
+   edges.
+3. **Settings.** The General tab gains the matching "Quota window reset"
+   checkbox beside the other two event toggles.
+
+The 2026-10-30 entry's re-arm wording ("re-arms when the fraction climbs
+back out of its band") is superseded for reset-time-carrying windows;
+its privacy, gating, and delivery statements stand.
+
 ## 2026-10-31 — Startup bundle: show-on-startup preference, user-asked autostart entry, single-instance lock
 
 This entry extends the 2026-08-29 Wayland app-id entry's "nothing is

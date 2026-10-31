@@ -91,6 +91,10 @@ type Deps struct {
 	// report and persist the "Quota window exhausted" event toggle.
 	NotificationsQuotaExhaustedEnabled    func() bool
 	SetNotificationsQuotaExhaustedEnabled func(bool)
+	// NotificationsQuotaResetEnabled / SetNotificationsQuotaResetEnabled
+	// report and persist the "Quota window reset" event toggle.
+	NotificationsQuotaResetEnabled    func() bool
+	SetNotificationsQuotaResetEnabled func(bool)
 	// ShowMonitorOnStartup / SetShowMonitorOnStartup report and persist the
 	// "Show monitor window at startup" preference.
 	ShowMonitorOnStartup    func() bool
@@ -143,6 +147,7 @@ type Settings struct {
 	notifs          *widget.Check
 	notifsLow       *widget.Check
 	notifsExhausted *widget.Check
+	notifsReset     *widget.Check
 	startupShow     *widget.Check
 	autostart       *widget.Check
 	startupHint     *widget.Label
@@ -219,6 +224,11 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 			s.deps.SetNotificationsQuotaExhaustedEnabled(on)
 		}
 	})
+	s.notifsReset = widget.NewCheck("Quota window reset", func(on bool) {
+		if s.deps.SetNotificationsQuotaResetEnabled != nil {
+			s.deps.SetNotificationsQuotaResetEnabled(on)
+		}
+	})
 
 	// The startup toggles follow the same immediate-apply contract. Start
 	// on login is a filesystem write, so its failure is surfaced in the
@@ -275,6 +285,7 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 		s.notifs,
 		s.notifsLow,
 		s.notifsExhausted,
+		s.notifsReset,
 		widget.NewLabelWithStyle("Startup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		s.startupShow,
 		s.autostart,
@@ -322,6 +333,9 @@ func (s *Settings) Show() {
 	}
 	if s.deps.NotificationsQuotaExhaustedEnabled != nil {
 		s.notifsExhausted.SetChecked(s.deps.NotificationsQuotaExhaustedEnabled())
+	}
+	if s.deps.NotificationsQuotaResetEnabled != nil {
+		s.notifsReset.SetChecked(s.deps.NotificationsQuotaResetEnabled())
 	}
 	if s.deps.ShowMonitorOnStartup != nil {
 		s.startupShow.SetChecked(s.deps.ShowMonitorOnStartup())

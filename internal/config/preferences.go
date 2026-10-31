@@ -50,6 +50,9 @@ const (
 	// keyNotificationsQuotaExhaustedDisabled backs the "Quota window
 	// exhausted" event toggle, inverted for the same default-on reason.
 	keyNotificationsQuotaExhaustedDisabled = "notifications.quota-exhausted.disabled"
+	// keyNotificationsQuotaResetDisabled backs the "Quota window reset"
+	// event toggle, inverted for the same default-on reason.
+	keyNotificationsQuotaResetDisabled = "notifications.quota-reset.disabled"
 	// keyStartupShowMonitor backs the "Show monitor window at startup"
 	// preference. Plain storage: absent and false both mean the tray-first
 	// default (hidden), true means the monitor window opens at launch.
@@ -289,6 +292,18 @@ func (r *Repository) NotificationsQuotaExhaustedEnabled() bool {
 // exhausted" event toggle.
 func (r *Repository) SetNotificationsQuotaExhaustedEnabled(on bool) {
 	r.prefs.SetBool(keyNotificationsQuotaExhaustedDisabled, !on)
+}
+
+// NotificationsQuotaResetEnabled reports the "Quota window reset" event
+// toggle. It defaults to true.
+func (r *Repository) NotificationsQuotaResetEnabled() bool {
+	return !r.prefs.Bool(keyNotificationsQuotaResetDisabled)
+}
+
+// SetNotificationsQuotaResetEnabled persists the "Quota window reset"
+// event toggle.
+func (r *Repository) SetNotificationsQuotaResetEnabled(on bool) {
+	r.prefs.SetBool(keyNotificationsQuotaResetDisabled, !on)
 }
 
 // ShowMonitorOnStartup reports the "Show monitor window at startup"

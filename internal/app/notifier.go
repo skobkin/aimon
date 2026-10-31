@@ -12,9 +12,10 @@ import (
 
 // The quota desktop notifier. Desktop notifications were originally out of
 // scope (docs/ARCHITECTURE.md §14); the 2026-10-30 Decision Log entry
-// supersedes that for exactly two edge-triggered events, each with its own
-// Settings toggle: a quota window entering the red band ("low") and a
-// window reaching zero ("exhausted").
+// supersedes that for edge-triggered events, each with its own Settings
+// toggle: a quota window entering the red band ("low"), a window reaching
+// zero ("exhausted"), and a used window rolling over ("reset", added by
+// the 2026-11-01 entry).
 //
 // Privacy is structural: notification text carries the instance name, the
 // window name, fixed state words and whole percentages only — never
@@ -32,6 +33,18 @@ import (
 // overflow drops the event with a warning.
 const notifyQueueLen = 16
 
+// resetJitterTolerance is how far a window's ResetAt may move between two
+// polls without counting as a new window generation. MiniMax reports a
+// remaining-milliseconds countdown, so its ResetAt is re-derived from the
+// observation time every poll and jitters by seconds; a real rollover
+// moves it by the window length (hours).
+const resetJitterTolerance = 5 * time.Minute
+
+// vanishGrace is how many consecutive snapshots a window may be absent
+// from before its latch state is dropped. One flaky or partially parsed
+// snapshot must not resurrect the edges of a window that is still there.
+const vanishGrace = 3
+
 // notifierConfig is the notifier's view of the app: the gating preferences
 // (read at event time, so toggles apply without a restart), the send
 // primitive, and the keep-set of enabled instances for latch pruning.
@@ -42,6 +55,8 @@ type notifierConfig struct {
 	Low func() bool
 	// Exhausted reports the "Quota window exhausted" event toggle.
 	Exhausted func() bool
+	// Reset reports the "Quota window reset" event toggle.
+	Reset func() bool
 	// Send posts one desktop notification.
 	Send func(title, content string)
 	// Known returns the enabled configured instances; latch state for
@@ -57,11 +72,21 @@ type quotaEvent struct {
 }
 
 // windowLatch is the edge state of one instance window: after an event
-// fired it stays silent until the edge re-arms (the remaining fraction
-// climbs back out of its band, or the window resets).
+// fired it stays silent until the window resets (a ResetAt moved beyond
+// the jitter tolerance) — or, when the provider exposes no reset time,
+// until the remaining fraction climbs back out of its band.
 type windowLatch struct {
 	low, exhausted bool
-	resetAt        *time.Time
+	// used records whether any observation of the current generation saw
+	// usage: a reset notification fires only for a window that was
+	// actually consumed.
+	used bool
+	// resetAt anchors the current generation: the first ResetAt seen for
+	// it, never advanced by jitter. nil when the provider exposes no
+	// reset time.
+	resetAt *time.Time
+	// misses counts consecutive snapshots the window was absent from.
+	misses int
 }
 
 // notifier turns quota snapshots into desktop notifications. All latch
@@ -124,9 +149,9 @@ func (n *notifier) run() {
 }
 
 // handle evaluates one snapshot's windows against the latches. Worker
-// goroutine only. Gating (Master/Low/Exhausted) decides audibility only:
-// the latch state always tracks reality, so enabling an event mid-band
-// cannot retro-fire — only the next transition is heard.
+// goroutine only. Gating (Master/Low/Exhausted/Reset) decides audibility
+// only: the latch state always tracks reality, so enabling an event
+// mid-band cannot retro-fire — only the next transition is heard.
 func (n *notifier) handle(ev quotaEvent) {
 	if n.cfg.Known != nil {
 		known := n.cfg.Known()
@@ -157,13 +182,14 @@ func (n *notifier) handle(ev quotaEvent) {
 			l = &windowLatch{}
 			latches[wid] = l
 		}
-		if resetChanged(l.resetAt, w.ResetAt) {
-			// A new window generation clears both edges, even when the
-			// fresh window opens in-band (that one trip is accepted and
-			// recorded in the Decision Log).
-			l.low, l.exhausted = false, false
+		l.misses = 0
+		if newGen, used := l.advanceGeneration(w.ResetAt); newGen && used {
+			// The ended generation was actually consumed: announce that
+			// its quota is back. The fresh generation is judged below —
+			// one that opens in-band trips on its own (accepted, Decision
+			// Log 2026-10-30).
+			n.send(ev, w, n.cfg.Reset, "reset")
 		}
-		l.resetAt = w.ResetAt
 
 		remaining := domain.Clamp01(w.RemainingFraction)
 		switch {
@@ -180,23 +206,31 @@ func (n *notifier) handle(ev quotaEvent) {
 				n.send(ev, w, n.cfg.Low, percentRemaining(remaining))
 			}
 		}
-		// Re-arm. A rising fraction in a rolling window is refill, not an
-		// error: leaving the band re-arms without waiting for the reset
-		// time to move (providers that expose no ResetAt would otherwise
-		// latch forever).
-		if remaining > components.LowThreshold {
-			l.low = false
+		// Re-arm. An anchored window (the provider exposes a reset time)
+		// fires once per generation: its edges clear only in
+		// advanceGeneration. A window without a reset time has no other
+		// rollover marker, so leaving the band re-arms it — a rising
+		// fraction in a rolling window is refill, not an error.
+		if l.resetAt == nil {
+			if remaining > components.LowThreshold {
+				l.low = false
+			}
+			if remaining > components.CriticalThreshold {
+				l.exhausted = false
+			}
 		}
-		if remaining > components.CriticalThreshold {
-			l.exhausted = false
-		}
+		l.used = l.used || domain.Clamp01(w.UsedFraction) > 0
 	}
-	// A window absent from the snapshot is gone (a reset rotated the set
-	// or the provider dropped it): its latches must not leak into the next
-	// generation — that also covers reset-straight-back-into-band for
-	// ResetAt-carrying windows whose reset time failed to move.
-	for wid := range latches {
-		if _, ok := seen[wid]; !ok {
+	// A window absent from the snapshot is on its way out (a reset
+	// rotated the set, or the provider dropped it), but one flaky
+	// snapshot must not resurrect its edges: the latch survives a grace
+	// of consecutive absences before the state is dropped.
+	for wid, l := range latches {
+		if _, ok := seen[wid]; ok {
+			continue
+		}
+		l.misses++
+		if l.misses >= vanishGrace {
 			delete(latches, wid)
 		}
 	}
@@ -250,13 +284,49 @@ func percentRemaining(remaining float64) string {
 	return fmt.Sprintf("%d%% remaining", int(math.Round(remaining*100)))
 }
 
-// resetChanged reports whether the window reset time moved — the marker of
-// a new window generation for providers that expose it. nil↔non-nil is a
-// change; two nils mean the provider never exposes one.
-func resetChanged(old, cur *time.Time) bool {
-	if old == nil || cur == nil {
-		return old != cur
+// advanceGeneration folds an observed ResetAt into the latch and reports
+// whether a new window generation began (the old anchor and the
+// observation both known, moved apart beyond the jitter tolerance) and
+// whether the ended generation saw usage. A provider gaining or losing a
+// reset time is not a reset: the anchor is adopted or dropped and the
+// edges keep their state — there is nothing to distinguish that from the
+// same generation reported less completely.
+func (l *windowLatch) advanceGeneration(cur *time.Time) (newGen, used bool) {
+	if cur == nil {
+		// No reset time observed (or the provider stopped exposing one):
+		// drop the anchor so band-exit re-arming takes over.
+		l.resetAt = nil
+
+		return false, l.used
+	}
+	if l.resetAt == nil {
+		// The provider started exposing a reset time: adopt it as the
+		// anchor without declaring a reset.
+		l.resetAt = cur
+
+		return false, l.used
+	}
+	if jittered(*l.resetAt, *cur) {
+		return false, l.used // same generation; the anchor stays put
+	}
+	// A real rollover: the old generation's edges die with it, even when
+	// the fresh window opens in-band (accepted, Decision Log 2026-10-30).
+	used = l.used
+	l.resetAt = cur
+	l.low, l.exhausted, l.used = false, false, false
+
+	return true, used
+}
+
+// jittered reports whether an observed reset time still belongs to the
+// anchored generation. Providers that derive ResetAt from a remaining-time
+// countdown re-derive it every poll, so within one generation it moves by
+// seconds; a real rollover moves it by the window length.
+func jittered(anchor, cur time.Time) bool {
+	d := cur.Sub(anchor)
+	if d < 0 {
+		d = -d
 	}
 
-	return !old.Equal(*cur)
+	return d <= resetJitterTolerance
 }

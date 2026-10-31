@@ -209,6 +209,7 @@ func New() (*App, error) {
 		Master:    repo.NotificationsEnabled,
 		Low:       repo.NotificationsQuotaLowEnabled,
 		Exhausted: repo.NotificationsQuotaExhaustedEnabled,
+		Reset:     repo.NotificationsQuotaResetEnabled,
 		Send: func(title, content string) {
 			fa.SendNotification(fyne.NewNotification(title, content))
 		},
@@ -233,6 +234,8 @@ func New() (*App, error) {
 		SetNotificationsQuotaLowEnabled:       a.SetNotificationsQuotaLowEnabled,
 		NotificationsQuotaExhaustedEnabled:    a.NotificationsQuotaExhaustedEnabled,
 		SetNotificationsQuotaExhaustedEnabled: a.SetNotificationsQuotaExhaustedEnabled,
+		NotificationsQuotaResetEnabled:        a.NotificationsQuotaResetEnabled,
+		SetNotificationsQuotaResetEnabled:     a.SetNotificationsQuotaResetEnabled,
 
 		ShowMonitorOnStartup:    a.ShowMonitorOnStartup,
 		SetShowMonitorOnStartup: a.SetShowMonitorOnStartup,
@@ -637,6 +640,16 @@ func (a *App) NotificationsQuotaExhaustedEnabled() bool {
 // exhausted" event toggle.
 func (a *App) SetNotificationsQuotaExhaustedEnabled(on bool) {
 	a.repo.SetNotificationsQuotaExhaustedEnabled(on)
+}
+
+// NotificationsQuotaResetEnabled reports the "Quota window reset" event
+// toggle; the Settings window reads it through Deps.
+func (a *App) NotificationsQuotaResetEnabled() bool { return a.repo.NotificationsQuotaResetEnabled() }
+
+// SetNotificationsQuotaResetEnabled persists the "Quota window reset"
+// event toggle.
+func (a *App) SetNotificationsQuotaResetEnabled(on bool) {
+	a.repo.SetNotificationsQuotaResetEnabled(on)
 }
 
 // ShowMonitorOnStartup reports the "Show monitor window at startup"

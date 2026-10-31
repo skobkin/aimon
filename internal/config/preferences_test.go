@@ -253,9 +253,9 @@ func TestSourceDocumentHasNoCredentialFields(t *testing.T) {
 	walk(doc)
 }
 
-// The notification preferences default to enabled (all three, inverted
+// The notification preferences default to enabled (each with inverted
 // storage like privacy and update checks) and persist both ways: master
-// switch first, then the two per-event toggles.
+// switch first, then the per-event toggles.
 func TestNotificationsPreferences(t *testing.T) {
 	prefs := newMemPreferences()
 	repo := NewRepository(prefs)
@@ -268,6 +268,9 @@ func TestNotificationsPreferences(t *testing.T) {
 	}
 	if !repo.NotificationsQuotaExhaustedEnabled() {
 		t.Error("absent quota-exhausted preference must default to enabled")
+	}
+	if !repo.NotificationsQuotaResetEnabled() {
+		t.Error("absent quota-reset preference must default to enabled")
 	}
 
 	repo.SetNotificationsEnabled(false)
@@ -291,13 +294,23 @@ func TestNotificationsPreferences(t *testing.T) {
 		t.Error("persisted quota-exhausted=false must read back false")
 	}
 
+	repo.SetNotificationsQuotaResetEnabled(false)
+	if repo.NotificationsQuotaResetEnabled() {
+		t.Error("persisted quota-reset=false must read back false")
+	}
+	if v := prefs.Bool(keyNotificationsQuotaResetDisabled); !v {
+		t.Errorf("storing quota-reset enabled=false must write the disabled key, got %v", v)
+	}
+
 	// Round-trip back on; the inverted storage of each key follows its own
 	// state.
 	repo.SetNotificationsEnabled(true)
 	repo.SetNotificationsQuotaLowEnabled(true)
 	repo.SetNotificationsQuotaExhaustedEnabled(true)
-	if !repo.NotificationsEnabled() || !repo.NotificationsQuotaLowEnabled() || !repo.NotificationsQuotaExhaustedEnabled() {
-		t.Error("toggling all three back on must persist")
+	repo.SetNotificationsQuotaResetEnabled(true)
+	if !repo.NotificationsEnabled() || !repo.NotificationsQuotaLowEnabled() ||
+		!repo.NotificationsQuotaExhaustedEnabled() || !repo.NotificationsQuotaResetEnabled() {
+		t.Error("toggling all four back on must persist")
 	}
 }
 

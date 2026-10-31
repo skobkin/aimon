@@ -355,7 +355,7 @@ func TestSettingsUpdatesCheckSyncsAndPersists(t *testing.T) {
 func TestSettingsNotificationChecksSyncAndPersist(t *testing.T) {
 	stub := stubDeps()
 	stub.Creds = blockedStore{}
-	state := map[string]bool{"master": true, "low": true, "exhausted": true}
+	state := map[string]bool{"master": true, "low": true, "exhausted": true, "reset": true}
 	var calls []string
 	stub.NotificationsEnabled = func() bool { return state["master"] }
 	stub.SetNotificationsEnabled = func(on bool) {
@@ -372,16 +372,21 @@ func TestSettingsNotificationChecksSyncAndPersist(t *testing.T) {
 		calls = append(calls, "exhausted")
 		state["exhausted"] = on
 	}
+	stub.NotificationsQuotaResetEnabled = func() bool { return state["reset"] }
+	stub.SetNotificationsQuotaResetEnabled = func(on bool) {
+		calls = append(calls, "reset")
+		state["reset"] = on
+	}
 	s := NewSettings(test.NewTempApp(t), stub)
 
 	s.Show()
-	if !s.notifs.Checked || !s.notifsLow.Checked || !s.notifsExhausted.Checked {
-		t.Error("Show must sync all three notification checks from the preferences")
+	if !s.notifs.Checked || !s.notifsLow.Checked || !s.notifsExhausted.Checked || !s.notifsReset.Checked {
+		t.Error("Show must sync all notification checks from the preferences")
 	}
 
-	state["master"], state["low"], state["exhausted"] = false, false, false
+	state["master"], state["low"], state["exhausted"], state["reset"] = false, false, false, false
 	s.Show()
-	if s.notifs.Checked || s.notifsLow.Checked || s.notifsExhausted.Checked {
+	if s.notifs.Checked || s.notifsLow.Checked || s.notifsExhausted.Checked || s.notifsReset.Checked {
 		t.Error("Show must reload the notification preferences")
 	}
 
@@ -392,7 +397,8 @@ func TestSettingsNotificationChecksSyncAndPersist(t *testing.T) {
 	s.notifs.SetChecked(true)
 	s.notifsLow.SetChecked(true)
 	s.notifsExhausted.SetChecked(true)
-	if len(calls) != 3 || calls[0] != "master" || calls[1] != "low" || calls[2] != "exhausted" {
+	s.notifsReset.SetChecked(true)
+	if len(calls) != 4 || calls[0] != "master" || calls[1] != "low" || calls[2] != "exhausted" || calls[3] != "reset" {
 		t.Errorf("toggles reached %v, want each check's own setter", calls)
 	}
 }
