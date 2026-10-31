@@ -30,6 +30,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/config"
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/notify"
 	"git.skobk.in/skobkin/aimonitor/internal/pace"
 	"git.skobk.in/skobkin/aimonitor/internal/registry"
 	"git.skobk.in/skobkin/aimonitor/internal/resources"
@@ -201,8 +202,18 @@ func New() (*App, error) {
 	a.creds = newPaceGuardStore(creds, a.paceCredentialChanged)
 	a.running.Store(true)
 
+	// The desktop notification sender: D-Bus with server-default expiry on
+	// Linux/BSD (Fyne's own SendNotification never expires there), the
+	// Fyne API elsewhere. An unavailable backend degrades to a no-op —
+	// notifications are disposable, never an app failure.
+	sender, err := notify.New(buildinfo.AppName)
+	if err != nil {
+		logger.Warn("desktop notifications unavailable; continuing without them", "error", err)
+		sender = notify.Nop{}
+	}
+
 	// The quota notifier: gating reads the repository at event time, send
-	// posts through the Fyne app (synchronous D-Bus on Linux — worker
+	// posts through the sender (a synchronous D-Bus call on Linux — worker
 	// goroutine only), and the latch keep-set follows the enabled
 	// instances.
 	a.notifier = newNotifier(logger, notifierConfig{
@@ -211,7 +222,9 @@ func New() (*App, error) {
 		Exhausted: repo.NotificationsQuotaExhaustedEnabled,
 		Reset:     repo.NotificationsQuotaResetEnabled,
 		Send: func(title, content string) {
-			fa.SendNotification(fyne.NewNotification(title, content))
+			if err := sender.Notify(title, content); err != nil {
+				logger.Warn("desktop notification failed", "error", err)
+			}
 		},
 		Known: a.enabledInstanceIDs,
 	})

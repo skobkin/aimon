@@ -25,8 +25,10 @@ import (
 //
 // Delivery model: the manager loop goroutine only enqueues (non-blocking,
 // bounded queue); one worker goroutine evaluates latches and posts. The
-// real Send is fyne.App.SendNotification — a synchronous session-bus D-Bus
-// call on Linux — so it must never run on a manager loop or the UI thread.
+// real Send posts over the desktop's notification service (D-Bus on
+// Linux/BSD, fyne.App.SendNotification elsewhere) — a synchronous session
+// bus call on Linux — so it must never run on a manager loop or the UI
+// thread.
 
 // notifyQueueLen bounds the event queue. Quota events arrive at poll
 // cadence (tens of seconds at fastest), so sixteen absorbs any burst; an

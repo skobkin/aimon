@@ -46,7 +46,8 @@ you use — without ever opening a browser tab.
   rolled over) — edge-triggered so each transition notifies once per
   quota window. Each event has its own toggle in Settings (plus a master
   switch); notification text carries percentages only, never absolute
-  amounts.
+  amounts. On Linux the app talks to the desktop's notification service
+  directly, so popups auto-hide after the platform's default timeout.
 - Optional masking of sensitive values such as spending, for screenshots and
   shared screens.
 - Sources are independent: one failing or disabled source never breaks the

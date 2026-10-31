@@ -39,10 +39,24 @@ behavior (repeating "weekly: 5% remaining" popups) and user direction:
    edges.
 3. **Settings.** The General tab gains the matching "Quota window reset"
    checkbox beside the other two event toggles.
+4. **Delivery path.** Quota popups never auto-hid on Linux: Fyne's
+   `app_xdg.go` hardcodes `expire_timeout: 0`, which the freedesktop
+   notification spec reads as "never expire". Notifications now go
+   through a small `internal/notify` abstraction with build-tagged
+   senders: Linux/BSD address `org.freedesktop.Notifications` directly
+   via godbus with `expire_timeout: -1` (server default — the pattern
+   the author's `wifidog` uses; `buildinfo.AppName` matches the
+   installed desktop entry so the theme icon still resolves), while
+   every other platform keeps `fyne.App.SendNotification`, where Fyne's
+   integration behaves correctly. An unresolvable backend degrades to a
+   no-op with a warning — notifications stay disposable, never an app
+   failure. `github.com/godbus/dbus/v5` becomes a direct dependency.
 
 The 2026-10-30 entry's re-arm wording ("re-arms when the fraction climbs
 back out of its band") is superseded for reset-time-carrying windows;
-its privacy, gating, and delivery statements stand.
+its privacy and gating statements stand, and its delivery statement
+("posts through `fyne.App.SendNotification`") is superseded by (4) on
+Linux/BSD.
 
 ## 2026-10-31 — Startup bundle: show-on-startup preference, user-asked autostart entry, single-instance lock
 
