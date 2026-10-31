@@ -206,25 +206,27 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 	})
 
 	// The notification toggles follow the same immediate-apply contract.
-	// The master switch silences every event; the two event checks each
-	// silence exactly one kind. They apply to the notifier's next event —
-	// the notifier reads the preferences at event time.
+	// The master switch silences every event and greys the per-event
+	// checks out while it is off; each indented event check silences
+	// exactly one kind. They apply to the notifier's next event — the
+	// notifier reads the preferences at event time.
 	s.notifs = widget.NewCheck("Desktop notifications", func(on bool) {
 		if s.deps.SetNotificationsEnabled != nil {
 			s.deps.SetNotificationsEnabled(on)
 		}
+		s.setNotificationEventsEnabled(on)
 	})
-	s.notifsLow = widget.NewCheck("Quota window low", func(on bool) {
+	s.notifsLow = widget.NewCheck("    Quota window low", func(on bool) {
 		if s.deps.SetNotificationsQuotaLowEnabled != nil {
 			s.deps.SetNotificationsQuotaLowEnabled(on)
 		}
 	})
-	s.notifsExhausted = widget.NewCheck("Quota window exhausted", func(on bool) {
+	s.notifsExhausted = widget.NewCheck("    Quota window exhausted", func(on bool) {
 		if s.deps.SetNotificationsQuotaExhaustedEnabled != nil {
 			s.deps.SetNotificationsQuotaExhaustedEnabled(on)
 		}
 	})
-	s.notifsReset = widget.NewCheck("Quota window reset", func(on bool) {
+	s.notifsReset = widget.NewCheck("    Quota window reset", func(on bool) {
 		if s.deps.SetNotificationsQuotaResetEnabled != nil {
 			s.deps.SetNotificationsQuotaResetEnabled(on)
 		}
@@ -316,6 +318,20 @@ func NewSettings(a fyne.App, deps Deps) *Settings {
 // Window returns the underlying window.
 func (s *Settings) Window() fyne.Window { return s.win }
 
+// setNotificationEventsEnabled greys the per-event notification checks
+// out while the master switch is off. Their stored values survive the
+// disable: re-enabling the master restores each event's own toggle
+// state.
+func (s *Settings) setNotificationEventsEnabled(on bool) {
+	for _, c := range []*widget.Check{s.notifsLow, s.notifsExhausted, s.notifsReset} {
+		if on {
+			c.Enable()
+		} else {
+			c.Disable()
+		}
+	}
+}
+
 // Show rebuilds the list from the authoritative configuration, reloads the
 // application-wide preferences, and reveals the window.
 func (s *Settings) Show() {
@@ -337,6 +353,10 @@ func (s *Settings) Show() {
 	if s.deps.NotificationsQuotaResetEnabled != nil {
 		s.notifsReset.SetChecked(s.deps.NotificationsQuotaResetEnabled())
 	}
+	// The master sync above already greys or ungreys the event checks
+	// through its callback; do it explicitly as well so a nil master
+	// getter (tests) still lands in a consistent state.
+	s.setNotificationEventsEnabled(s.deps.NotificationsEnabled == nil || s.deps.NotificationsEnabled())
 	if s.deps.ShowMonitorOnStartup != nil {
 		s.startupShow.SetChecked(s.deps.ShowMonitorOnStartup())
 	}

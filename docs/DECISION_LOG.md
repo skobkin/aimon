@@ -38,7 +38,10 @@ behavior (repeating "weekly: 5% remaining" popups) and user direction:
    Gating stays audibility-only: a silenced rollover still re-arms the
    edges.
 3. **Settings.** The General tab gains the matching "Quota window reset"
-   checkbox beside the other two event toggles.
+   checkbox, and the per-event checks are now presented as children of
+   the master switch: indented beneath it and greyed out (disabled)
+   while "Desktop notifications" is off — each check's stored value
+   survives the disable and returns with the master.
 4. **Delivery path.** Quota popups never auto-hid on Linux: Fyne's
    `app_xdg.go` hardcodes `expire_timeout: 0`, which the freedesktop
    notification spec reads as "never expire". Notifications now go

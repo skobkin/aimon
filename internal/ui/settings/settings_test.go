@@ -403,6 +403,50 @@ func TestSettingsNotificationChecksSyncAndPersist(t *testing.T) {
 	}
 }
 
+// The per-event notification checks are children of the master switch in
+// the UI sense too: indented beneath it and greyed out (disabled) while
+// it is off, enabled again when it comes back on.
+func TestSettingsNotificationEventsGreyOutWithMaster(t *testing.T) {
+	stub := stubDeps()
+	stub.Creds = blockedStore{}
+	master := true
+	stub.NotificationsEnabled = func() bool { return master }
+	stub.SetNotificationsEnabled = func(on bool) { master = on }
+	s := NewSettings(test.NewTempApp(t), stub)
+
+	events := []struct {
+		name  string
+		check *widget.Check
+	}{
+		{"low", s.notifsLow},
+		{"exhausted", s.notifsExhausted},
+		{"reset", s.notifsReset},
+	}
+
+	s.Show()
+	for _, ev := range events {
+		if ev.check.Disabled() {
+			t.Errorf("%s check disabled while master is on", ev.name)
+		}
+	}
+
+	// Toggling the master off greys the event checks out.
+	s.notifs.SetChecked(false)
+	for _, ev := range events {
+		if !ev.check.Disabled() {
+			t.Errorf("%s check stayed enabled while master is off", ev.name)
+		}
+	}
+
+	// Back on, they return enabled.
+	s.notifs.SetChecked(true)
+	for _, ev := range events {
+		if ev.check.Disabled() {
+			t.Errorf("%s check stayed disabled after master returned on", ev.name)
+		}
+	}
+}
+
 // The Startup toggles: Show syncs the show-monitor check from the
 // preference and the autostart check from the entry's actual presence; an
 // unsupported binary disables the autostart check with the hint shown;
