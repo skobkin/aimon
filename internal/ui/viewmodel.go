@@ -227,8 +227,9 @@ type OverviewDonutVM struct {
 	Remaining float64 // drives threshold color
 	ResetText string  // countdown below donut
 	// ExhaustText is the optional burn-out estimate prefix of the
-	// countdown ("≈1h35m / 2h14m"); empty without an exhausting pace.
-	// Rendered in the error color.
+	// countdown ("≈1h35m" — the " / 2h14m" reset half is appended by the
+	// renderer); empty without an exhausting pace. Rendered in the error
+	// color.
 	ExhaustText string
 	// ResetAt is the absolute instant ResetText was derived from, so the
 	// rendered countdown line can age in place; nil means no countdown.

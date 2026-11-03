@@ -226,9 +226,17 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 	var tick func(now time.Time)
 	if vm.ResetAt != nil || (vm.Pace != nil && vm.Pace.CanProject) {
 		reset := vm.ResetAt
+		// The steady-state tick compares the two formatted strings and
+		// stops there; segment trees are built only for a real change.
+		lastExhaust, lastReset := vm.ExhaustText, vm.ResetText
 		tick = func(now time.Time) {
 			if reset != nil {
-				setRichText(title, quotaRowTitleSegments(vm.Name, vm.Pace.ExhaustText(reset, now), ui.FormatResetCountdown(reset, now)))
+				exhaust := vm.Pace.ExhaustText(reset, now)
+				cd := ui.FormatResetCountdown(reset, now)
+				if exhaust != lastExhaust || cd != lastReset {
+					lastExhaust, lastReset = exhaust, cd
+					setRichText(title, quotaRowTitleSegments(vm.Name, exhaust, cd))
+				}
 			}
 			// The projection dies at the reset instant while the speed
 			// stays meaningful: drop the projection part in place until a
@@ -268,17 +276,19 @@ func addPaceLine(row *fyne.Container, pace *ui.PaceVM) (*widget.RichText, *Proje
 // tickPaceExpiry applies the projection-expiry flip of one pace line: once
 // now has reached the reset, the bar and the projection half of the
 // caption hide in place; the speed text stays. A no-op without pace data
-// or a projection, and a no-op while the state is unchanged.
+// or a projection, and a no-op while the state is unchanged. The
+// steady-state tick compares the rendered text before building any
+// segments, so the common case allocates only the caption string.
 func tickPaceExpiry(caption *widget.RichText, bar *ProjectionBar, pace *ui.PaceVM, now time.Time) {
 	if pace == nil || !pace.CanProject {
 		return
 	}
 	expired := pace.ProjectionExpired(now)
-	want := paceCaptionSegments(pace)
+	want := pace.Caption()
 	if expired {
-		want = speedCaptionSegments(pace)
+		want = pace.SpeedCaption()
 	}
-	if richTextPlain(caption) == segmentsPlain(want) {
+	if RichTextPlain(caption) == want {
 		// The caption already matches the wanted state.
 		return
 	}
@@ -286,17 +296,21 @@ func tickPaceExpiry(caption *widget.RichText, bar *ProjectionBar, pace *ui.PaceV
 		if bar != nil {
 			bar.Hide()
 		}
-	} else if bar != nil {
-		bar.Show()
+		setRichText(caption, speedCaptionSegments(pace))
+	} else {
+		if bar != nil {
+			bar.Show()
+		}
+		setRichText(caption, paceCaptionSegments(pace))
 	}
-	setRichText(caption, want)
 }
 
 // quotaRowTitleSegments renders the row's first line as segments: the
 // window name, with the countdown appended when one is known
 // ("Credits-5h · 2h14m"), prefixed by the burn-out estimate in the error
 // color when the current pace exhausts the window before the reset
-// ("Credits-5h · ≈1h35m / 2h14m").
+// ("Credits-5h · ≈1h35m / 2h14m"). The estimate/countdown half is the
+// shared countdownSegments grammar.
 func quotaRowTitleSegments(name, exhaust, reset string) []widget.RichTextSegment {
 	bold := fyne.TextStyle{Bold: true}
 	segs := []widget.RichTextSegment{plainSeg(name, fyne.TextAlignLeading, bold)}
@@ -304,15 +318,8 @@ func quotaRowTitleSegments(name, exhaust, reset string) []widget.RichTextSegment
 		return segs
 	}
 	segs = append(segs, plainSeg(" · ", fyne.TextAlignLeading, bold))
-	if exhaust != "" {
-		segs = append(segs,
-			errorSeg(exhaust, fyne.TextAlignLeading, bold),
-			plainSeg(" / ", fyne.TextAlignLeading, bold),
-		)
-	}
-	segs = append(segs, plainSeg(reset, fyne.TextAlignLeading, bold))
 
-	return segs
+	return append(segs, countdownSegments(exhaust, reset, fyne.TextAlignLeading, bold)...)
 }
 
 // paceCaptionSegments renders the pace caption's segments: the speed line

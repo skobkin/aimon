@@ -32,7 +32,7 @@ func TestQuotaOverviewBodyTickAgesCountdowns(t *testing.T) {
 	}
 
 	tick(at.Add(3 * time.Hour))
-	texts := donutTexts(t, body)
+	texts := treeTexts(t, body)
 	// The 5h window's reset fell 1h in the past; the weekly one has 21h left.
 	if !slices.Contains(texts, "now") {
 		t.Errorf("5h countdown = %v, want %q after its reset passed", texts, "now")
@@ -54,31 +54,6 @@ func TestQuotaOverviewBodyWithoutCountdownsHasNoTick(t *testing.T) {
 	if body == nil {
 		t.Error("body = nil")
 	}
-}
-
-// donutTexts collects label and rich-text texts from an overview body
-// tree. Concrete cases must precede fyne.Widget: *widget.Label and
-// *widget.RichText implement the Widget interface and would otherwise
-// match first.
-func donutTexts(t *testing.T, obj fyne.CanvasObject) []string {
-	t.Helper()
-	var out []string
-	switch o := obj.(type) {
-	case *widget.Label:
-		out = append(out, o.Text)
-	case *widget.RichText:
-		out = append(out, richTextPlain(o))
-	case fyne.Widget:
-		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
-			out = append(out, donutTexts(t, child)...)
-		}
-	case *fyne.Container:
-		for _, child := range o.Objects {
-			out = append(out, donutTexts(t, child)...)
-		}
-	}
-
-	return out
 }
 
 func TestDonutTextBlockCentersBothLinesInHole(t *testing.T) {
@@ -153,7 +128,7 @@ func TestQuotaOverviewBodyPaceLine(t *testing.T) {
 		},
 	})
 
-	texts := donutTexts(t, body)
+	texts := treeTexts(t, body)
 	if !slices.Contains(texts, "≈51% at reset") {
 		t.Errorf("overview texts = %v, want the projection caption", texts)
 	}
@@ -161,7 +136,7 @@ func TestQuotaOverviewBodyPaceLine(t *testing.T) {
 		t.Errorf("overview texts = %v, want no speed text in Overview", texts)
 	}
 	for _, rt := range richTexts(t, body) {
-		if richTextPlain(rt) == "≈51% at reset" && rt.Wrapping != fyne.TextWrapWord {
+		if RichTextPlain(rt) == "≈51% at reset" && rt.Wrapping != fyne.TextWrapWord {
 			// An unclamped projection can reach four digits; the caption
 			// must wrap instead of widening the donut column.
 			t.Errorf("projection caption wrapping = %v, want word wrap", rt.Wrapping)
@@ -176,14 +151,14 @@ func TestQuotaOverviewBodyPaceLine(t *testing.T) {
 	// its column.
 	tick(at.Add(time.Hour))
 	for _, rt := range richTexts(t, body) {
-		if richTextPlain(rt) == "≈51% at reset" && rt.Visible() {
+		if RichTextPlain(rt) == "≈51% at reset" && rt.Visible() {
 			t.Error("projection caption still visible after expiry")
 		}
 	}
 	if bars[0].Visible() {
 		t.Error("projection bar still visible after expiry")
 	}
-	if !slices.Contains(donutTexts(t, body), "23h0m") {
+	if !slices.Contains(treeTexts(t, body), "23h0m") {
 		t.Error("the other column's countdown stopped ticking")
 	}
 }
@@ -205,8 +180,8 @@ func TestQuotaOverviewBodyWithoutPace(t *testing.T) {
 		t.Errorf("projection bars = %d, want 0 without pace", len(bars))
 	}
 	for _, rt := range richTexts(t, body) {
-		if strings.HasPrefix(richTextPlain(rt), "≈") {
-			t.Errorf("unexpected projection caption %q", richTextPlain(rt))
+		if strings.HasPrefix(RichTextPlain(rt), "≈") {
+			t.Errorf("unexpected projection caption %q", RichTextPlain(rt))
 		}
 	}
 }
@@ -275,7 +250,7 @@ func requireDonutsTopAligned(t *testing.T, cols []*fyne.Container) {
 // projectionCaption returns the column's "≈…" caption rich text, or nil.
 func projectionCaption(col *fyne.Container) *widget.RichText {
 	for _, o := range col.Objects {
-		if rt, ok := o.(*widget.RichText); ok && strings.HasPrefix(richTextPlain(rt), "≈") {
+		if rt, ok := o.(*widget.RichText); ok && strings.HasPrefix(RichTextPlain(rt), "≈") {
 			return rt
 		}
 	}
@@ -450,7 +425,7 @@ func TestQuotaOverviewBodyCountdownExhaust(t *testing.T) {
 
 	cols := overviewColumns(t, body)
 	cd := countdownLabel(t, cols[0])
-	if got := richTextPlain(cd); got != "≈35m / 1h0m" {
+	if got := RichTextPlain(cd); got != "≈35m / 1h0m" {
 		t.Fatalf("countdown = %q, want the combined label", got)
 	}
 	if got := errorSegmentTexts(cd); !slices.Equal(got, []string{"≈35m"}) {
@@ -459,16 +434,16 @@ func TestQuotaOverviewBodyCountdownExhaust(t *testing.T) {
 
 	// The estimate clamps at zero while the countdown keeps aging.
 	tick(at.Add(50 * time.Minute))
-	if got := richTextPlain(countdownLabel(t, cols[0])); got != "≈0s / 10m" {
+	if got := RichTextPlain(countdownLabel(t, cols[0])); got != "≈0s / 10m" {
 		t.Errorf("aged countdown = %q, want \"≈0s / 10m\"", got)
 	}
 
 	// At the reset the estimate drops together with the projection.
 	tick(reset)
-	if got := richTextPlain(countdownLabel(t, cols[0])); got != "now" {
+	if got := RichTextPlain(countdownLabel(t, cols[0])); got != "now" {
 		t.Errorf("countdown at reset = %q, want \"now\"", got)
 	}
-	if !slices.Contains(donutTexts(t, body), "23h0m") {
+	if !slices.Contains(treeTexts(t, body), "23h0m") {
 		t.Error("the other column's countdown stopped ticking")
 	}
 }

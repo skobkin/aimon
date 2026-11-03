@@ -948,6 +948,9 @@ func TestDetailScrollPendingAppliesWhenSized(t *testing.T) {
 // allTexts collects the visible text of every label in the tree. The Label
 // and Text cases must precede the Widget case: *widget.Label and
 // *canvas.Text are fyne.CanvasObjects, and a Label is a fyne.Widget too.
+// A rich text reads as one line — components.RichTextPlain concatenates
+// its segments (the row titles, countdown lines and pace captions carry
+// colored sub-spans).
 func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	t.Helper()
 	var out []string
@@ -959,14 +962,7 @@ func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	case *widget.Label:
 		out = append(out, o.Text)
 	case *widget.RichText:
-		// A rich text reads as one line: its segments concatenate into a
-		// single plain text (the row titles, countdown lines and pace
-		// captions carry colored sub-spans).
-		s := ""
-		for _, seg := range o.Segments {
-			s += seg.Textual()
-		}
-		out = append(out, s)
+		out = append(out, components.RichTextPlain(o))
 	case *canvas.Text:
 		out = append(out, o.Text)
 	case fyne.Widget:

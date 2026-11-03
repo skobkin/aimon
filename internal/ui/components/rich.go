@@ -2,7 +2,7 @@
 // cannot color part of its text, so the quota row titles, the Overview
 // countdown lines and the pace captions are widget.RichText built from
 // explicit TextSegments. The helpers keep the established label
-// discipline — compare the rendered text and repaint only on change
+// discipline — compare before writing, repaint only on change
 // (S7_IMPLEMENTATION_SPEC §8).
 package components
 
@@ -31,6 +31,22 @@ func errorSeg(text string, align fyne.TextAlign, ts fyne.TextStyle) *widget.Text
 	return textSeg(text, widget.RichTextStyle{Alignment: align, TextStyle: ts, ColorName: theme.ColorNameError, Inline: true})
 }
 
+// countdownSegments renders the shared countdown grammar: the reset
+// countdown, prefixed by the burn-out estimate in the error color when
+// the current pace exhausts the window before the reset
+// ("≈1h35m / 2h14m"). The Overview donut line centers it; the quota row
+// title prepends the window name in bold. Alignment and text style
+// follow the caller.
+func countdownSegments(exhaust, reset string, align fyne.TextAlign, ts fyne.TextStyle) []widget.RichTextSegment {
+	segs := []widget.RichTextSegment{}
+	if exhaust != "" {
+		segs = append(segs, errorSeg(exhaust, align, ts), plainSeg(" / ", align, ts))
+	}
+	segs = append(segs, plainSeg(reset, align, ts))
+
+	return segs
+}
+
 // projectionSeg renders the projection caption segment ("≈137% at
 // reset") in the error color when the raw projection exceeds 100% — the
 // text counterpart of the ProjectionBar's overflow segment.
@@ -42,9 +58,10 @@ func projectionSeg(pace *ui.PaceVM, align fyne.TextAlign) *widget.TextSegment {
 	return plainSeg(pace.ProjectedText, align, fyne.TextStyle{})
 }
 
-// richTextPlain concatenates a rich-text label's rendered text — what
-// the compare gates read.
-func richTextPlain(rt *widget.RichText) string {
+// RichTextPlain concatenates a rich-text label's rendered text — the
+// plain reading of a (possibly colored) line, used by the compare gates
+// and the tests.
+func RichTextPlain(rt *widget.RichText) string {
 	return segmentsPlain(rt.Segments)
 }
 
@@ -58,30 +75,27 @@ func segmentsPlain(segs []widget.RichTextSegment) string {
 	return s
 }
 
-// setRichText writes segments into a rich-text label. A same-shaped
-// update mutates the existing text segments in place — RichText caches
-// its canvas objects per segment pointer, so keeping the pointers keeps
-// the object tree identical (the discipline the per-second tick lives
-// by). A structural change replaces the segments. Either way the refresh
-// is skipped when the rendered text is unchanged, so a tick never
-// repaints a line that reads the same.
-func setRichText(rt *widget.RichText, segs []widget.RichTextSegment) {
-	if richTextPlain(rt) == segmentsPlain(segs) {
-		return
+// richTextSegmentsEqual reports whether two segment lists render the
+// identical text in the identical styles. RichTextStyle is comparable —
+// alignment, color name and text style decide identity. One
+// allocation-free walk: the per-second tick's no-op path costs nothing.
+func richTextSegmentsEqual(a, b []widget.RichTextSegment) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	if richTextSameShape(rt.Segments, segs) {
-		for i, seg := range segs {
-			rt.Segments[i].(*widget.TextSegment).Text = seg.(*widget.TextSegment).Text
+	for i := range b {
+		x, okA := a[i].(*widget.TextSegment)
+		y, okB := b[i].(*widget.TextSegment)
+		if !okA || !okB || x.Text != y.Text || x.Style != y.Style {
+			return false
 		}
-	} else {
-		rt.Segments = segs
 	}
-	rt.Refresh()
+
+	return true
 }
 
 // richTextSameShape reports whether new text segments can update old ones
-// in place: same count, all text segments, same styles (RichTextStyle is
-// comparable — alignment, color name and text style decide identity).
+// in place: same count, all text segments, same styles.
 func richTextSameShape(old, new []widget.RichTextSegment) bool {
 	if len(old) != len(new) {
 		return false
@@ -95,4 +109,28 @@ func richTextSameShape(old, new []widget.RichTextSegment) bool {
 	}
 
 	return true
+}
+
+// setRichText writes segments into a rich-text label. The gate compares
+// text and styles per segment rather than the concatenated text alone: a
+// style-only change must still reach the refresh. (Today every color
+// flip at the call sites changes the text with it, so the style compare
+// never fires alone — this is what keeps a future style-only transition
+// from being silently dropped.) A same-shaped update mutates the
+// existing text segments in place — RichText caches its canvas objects
+// per segment pointer, so keeping the pointers keeps the object tree
+// identical (the discipline the per-second tick lives by); a structural
+// change replaces the segments and repaints once.
+func setRichText(rt *widget.RichText, segs []widget.RichTextSegment) {
+	if richTextSegmentsEqual(rt.Segments, segs) {
+		return
+	}
+	if richTextSameShape(rt.Segments, segs) {
+		for i, seg := range segs {
+			rt.Segments[i].(*widget.TextSegment).Text = seg.(*widget.TextSegment).Text
+		}
+	} else {
+		rt.Segments = segs
+	}
+	rt.Refresh()
 }

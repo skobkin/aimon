@@ -184,9 +184,10 @@ countdown line) rewrite the burn-out estimate component per second through
 `PaceVM.ExhaustText` and drop it at the reset; when
 `Pace.ProjectionExpired(now)` flips, hide/restore the projection caption
 part and bar in place. The affected labels are `widget.RichText`; same-
-shaped segment updates mutate the existing segments so the canvas object
-tree stays identical. No projection recomputation, no object rebuilding, no
-full re-render.
+shaped segment updates mutate the existing segments so a steady-state
+tick leaves the canvas object tree identical, while a shape change (the
+estimate dropping at the reset) replaces the segments and repaints once.
+No projection recomputation, no full re-render.
 
 ## 9. Test matrix
 

@@ -20,23 +20,27 @@ accent of an over-100% projection change:
    Overview donut column and the detail row title — prefix a burn-out
    estimate when the current speed would exhaust the quota strictly
    before the reset: `≈1h35m / 4h45m` in Overview,
-   `5-hour · ≈1h35m / 2h14m` in the row title. The estimate is set
-   exactly when the raw projection exceeds 100% at a positive speed (an
-   equivalence, not a heuristic: exhaust < reset ⟺ LastUsed +
-   SpeedFrac·Δ > 1), clamps to `≈0s` once the quota is spent, and drops
-   at the window reset together with the projection. Without an
-   exhausting pace the labels render exactly as before — no placeholder,
-   no shape change. `PaceVM` gains `ExhaustAt` and the time-relative
-   `ExhaustText`; the countdown ticks write the combined label through
-   the shared countdown grammar.
+   `5-hour · ≈1h35m / 2h14m` in the row title. The estimate is gated on
+   the same projected value the caption and bar use — set iff the raw
+   projection exceeds 100% at a positive speed (mathematically an
+   equivalence: exhaust < reset ⟺ LastUsed +
+   SpeedFrac·Δ > 1) — so caption, bar and countdown prefix cannot
+   disagree at float precision; it clamps to `≈0s` once the quota is
+   spent, and drops at the window reset together with the projection.
+   Without an exhausting pace the labels render exactly as before — no
+   placeholder, no shape change. `PaceVM` gains `ExhaustAt` and the
+   time-relative `ExhaustText`; the countdown ticks write the combined
+   label through the shared countdown grammar.
 2. **Error-color accent via the theme.** The burn-out component and a
    projection caption past 100% (`≈146% at reset`) render in the theme's
    error color, mirroring the ProjectionBar's red overflow segment. The
    affected labels (quota row titles, Overview countdown lines, pace
    captions) therefore move from `widget.Label` to standard
    `widget.RichText` with explicit text segments — no new custom widget.
-   Segment updates mutate existing segments in place, so the per-second
-   tick still leaves the canvas object tree identical. The fixed D9
+   Same-shaped segment updates mutate the existing segments in place, so
+   a steady-state per-second tick leaves the canvas object tree
+   identical; a shape change (the estimate dropping at the reset)
+   replaces the segments and repaints once. The fixed D9
    threshold palette stays bar-fill-only; text colors resolve through
    the theme. Color is never the only signal — the `≈` marker and the
    values remain plain text.

@@ -16,82 +16,56 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
-// rowLabels walks the tree of a quota row and returns its labels in order.
-// Concrete cases must precede fyne.Widget: *widget.Label implements the
-// Widget interface and would otherwise match first.
-func rowLabels(t *testing.T, obj fyne.CanvasObject) []*widget.Label {
+// walkTree visits every canvas object of a widget tree in document
+// order, descending into widget renderers and containers — the one
+// shared skeleton for the collectors below. Text leaves (Label, RichText)
+// stay opaque: a Label wraps its own RichText internally, and that
+// renderer detail is not part of the logical tree.
+func walkTree(t *testing.T, obj fyne.CanvasObject, visit func(fyne.CanvasObject)) {
 	t.Helper()
-	var out []*widget.Label
+	visit(obj)
 	switch o := obj.(type) {
-	case *widget.Label:
-		out = append(out, o)
+	case *widget.Label, *widget.RichText:
+		return
 	case fyne.Widget:
 		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
-			out = append(out, rowLabels(t, child)...)
+			walkTree(t, child, visit)
 		}
 	case *fyne.Container:
 		for _, child := range o.Objects {
-			out = append(out, rowLabels(t, child)...)
+			walkTree(t, child, visit)
 		}
 	}
+}
+
+// treeTexts collects every text-bearing leaf's text in document order —
+// labels and rich texts alike — so ordering assertions can compare
+// positions across both kinds.
+func treeTexts(t *testing.T, obj fyne.CanvasObject) []string {
+	t.Helper()
+	var out []string
+	walkTree(t, obj, func(o fyne.CanvasObject) {
+		switch v := o.(type) {
+		case *widget.Label:
+			out = append(out, v.Text)
+		case *widget.RichText:
+			out = append(out, RichTextPlain(v))
+		}
+	})
 
 	return out
 }
 
 // richTexts walks a tree collecting RichText widgets — the quota row
-// titles and pace captions. Concrete cases must precede fyne.Widget:
-// *widget.RichText implements the Widget interface and would otherwise
-// match first.
+// titles and pace captions.
 func richTexts(t *testing.T, obj fyne.CanvasObject) []*widget.RichText {
 	t.Helper()
 	var out []*widget.RichText
-	switch o := obj.(type) {
-	case *widget.RichText:
-		out = append(out, o)
-	case fyne.Widget:
-		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
-			out = append(out, richTexts(t, child)...)
+	walkTree(t, obj, func(o fyne.CanvasObject) {
+		if rt, ok := o.(*widget.RichText); ok {
+			out = append(out, rt)
 		}
-	case *fyne.Container:
-		for _, child := range o.Objects {
-			out = append(out, richTexts(t, child)...)
-		}
-	}
-
-	return out
-}
-
-// richTextTexts returns the plain text of each rich text in order.
-func richTextTexts(rts []*widget.RichText) []string {
-	out := make([]string, len(rts))
-	for i, rt := range rts {
-		out[i] = richTextPlain(rt)
-	}
-
-	return out
-}
-
-// rowTexts walks a quota row tree collecting every text-bearing leaf's
-// text in document order — labels and rich texts alike — so ordering
-// assertions can compare positions across both kinds. Concrete cases
-// must precede fyne.Widget.
-func rowTexts(t *testing.T, obj fyne.CanvasObject) []string {
-	t.Helper()
-	var out []string
-	switch o := obj.(type) {
-	case *widget.Label:
-		out = append(out, o.Text)
-	case *widget.RichText:
-		out = append(out, richTextPlain(o))
-	case fyne.Widget:
-		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
-			out = append(out, rowTexts(t, child)...)
-		}
-	case *fyne.Container:
-		for _, child := range o.Objects {
-			out = append(out, rowTexts(t, child)...)
-		}
-	}
+	})
 
 	return out
 }
@@ -101,7 +75,7 @@ func rowTexts(t *testing.T, obj fyne.CanvasObject) []string {
 func paceCaptionRichText(t *testing.T, row fyne.CanvasObject) *widget.RichText {
 	t.Helper()
 	for _, rt := range richTexts(t, row) {
-		if strings.HasPrefix(richTextPlain(rt), "Pace ") {
+		if strings.HasPrefix(RichTextPlain(rt), "Pace ") {
 			return rt
 		}
 	}
@@ -231,10 +205,10 @@ func TestNewQuotaRowTickAdvancesCountdown(t *testing.T) {
 	}
 
 	tick(time.Unix(1770000000, 0))
-	before := richTextPlain(richTexts(t, row)[0])
+	before := RichTextPlain(richTexts(t, row)[0])
 
 	tick(time.Unix(1770000000, 0).Add(1*time.Hour + 5*time.Minute))
-	after := richTextPlain(richTexts(t, row)[0])
+	after := RichTextPlain(richTexts(t, row)[0])
 
 	if before != "Credits-5h · 2h0m" {
 		t.Errorf("title at t0 = %q", before)
@@ -245,7 +219,7 @@ func TestNewQuotaRowTickAdvancesCountdown(t *testing.T) {
 
 	// Re-deriving an unchanged second must be a no-op text write.
 	tick(time.Unix(1770000000, 0).Add(1*time.Hour + 5*time.Minute))
-	if again := richTextPlain(richTexts(t, row)[0]); again != after {
+	if again := RichTextPlain(richTexts(t, row)[0]); again != after {
 		t.Errorf("second tick at the same instant changed the title to %q", again)
 	}
 }
@@ -258,29 +232,20 @@ func TestNewQuotaRowWithoutResetHasNoTick(t *testing.T) {
 		t.Error("row without ResetAt returned a non-nil tick refresher")
 	}
 	rts := richTexts(t, row)
-	if len(rts) == 0 || richTextPlain(rts[0]) != "Credits-5h" {
-		t.Errorf("title rich texts = %v, want the bare window name", richTextTexts(rts))
+	if len(rts) != 1 || RichTextPlain(rts[0]) != "Credits-5h" {
+		t.Errorf("row rich texts = %d, want one title reading the bare window name", len(rts))
 	}
 }
 
-// projectionBars walks a tree collecting ProjectionBar widgets. Concrete
-// cases must precede fyne.Widget: *ProjectionBar implements the Widget
-// interface and would otherwise match first.
+// projectionBars walks a tree collecting ProjectionBar widgets.
 func projectionBars(t *testing.T, obj fyne.CanvasObject) []*ProjectionBar {
 	t.Helper()
 	var out []*ProjectionBar
-	switch o := obj.(type) {
-	case *ProjectionBar:
-		out = append(out, o)
-	case fyne.Widget:
-		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
-			out = append(out, projectionBars(t, child)...)
+	walkTree(t, obj, func(o fyne.CanvasObject) {
+		if b, ok := o.(*ProjectionBar); ok {
+			out = append(out, b)
 		}
-	case *fyne.Container:
-		for _, child := range o.Objects {
-			out = append(out, projectionBars(t, child)...)
-		}
-	}
+	})
 
 	return out
 }
@@ -301,15 +266,6 @@ func paceRowVM(at time.Time) ui.QuotaWindowVM {
 	}
 }
 
-func labelTexts(labels []*widget.Label) []string {
-	out := make([]string, len(labels))
-	for i, l := range labels {
-		out[i] = l.Text
-	}
-
-	return out
-}
-
 // A projectable row: the caption reads "Pace <speed> · <projection>", the
 // bar sits beneath it, the raw-counts line stays last. A row without pace
 // data renders none of that.
@@ -320,12 +276,12 @@ func TestNewQuotaRowPaceLine(t *testing.T) {
 		t.Fatal("projectable row lost its countdown tick")
 	}
 
-	texts := rowTexts(t, row)
+	texts := treeTexts(t, row)
 	if !slices.Contains(texts, "Pace 3.4%/h · ≈51% at reset") {
 		t.Errorf("row texts = %v, want the pace caption", texts)
 	}
 	for _, rt := range richTexts(t, row) {
-		if strings.HasPrefix(richTextPlain(rt), "Pace ") && rt.Wrapping != fyne.TextWrapWord {
+		if strings.HasPrefix(RichTextPlain(rt), "Pace ") && rt.Wrapping != fyne.TextWrapWord {
 			t.Errorf("pace caption wrapping = %v, want word wrap", rt.Wrapping)
 		}
 	}
@@ -343,7 +299,7 @@ func TestNewQuotaRowPaceLine(t *testing.T) {
 	plain := paceRowVM(at)
 	plain.Pace = nil
 	row2, _ := NewQuotaRow(plain)
-	for _, s := range richTextTexts(richTexts(t, row2)) {
+	for _, s := range treeTexts(t, row2) {
 		if strings.HasPrefix(s, "Pace ") {
 			t.Errorf("pace-less row text = %q", s)
 		}
@@ -364,7 +320,7 @@ func TestNewQuotaRowPaceExpiryTick(t *testing.T) {
 	bars := projectionBars(t, row)
 
 	tick(at)
-	if !slices.Contains(richTextTexts(richTexts(t, row)), "Pace 3.4%/h · ≈51% at reset") {
+	if !slices.Contains(treeTexts(t, row), "Pace 3.4%/h · ≈51% at reset") {
 		t.Fatal("fresh projection caption missing before the reset")
 	}
 	if !bars[0].Visible() {
@@ -372,7 +328,7 @@ func TestNewQuotaRowPaceExpiryTick(t *testing.T) {
 	}
 
 	tick(reset)
-	texts := richTextTexts(richTexts(t, row))
+	texts := treeTexts(t, row)
 	if slices.Contains(texts, "≈51% at reset") || slices.Contains(texts, "Pace 3.4%/h · ≈51% at reset") {
 		t.Errorf("caption after expiry = %v, want the projection part gone", texts)
 	}
@@ -385,20 +341,20 @@ func TestNewQuotaRowPaceExpiryTick(t *testing.T) {
 
 	// Idempotent: ticking again changes nothing.
 	tick(reset.Add(time.Second))
-	if !slices.Contains(richTextTexts(richTexts(t, row)), "Pace 3.4%/h") || bars[0].Visible() {
+	if !slices.Contains(treeTexts(t, row), "Pace 3.4%/h") || bars[0].Visible() {
 		t.Error("expiry flip is not idempotent")
 	}
 
 	// The countdown keeps ticking next to the expired projection.
 	tick(reset.Add(30 * time.Minute))
-	if got := richTextPlain(richTexts(t, row)[0]); got != "5-hour · now" {
+	if got := RichTextPlain(richTexts(t, row)[0]); got != "5-hour · now" {
 		t.Error("countdown must read \"now\" beside the expired projection")
 	}
 
 	// A not-yet-expired state (a fresh sample rebuilds the row, the flip
 	// covers the same transition) restores bar and caption.
 	tick(at)
-	if !bars[0].Visible() || !slices.Contains(richTextTexts(richTexts(t, row)), "Pace 3.4%/h · ≈51% at reset") {
+	if !bars[0].Visible() || !slices.Contains(treeTexts(t, row), "Pace 3.4%/h · ≈51% at reset") {
 		t.Error("restore flip failed")
 	}
 }
@@ -424,10 +380,10 @@ func TestNewQuotaRowTickForPaceWithoutReset(t *testing.T) {
 	}
 
 	tick(at.Add(2 * time.Hour))
-	if bars[0].Visible() || slices.Contains(richTextTexts(richTexts(t, row)), "≈51% at reset") {
+	if bars[0].Visible() || slices.Contains(treeTexts(t, row), "≈51% at reset") {
 		t.Error("expired projection survived on a countdown-less row")
 	}
-	if !slices.Contains(richTextTexts(richTexts(t, row)), "Pace 3.4%/h") {
+	if !slices.Contains(treeTexts(t, row), "Pace 3.4%/h") {
 		t.Error("the speed part of the caption must stay")
 	}
 }
@@ -445,31 +401,31 @@ func TestNewQuotaRowCountdownExhaust(t *testing.T) {
 	row, tick := NewQuotaRow(vm)
 
 	title := richTexts(t, row)[0]
-	if got := richTextPlain(title); got != "5-hour · ≈35m / 1h0m" {
+	if got := RichTextPlain(title); got != "5-hour · ≈35m / 1h0m" {
 		t.Fatalf("title = %q, want the combined countdown", got)
 	}
 	if got := errorSegmentTexts(title); !slices.Equal(got, []string{"≈35m"}) {
 		t.Errorf("error segments = %v, want the estimate alone", got)
 	}
-	if got := richTextTexts(richTexts(t, row)); !slices.Contains(got, "Pace 3.4%/h · ≈51% at reset") {
+	if got := treeTexts(t, row); !slices.Contains(got, "Pace 3.4%/h · ≈51% at reset") {
 		t.Errorf("caption untouched by the estimate = %v", got)
 	}
 
 	// The estimate clamps at zero and keeps aging with the countdown.
 	tick(at.Add(50 * time.Minute))
-	if got := richTextPlain(richTexts(t, row)[0]); got != "5-hour · ≈0s / 10m" {
+	if got := RichTextPlain(richTexts(t, row)[0]); got != "5-hour · ≈0s / 10m" {
 		t.Errorf("aged title = %q, want the clamped estimate", got)
 	}
 
 	// Idempotent: ticking again changes nothing.
 	tick(at.Add(50 * time.Minute))
-	if got := richTextPlain(richTexts(t, row)[0]); got != "5-hour · ≈0s / 10m" {
+	if got := RichTextPlain(richTexts(t, row)[0]); got != "5-hour · ≈0s / 10m" {
 		t.Errorf("second tick changed the title to %q", got)
 	}
 
 	// At the reset the estimate drops with the projection.
 	tick(reset)
-	if got := richTextPlain(richTexts(t, row)[0]); got != "5-hour · now" {
+	if got := RichTextPlain(richTexts(t, row)[0]); got != "5-hour · now" {
 		t.Errorf("title at reset = %q, want the plain \"now\" countdown", got)
 	}
 }

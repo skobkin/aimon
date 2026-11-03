@@ -1346,6 +1346,22 @@ func TestBuildPaceVMExhaustAt(t *testing.T) {
 		t.Errorf("100%% projection exhaust = %v, want nil", vm.ExhaustAt)
 	}
 
+	// The gate is the projection value itself, so caption, bar and
+	// countdown prefix cannot disagree at float precision: a projection
+	// a ULP past 100% sets the estimate even when the hours-division
+	// lands outside the span (the instant clamps to the reset, and the
+	// label's strictly-before gate decides visibility).
+	ulpOver := activeEst()
+	ulpOver.LastUsed = 0.1
+	ulpOver.SpeedFrac = 0.04390243902439025
+	over20h := now.Add(20*time.Hour + 30*time.Minute)
+	ulpOver.ResetAt = &over20h
+	vm = buildPaceVM(ulpOver, now)
+	if !vm.CanProject || vm.Projected <= 1 || vm.ExhaustAt == nil || !vm.ExhaustAt.Equal(over20h) {
+		t.Errorf("projected %v with exhaust %v, want the estimate set (clamped to the reset) with the projection over 100%%",
+			vm.Projected, vm.ExhaustAt)
+	}
+
 	// Already past 100%: the exhaust instant sits in the past and the
 	// label clamps to "≈0s".
 	spent := activeEst()

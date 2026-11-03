@@ -173,12 +173,24 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 	for _, w := range vm.Windows {
 		col := container.NewVBox(NewQuotaDonut(w.PctText, w.Label, w.Used, w.Remaining))
 		if w.ResetAt != nil {
-			reset := widget.NewRichText(countdownSegments(w.ExhaustText, w.ResetText)...)
+			// Centered countdown line through the shared countdown
+			// grammar: burn-out estimate in the error color when the pace
+			// exhausts the window before the reset. The steady-state tick
+			// compares the two formatted strings and stops there.
+			center, plain := fyne.TextAlignCenter, fyne.TextStyle{}
+			reset := widget.NewRichText(countdownSegments(w.ExhaustText, w.ResetText, center, plain)...)
 			col.Add(reset)
 			at := w.ResetAt
 			paceVM := w.Pace
+			lastExhaust, lastReset := w.ExhaustText, w.ResetText
 			ticks = append(ticks, func(now time.Time) {
-				setRichText(reset, countdownSegments(paceVM.ExhaustText(at, now), ui.FormatResetCountdown(at, now)))
+				exhaust := paceVM.ExhaustText(at, now)
+				cd := ui.FormatResetCountdown(at, now)
+				if exhaust == lastExhaust && cd == lastReset {
+					return
+				}
+				lastExhaust, lastReset = exhaust, cd
+				setRichText(reset, countdownSegments(exhaust, cd, center, plain))
 			})
 		}
 		// One compact projection line under a projectable donut: a thin
@@ -233,23 +245,4 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 	}
 
 	return body, tick
-}
-
-// countdownSegments renders the centered countdown line under a donut:
-// the reset countdown, prefixed by the burn-out estimate in the error
-// color when the current pace exhausts the window before the reset
-// ("≈1h35m / 2h14m"). Every segment is centered — the donut column
-// centers its text.
-func countdownSegments(exhaust, reset string) []widget.RichTextSegment {
-	if reset == "" {
-		return nil
-	}
-	center := fyne.TextAlignCenter
-	segs := []widget.RichTextSegment{}
-	if exhaust != "" {
-		segs = append(segs, errorSeg(exhaust, center, fyne.TextStyle{}), plainSeg(" / ", center, fyne.TextStyle{}))
-	}
-	segs = append(segs, plainSeg(reset, center, fyne.TextStyle{}))
-
-	return segs
 }

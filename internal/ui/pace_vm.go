@@ -37,9 +37,10 @@ type PaceVM struct {
 	LastAt    time.Time
 	ResetAt   *time.Time
 	// ExhaustAt estimates when the used fraction reaches 100% at the
-	// current speed — set only when that lands strictly before ResetAt
-	// (the raw projection then exceeds 100%) and the speed is positive.
-	// Nil otherwise; like the projection, constant between samples.
+	// current speed — set iff the raw projection exceeds 100% at a
+	// positive speed (the caption and bar then say so too), clamped to
+	// at most ResetAt. Nil otherwise; like the projection, constant
+	// between samples.
 	ExhaustAt *time.Time
 }
 
@@ -113,16 +114,22 @@ func buildPaceVM(est pace.Estimate, now time.Time) *PaceVM {
 		}
 		vm.Projected = projected
 		vm.ProjectedText = "≈" + formatProjectedPct(projected) + " at reset"
-		// The burn-out estimate mirrors the projection: with a positive
-		// speed it is set exactly when the raw projection exceeds 100%,
-		// i.e. the quota dies before this window resets. Comparing in
-		// hours before the Duration conversion keeps a near-zero speed
-		// from overflowing the int64 nanoseconds.
-		if est.SpeedFrac > 0 {
-			if hrs := (1 - est.LastUsed) / est.SpeedFrac; hrs < est.ResetAt.Sub(est.LastAt).Hours() {
-				exhaust := est.LastAt.Add(time.Duration(hrs * float64(time.Hour)))
-				vm.ExhaustAt = &exhaust
+		// One gate for the estimate, the caption and the bar: ExhaustAt
+		// is set iff the same raw projected value exceeds 100% at a
+		// positive speed (mathematically exhaust < reset ⟺ LastUsed +
+		// SpeedFrac·Δ > 1), so they cannot disagree at float precision.
+		// The instant itself is clamped to the window span before the
+		// Duration conversion — a rounding step must not overflow the
+		// int64 nanoseconds — and the label's strictly-before gate then
+		// decides visibility.
+		if est.SpeedFrac > 0 && projected > 1 {
+			span := est.ResetAt.Sub(est.LastAt).Hours()
+			hrs := (1 - est.LastUsed) / est.SpeedFrac
+			if hrs > span {
+				hrs = span
 			}
+			exhaust := est.LastAt.Add(time.Duration(hrs * float64(time.Hour)))
+			vm.ExhaustAt = &exhaust
 		}
 	}
 

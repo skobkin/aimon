@@ -52,7 +52,8 @@ caption. No speed text in Overview.
 ```
 
 When a window's pace would exhaust it before the reset, its countdown
-line gains the error-colored burn-out estimate: `5h · ≈1h35m / 2h14m`.
+line gains the error-colored burn-out estimate: `≈1h35m / 2h14m` (the
+window's short label stays in the donut hole).
 
 Windows without a usable projection (no ResetAt, not Active/Idle) show
 nothing extra — the column simply ends shorter. Columns are top-aligned,
