@@ -11,6 +11,10 @@ requests, no persistence.
 - **Projection** — where the used fraction lands at the window reset:
   `≈68% at reset`. May exceed 100% (`≈137% at reset`); the overflow is drawn
   red inside the projection bar and always spelled out in text.
+- **Burn-out estimate** — how long the quota lasts at the current speed:
+  `≈1h35m`. Shown in the countdown lines (`≈1h35m / 4h45m`) only when the
+  projection exceeds 100% — the quota dies before the reset; clamps to
+  `≈0s` once spent and drops at the window reset with the projection.
 - **Sample** — one successful poll's reading for one series (quota window or
   spend counter), stamped with the snapshot's own `CollectedAt`. Sample times
   always come from snapshots, never from receive time.

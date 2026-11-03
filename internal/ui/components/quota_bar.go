@@ -203,7 +203,7 @@ func (r *quotaBarRenderer) Refresh() {
 // retire. Rows are never rebuilt for time: the monitor's ticker calls
 // this instead.
 func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
-	title := widget.NewLabelWithStyle(quotaRowTitle(vm), fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title := widget.NewRichText(quotaRowTitleSegments(vm.Name, vm.ExhaustText, vm.ResetText)...)
 	row := container.NewVBox(
 		container.NewHBox(
 			title,
@@ -228,10 +228,7 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 		reset := vm.ResetAt
 		tick = func(now time.Time) {
 			if reset != nil {
-				setText(title, quotaRowTitle(ui.QuotaWindowVM{
-					Name:      vm.Name,
-					ResetText: ui.FormatResetCountdown(reset, now),
-				}))
+				setRichText(title, quotaRowTitleSegments(vm.Name, vm.Pace.ExhaustText(reset, now), ui.FormatResetCountdown(reset, now)))
 			}
 			// The projection dies at the reset instant while the speed
 			// stays meaningful: drop the projection part in place until a
@@ -251,11 +248,12 @@ func NewQuotaRow(vm ui.QuotaWindowVM) (fyne.CanvasObject, func(now time.Time)) {
 // bar for the row's expiry tick; both are nil without pace data. The
 // caption word-wraps like the row's other free-text lines, so a long
 // projection widens nothing.
-func addPaceLine(row *fyne.Container, pace *ui.PaceVM) (*widget.Label, *ProjectionBar) {
+func addPaceLine(row *fyne.Container, pace *ui.PaceVM) (*widget.RichText, *ProjectionBar) {
 	if pace == nil {
 		return nil, nil
 	}
-	caption := NewWrappedLabel(pace.Caption(), fyne.TextAlignLeading, fyne.TextStyle{})
+	caption := widget.NewRichText(paceCaptionSegments(pace)...)
+	caption.Wrapping = fyne.TextWrapWord
 	row.Add(caption)
 
 	var bar *ProjectionBar
@@ -271,16 +269,16 @@ func addPaceLine(row *fyne.Container, pace *ui.PaceVM) (*widget.Label, *Projecti
 // now has reached the reset, the bar and the projection half of the
 // caption hide in place; the speed text stays. A no-op without pace data
 // or a projection, and a no-op while the state is unchanged.
-func tickPaceExpiry(caption *widget.Label, bar *ProjectionBar, pace *ui.PaceVM, now time.Time) {
+func tickPaceExpiry(caption *widget.RichText, bar *ProjectionBar, pace *ui.PaceVM, now time.Time) {
 	if pace == nil || !pace.CanProject {
 		return
 	}
 	expired := pace.ProjectionExpired(now)
-	want := pace.Caption()
+	want := paceCaptionSegments(pace)
 	if expired {
-		want = pace.SpeedCaption()
+		want = speedCaptionSegments(pace)
 	}
-	if caption.Text == want {
+	if richTextPlain(caption) == segmentsPlain(want) {
 		// The caption already matches the wanted state.
 		return
 	}
@@ -291,17 +289,53 @@ func tickPaceExpiry(caption *widget.Label, bar *ProjectionBar, pace *ui.PaceVM, 
 	} else if bar != nil {
 		bar.Show()
 	}
-	setText(caption, want)
+	setRichText(caption, want)
 }
 
-// quotaRowTitle renders the row's first line: the window name, with the
-// countdown appended when one is known ("Credits-5h · 2h14m").
-func quotaRowTitle(vm ui.QuotaWindowVM) string {
-	if vm.ResetText == "" {
-		return vm.Name
+// quotaRowTitleSegments renders the row's first line as segments: the
+// window name, with the countdown appended when one is known
+// ("Credits-5h · 2h14m"), prefixed by the burn-out estimate in the error
+// color when the current pace exhausts the window before the reset
+// ("Credits-5h · ≈1h35m / 2h14m").
+func quotaRowTitleSegments(name, exhaust, reset string) []widget.RichTextSegment {
+	bold := fyne.TextStyle{Bold: true}
+	segs := []widget.RichTextSegment{plainSeg(name, fyne.TextAlignLeading, bold)}
+	if reset == "" {
+		return segs
+	}
+	segs = append(segs, plainSeg(" · ", fyne.TextAlignLeading, bold))
+	if exhaust != "" {
+		segs = append(segs,
+			errorSeg(exhaust, fyne.TextAlignLeading, bold),
+			plainSeg(" / ", fyne.TextAlignLeading, bold),
+		)
+	}
+	segs = append(segs, plainSeg(reset, fyne.TextAlignLeading, bold))
+
+	return segs
+}
+
+// paceCaptionSegments renders the pace caption's segments: the speed line
+// with the projection appended when fresh — the projection in the error
+// color when it exceeds 100%, matching the ProjectionBar's overflow
+// segment. State placeholders render as one plain segment. The plain
+// text equals PaceVM.Caption().
+func paceCaptionSegments(pace *ui.PaceVM) []widget.RichTextSegment {
+	if !pace.CanProject {
+		return []widget.RichTextSegment{plainSeg(pace.Caption(), fyne.TextAlignLeading, fyne.TextStyle{})}
 	}
 
-	return vm.Name + " · " + vm.ResetText
+	return []widget.RichTextSegment{
+		plainSeg(pace.SpeedCaption()+" · ", fyne.TextAlignLeading, fyne.TextStyle{}),
+		projectionSeg(pace, fyne.TextAlignLeading),
+	}
+}
+
+// speedCaptionSegments renders the caption after the projection expired:
+// the speed line alone, one plain segment. The plain text equals
+// PaceVM.SpeedCaption().
+func speedCaptionSegments(pace *ui.PaceVM) []widget.RichTextSegment {
+	return []widget.RichTextSegment{plainSeg(pace.SpeedCaption(), fyne.TextAlignLeading, fyne.TextStyle{})}
 }
 
 // setText writes a label's text, skipping the refresh when unchanged so a

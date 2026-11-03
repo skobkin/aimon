@@ -141,9 +141,18 @@ type PaceVM struct {
     SpeedFrac, LastUsed float64
     LastAt         time.Time
     ResetAt        *time.Time
+    ExhaustAt      *time.Time // set iff the raw projection exceeds 100% at a positive speed
 }
-func (vm PaceVM) ProjectionExpired(now time.Time) bool // now ≥ ResetAt
+func (vm PaceVM) ProjectionExpired(now time.Time) bool                 // now ≥ ResetAt
+func (vm *PaceVM) ExhaustText(resetAt *time.Time, now time.Time) string // "≈1h35m" when exhausting strictly before resetAt; nil-receiver safe
 ```
+
+`ExhaustAt` is anchored at `LastAt` and derived with the projection: it is
+set exactly when `LastUsed + SpeedFrac·Δ > 1` with `SpeedFrac > 0`, where
+`Δ = ResetAt − LastAt`. The builders fold `ExhaustText` — computed against
+the window's own `ResetAt` — into `QuotaWindowVM.ExhaustText` /
+`OverviewDonutVM.ExhaustText`; the countdown ticks rewrite it per second
+and drop it at the reset with the projection.
 
 New formatters: `FormatPctPerHour`, `FormatCountPerHour(v, unit)`,
 `FormatMoneyPerHour` (siblings of `FormatRatePerMin`; `FormatCount` /
@@ -169,9 +178,14 @@ with sensitive-value masking).
 
 ## 8. Ticker discipline
 
-The 1-second ticker keeps rewriting only time-relative text. New duty: when
+The 1-second ticker keeps rewriting only time-relative text. New duties
+(DECISION_LOG 2026-11-03): the countdown labels (row title, Overview
+countdown line) rewrite the burn-out estimate component per second through
+`PaceVM.ExhaustText` and drop it at the reset; when
 `Pace.ProjectionExpired(now)` flips, hide/restore the projection caption
-part and bar in place. No projection recomputation, no object rebuilding, no
+part and bar in place. The affected labels are `widget.RichText`; same-
+shaped segment updates mutate the existing segments so the canvas object
+tree stays identical. No projection recomputation, no object rebuilding, no
 full re-render.
 
 ## 9. Test matrix

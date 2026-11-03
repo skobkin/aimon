@@ -1,8 +1,8 @@
 // Pace view models: the pure-data bridge between the derived estimates of
 // internal/pace and the rendered quota rows, donuts and spend cards (S7).
-// Everything here is plain data; the only time-relative method,
-// ProjectionExpired, feeds the monitor's per-second ticker so the ticker
-// never recomputes and never rebuilds.
+// Everything here is plain data; the time-relative methods (Projection-
+// Expired, ExhaustText) feed the monitor's per-second ticker so the
+// ticker never recomputes and never rebuilds.
 package ui
 
 import (
@@ -36,6 +36,11 @@ type PaceVM struct {
 	LastUsed  float64
 	LastAt    time.Time
 	ResetAt   *time.Time
+	// ExhaustAt estimates when the used fraction reaches 100% at the
+	// current speed — set only when that lands strictly before ResetAt
+	// (the raw projection then exceeds 100%) and the speed is positive.
+	// Nil otherwise; like the projection, constant between samples.
+	ExhaustAt *time.Time
 }
 
 // ProjectionExpired reports whether the projection has gone stale: once the
@@ -47,9 +52,34 @@ func (vm PaceVM) ProjectionExpired(now time.Time) bool {
 	return vm.ResetAt != nil && !now.Before(*vm.ResetAt)
 }
 
+// ExhaustText renders the burn-out estimate component of the countdown
+// label ("≈1h35m"): the estimated remaining time until the quota is
+// exhausted at the current speed, when that lands strictly before
+// resetAt. Empty without an estimate, without a known reset, or once now
+// has reached resetAt — the plain reset countdown replaces the whole
+// combined label at the window reset, exactly like the projection it
+// mirrors. Nil-receiver safe: pace-less windows call it through a nil
+// Pace. Pure function — takes an explicit now.
+func (vm *PaceVM) ExhaustText(resetAt *time.Time, now time.Time) string {
+	if vm == nil || vm.ExhaustAt == nil || resetAt == nil {
+		return ""
+	}
+	if !now.Before(*resetAt) || !vm.ExhaustAt.Before(*resetAt) {
+		return ""
+	}
+	d := vm.ExhaustAt.Sub(now)
+	if d < 0 {
+		d = 0
+	}
+
+	return "≈" + formatCountdown(d)
+}
+
 // buildPaceVM derives the pace VM of one quota window estimate. now stamps
 // the projection's freshness: a projection already past its reset renders
-// as non-projectable and the ticker has nothing to hide.
+// as non-projectable and the ticker has nothing to hide. A projectable
+// estimate also stamps ExhaustAt when the quota would die before the
+// reset at the current speed.
 func buildPaceVM(est pace.Estimate, now time.Time) *PaceVM {
 	vm := &PaceVM{
 		State:     est.State,
@@ -83,6 +113,17 @@ func buildPaceVM(est pace.Estimate, now time.Time) *PaceVM {
 		}
 		vm.Projected = projected
 		vm.ProjectedText = "≈" + formatProjectedPct(projected) + " at reset"
+		// The burn-out estimate mirrors the projection: with a positive
+		// speed it is set exactly when the raw projection exceeds 100%,
+		// i.e. the quota dies before this window resets. Comparing in
+		// hours before the Duration conversion keeps a near-zero speed
+		// from overflowing the int64 nanoseconds.
+		if est.SpeedFrac > 0 {
+			if hrs := (1 - est.LastUsed) / est.SpeedFrac; hrs < est.ResetAt.Sub(est.LastAt).Hours() {
+				exhaust := est.LastAt.Add(time.Duration(hrs * float64(time.Hour)))
+				vm.ExhaustAt = &exhaust
+			}
+		}
 	}
 
 	return vm

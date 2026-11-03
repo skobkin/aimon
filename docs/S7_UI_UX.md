@@ -17,12 +17,19 @@ Pace 3.4%/h · ≈68% at reset
 2051 / 12.0k credits                  <- Secondary (unchanged)
 ```
 
+When the current pace would exhaust the window before its reset, the
+title's countdown gains the burn-out estimate, rendered in the theme's
+error color: `5-hour · ≈1h35m / 2h14m` — an estimated `1h35m` of quota
+left against `2h14m` until the window resets. Without an exhausting pace
+the title renders exactly as above.
+
 Caption wording by state:
 
 | State | Caption |
 |---|---|
 | Active | `Pace 3.4%/h · ≈68% at reset` (projection part only when projectable) |
 | Active, counts | `Pace 12.4k credits/h · ≈68% at reset` |
+| Active, over 100% | `Pace 20%/h · ≈146% at reset` (projection part in the error color) |
 | Idle | `Pace 0%/h · ≈17% at reset` |
 | Collecting | `Pace collecting…` |
 | Unavailable | `Pace —` |
@@ -43,6 +50,9 @@ caption. No speed text in Overview.
   [██████░░░░]   [████░░░░░░]
   ≈68% at reset  ≈74% at reset
 ```
+
+When a window's pace would exhaust it before the reset, its countdown
+line gains the error-colored burn-out estimate: `5h · ≈1h35m / 2h14m`.
 
 Windows without a usable projection (no ResetAt, not Active/Idle) show
 nothing extra — the column simply ends shorter. Columns are top-aligned,
@@ -66,7 +76,11 @@ Non-pace sources render exactly as before.
 
 Existing rules apply unchanged: threshold colors remain remaining-based, text
 is always present, and pace state is never communicated by color alone. The
-pace caption is plain foreground text; no status color is assigned to pace.
+pace caption is otherwise plain foreground text; the only status color on
+pace is the theme error color, reserved for genuine overage — the
+projection caption past 100% and the burn-out estimate in the countdown
+lines (DECISION_LOG 2026-11-03). The `≈` marker keeps the estimate legible
+without color.
 
 ## Settings
 
@@ -84,8 +98,9 @@ Unselected falls back to the 20m default. Other kinds show no pace control.
 The reset countdown keeps ticking per second as today. When the countdown
 reaches the window reset, the projection caption part and bar hide in place
 (no recompute, no rebuild) and stay hidden until a fresh successful poll
-brings a new sample; the quota row itself keeps its last-good display and
-error handling.
+brings a new sample; the burn-out estimate drops together with them — the
+countdown line falls back to the plain reset countdown (`5-hour · now`).
+The quota row itself keeps its last-good display and error handling.
 
 ## Explicitly out of scope
 

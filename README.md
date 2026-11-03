@@ -18,9 +18,11 @@ you use — without ever opening a browser tab.
 - Usage pace for subscription quotas: how fast a quota window is burning
   ("Pace 3.4%/h") and where the usage is heading by the window's reset
   ("≈68% at reset", with a red overflow segment when the projection passes
-  100%). OpenRouter shows a spend speed in $/h. Estimates derive from a
-  bounded in-memory history; the estimation window (10–60 minutes) is
-  configurable per source.
+  100%). When a quota would run out before the reset at the current burn,
+  the countdown shows how long it lasts: "≈1h35m / 4h45m" — estimated
+  quota time against time until reset. OpenRouter shows a spend speed in
+  $/h. Estimates derive from a bounded in-memory history; the estimation
+  window (10–60 minutes) is configurable per source.
 - Multiple instances per source: monitor several accounts or endpoints side by
   side, each with its own poll interval. The Add dialog explains what each
   kind monitors, existing instances can be duplicated with one click

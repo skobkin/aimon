@@ -173,12 +173,12 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 	for _, w := range vm.Windows {
 		col := container.NewVBox(NewQuotaDonut(w.PctText, w.Label, w.Used, w.Remaining))
 		if w.ResetAt != nil {
-			reset := widget.NewLabel(w.ResetText)
-			reset.Alignment = fyne.TextAlignCenter
+			reset := widget.NewRichText(countdownSegments(w.ExhaustText, w.ResetText)...)
 			col.Add(reset)
 			at := w.ResetAt
+			paceVM := w.Pace
 			ticks = append(ticks, func(now time.Time) {
-				setText(reset, ui.FormatResetCountdown(at, now))
+				setRichText(reset, countdownSegments(paceVM.ExhaustText(at, now), ui.FormatResetCountdown(at, now)))
 			})
 		}
 		// One compact projection line under a projectable donut: a thin
@@ -192,7 +192,10 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 			// projection can reach four digits ("≈1037% at reset"), and an
 			// unwrapped caption would widen the whole donut column past
 			// the window (the label-wrapping policy, docs/DECISION_LOG.md).
-			caption := NewWrappedLabel(pace.ProjectedText, fyne.TextAlignCenter, fyne.TextStyle{})
+			// A RichText so a projection past 100% renders in the error
+			// color, matching the bar's overflow segment.
+			caption := widget.NewRichText(projectionSeg(pace, fyne.TextAlignCenter))
+			caption.Wrapping = fyne.TextWrapWord
 			col.Add(bar)
 			col.Add(caption)
 			ticks = append(ticks, func(now time.Time) {
@@ -230,4 +233,23 @@ func NewQuotaOverviewBody(vm ui.QuotaOverviewVM) (fyne.CanvasObject, func(now ti
 	}
 
 	return body, tick
+}
+
+// countdownSegments renders the centered countdown line under a donut:
+// the reset countdown, prefixed by the burn-out estimate in the error
+// color when the current pace exhausts the window before the reset
+// ("≈1h35m / 2h14m"). Every segment is centered — the donut column
+// centers its text.
+func countdownSegments(exhaust, reset string) []widget.RichTextSegment {
+	if reset == "" {
+		return nil
+	}
+	center := fyne.TextAlignCenter
+	segs := []widget.RichTextSegment{}
+	if exhaust != "" {
+		segs = append(segs, errorSeg(exhaust, center, fyne.TextStyle{}), plainSeg(" / ", center, fyne.TextStyle{}))
+	}
+	segs = append(segs, plainSeg(reset, center, fyne.TextStyle{}))
+
+	return segs
 }

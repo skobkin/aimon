@@ -56,15 +56,18 @@ func TestQuotaOverviewBodyWithoutCountdownsHasNoTick(t *testing.T) {
 	}
 }
 
-// donutTexts collects label texts from an overview body tree. Concrete
-// cases must precede fyne.Widget: *widget.Label implements the Widget
-// interface and would otherwise match first.
+// donutTexts collects label and rich-text texts from an overview body
+// tree. Concrete cases must precede fyne.Widget: *widget.Label and
+// *widget.RichText implement the Widget interface and would otherwise
+// match first.
 func donutTexts(t *testing.T, obj fyne.CanvasObject) []string {
 	t.Helper()
 	var out []string
 	switch o := obj.(type) {
 	case *widget.Label:
 		out = append(out, o.Text)
+	case *widget.RichText:
+		out = append(out, richTextPlain(o))
 	case fyne.Widget:
 		for _, child := range test.TempWidgetRenderer(t, o).Objects() {
 			out = append(out, donutTexts(t, child)...)
@@ -157,11 +160,11 @@ func TestQuotaOverviewBodyPaceLine(t *testing.T) {
 	if slices.Contains(texts, "3.4%/h") {
 		t.Errorf("overview texts = %v, want no speed text in Overview", texts)
 	}
-	for _, l := range rowLabels(t, body) {
-		if l.Text == "≈51% at reset" && l.Wrapping != fyne.TextWrapWord {
+	for _, rt := range richTexts(t, body) {
+		if richTextPlain(rt) == "≈51% at reset" && rt.Wrapping != fyne.TextWrapWord {
 			// An unclamped projection can reach four digits; the caption
 			// must wrap instead of widening the donut column.
-			t.Errorf("projection caption wrapping = %v, want word wrap", l.Wrapping)
+			t.Errorf("projection caption wrapping = %v, want word wrap", rt.Wrapping)
 		}
 	}
 	bars := projectionBars(t, body)
@@ -172,8 +175,8 @@ func TestQuotaOverviewBodyPaceLine(t *testing.T) {
 	// Expiry: the caption and the bar hide together; the countdown keeps
 	// its column.
 	tick(at.Add(time.Hour))
-	for _, l := range rowLabels(t, body) {
-		if l.Text == "≈51% at reset" && !l.Hidden {
+	for _, rt := range richTexts(t, body) {
+		if richTextPlain(rt) == "≈51% at reset" && rt.Visible() {
 			t.Error("projection caption still visible after expiry")
 		}
 	}
@@ -201,9 +204,9 @@ func TestQuotaOverviewBodyWithoutPace(t *testing.T) {
 	if bars := projectionBars(t, body); len(bars) != 0 {
 		t.Errorf("projection bars = %d, want 0 without pace", len(bars))
 	}
-	for _, l := range rowLabels(t, body) {
-		if strings.HasPrefix(l.Text, "≈") {
-			t.Errorf("unexpected projection caption %q", l.Text)
+	for _, rt := range richTexts(t, body) {
+		if strings.HasPrefix(richTextPlain(rt), "≈") {
+			t.Errorf("unexpected projection caption %q", richTextPlain(rt))
 		}
 	}
 }
@@ -269,30 +272,30 @@ func requireDonutsTopAligned(t *testing.T, cols []*fyne.Container) {
 	}
 }
 
-// projectionCaption returns the column's "≈…" caption label, or nil.
-func projectionCaption(col *fyne.Container) *widget.Label {
+// projectionCaption returns the column's "≈…" caption rich text, or nil.
+func projectionCaption(col *fyne.Container) *widget.RichText {
 	for _, o := range col.Objects {
-		if l, ok := o.(*widget.Label); ok && strings.HasPrefix(l.Text, "≈") {
-			return l
+		if rt, ok := o.(*widget.RichText); ok && strings.HasPrefix(richTextPlain(rt), "≈") {
+			return rt
 		}
 	}
 
 	return nil
 }
 
-// countdownLabel returns the column's reset countdown label, the object
-// right under the donut.
-func countdownLabel(t *testing.T, col *fyne.Container) *widget.Label {
+// countdownLabel returns the column's reset countdown rich text, the
+// object right under the donut.
+func countdownLabel(t *testing.T, col *fyne.Container) *widget.RichText {
 	t.Helper()
 	if len(col.Objects) < 2 {
 		t.Fatalf("column has %d objects, want donut + countdown at least", len(col.Objects))
 	}
-	l, ok := col.Objects[1].(*widget.Label)
+	rt, ok := col.Objects[1].(*widget.RichText)
 	if !ok {
-		t.Fatalf("column object 1 = %T, want the countdown label", col.Objects[1])
+		t.Fatalf("column object 1 = %T, want the countdown rich text", col.Objects[1])
 	}
 
-	return l
+	return rt
 }
 
 // A window without a reset time or projection — a just-reset 5h quota —
@@ -419,4 +422,81 @@ func TestQuotaOverviewBodyKeepsDonutsLevelAcrossPaceExpiry(t *testing.T) {
 	tick(at.Add(time.Hour))
 	layoutOverview(t, body)
 	requireDonutsTopAligned(t, cols)
+}
+
+// The Overview countdown line prefixes the burn-out estimate as its own
+// error-colored segment: "≈35m / 1h0m". It clamps like the detail row's
+// and drops at the reset with the projection, while the neighbor column
+// keeps ticking its plain countdown.
+func TestQuotaOverviewBodyCountdownExhaust(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	reset := at.Add(time.Hour)
+	exhaust := at.Add(35 * time.Minute)
+	weekReset := at.Add(24 * time.Hour)
+	body, tick := NewQuotaOverviewBody(ui.QuotaOverviewVM{
+		HasData: true,
+		Windows: []ui.OverviewDonutVM{
+			{Label: "5h", PctText: "31%", Used: 0.31, Remaining: 0.69,
+				ResetText: "1h0m", ResetAt: &reset, ExhaustText: "≈35m",
+				Pace: &ui.PaceVM{
+					State: pace.StateActive, SpeedText: "3.4%/h",
+					CanProject: true, ProjectedText: "≈146% at reset", Projected: 1.46,
+					ResetAt: &reset, ExhaustAt: &exhaust,
+				}},
+			{Label: "week", PctText: "14%", Used: 0.14, Remaining: 0.86,
+				ResetText: "1d0h", ResetAt: &weekReset},
+		},
+	})
+
+	cols := overviewColumns(t, body)
+	cd := countdownLabel(t, cols[0])
+	if got := richTextPlain(cd); got != "≈35m / 1h0m" {
+		t.Fatalf("countdown = %q, want the combined label", got)
+	}
+	if got := errorSegmentTexts(cd); !slices.Equal(got, []string{"≈35m"}) {
+		t.Errorf("countdown error segments = %v, want the estimate alone", got)
+	}
+
+	// The estimate clamps at zero while the countdown keeps aging.
+	tick(at.Add(50 * time.Minute))
+	if got := richTextPlain(countdownLabel(t, cols[0])); got != "≈0s / 10m" {
+		t.Errorf("aged countdown = %q, want \"≈0s / 10m\"", got)
+	}
+
+	// At the reset the estimate drops together with the projection.
+	tick(reset)
+	if got := richTextPlain(countdownLabel(t, cols[0])); got != "now" {
+		t.Errorf("countdown at reset = %q, want \"now\"", got)
+	}
+	if !slices.Contains(donutTexts(t, body), "23h0m") {
+		t.Error("the other column's countdown stopped ticking")
+	}
+}
+
+// The Overview projection caption turns error-colored exactly past 100%,
+// mirroring the ProjectionBar's overflow segment.
+func TestQuotaOverviewBodyPaceCaptionColor(t *testing.T) {
+	at := time.Unix(1770000000, 0)
+	reset := at.Add(time.Hour)
+	body, _ := NewQuotaOverviewBody(ui.QuotaOverviewVM{
+		HasData: true,
+		Windows: []ui.OverviewDonutVM{
+			{Label: "5h", PctText: "31%", Used: 0.31, Remaining: 0.69,
+				ResetText: "1h0m", ResetAt: &reset,
+				Pace: &ui.PaceVM{
+					State: pace.StateActive, SpeedText: "3.4%/h",
+					CanProject: true, ProjectedText: "≈146% at reset", Projected: 1.46,
+					ResetAt: &reset,
+				}},
+		},
+	})
+
+	cols := overviewColumns(t, body)
+	caption := projectionCaption(cols[0])
+	if caption == nil {
+		t.Fatal("projection caption missing")
+	}
+	if got := errorSegmentTexts(caption); !slices.Equal(got, []string{"≈146% at reset"}) {
+		t.Errorf("caption error segments = %v, want the projection alone", got)
+	}
 }

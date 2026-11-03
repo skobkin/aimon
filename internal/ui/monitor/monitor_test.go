@@ -958,6 +958,15 @@ func allTexts(t *testing.T, obj fyne.CanvasObject) []string {
 		}
 	case *widget.Label:
 		out = append(out, o.Text)
+	case *widget.RichText:
+		// A rich text reads as one line: its segments concatenate into a
+		// single plain text (the row titles, countdown lines and pace
+		// captions carry colored sub-spans).
+		s := ""
+		for _, seg := range o.Segments {
+			s += seg.Textual()
+		}
+		out = append(out, s)
 	case *canvas.Text:
 		out = append(out, o.Text)
 	case fyne.Widget:

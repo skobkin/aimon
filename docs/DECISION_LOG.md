@@ -10,6 +10,37 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-03 — Pace burn-out estimate in the countdown labels; error-color accent for over-100% projections
+
+User-directed extension of the S7 pace presentation. The bars and the
+caption grammar keep their S7 shape; only the countdown labels and the
+accent of an over-100% projection change:
+
+1. **Burn-out estimate in the countdown.** The reset-countdown lines — the
+   Overview donut column and the detail row title — prefix a burn-out
+   estimate when the current speed would exhaust the quota strictly
+   before the reset: `≈1h35m / 4h45m` in Overview,
+   `5-hour · ≈1h35m / 2h14m` in the row title. The estimate is set
+   exactly when the raw projection exceeds 100% at a positive speed (an
+   equivalence, not a heuristic: exhaust < reset ⟺ LastUsed +
+   SpeedFrac·Δ > 1), clamps to `≈0s` once the quota is spent, and drops
+   at the window reset together with the projection. Without an
+   exhausting pace the labels render exactly as before — no placeholder,
+   no shape change. `PaceVM` gains `ExhaustAt` and the time-relative
+   `ExhaustText`; the countdown ticks write the combined label through
+   the shared countdown grammar.
+2. **Error-color accent via the theme.** The burn-out component and a
+   projection caption past 100% (`≈146% at reset`) render in the theme's
+   error color, mirroring the ProjectionBar's red overflow segment. The
+   affected labels (quota row titles, Overview countdown lines, pace
+   captions) therefore move from `widget.Label` to standard
+   `widget.RichText` with explicit text segments — no new custom widget.
+   Segment updates mutate existing segments in place, so the per-second
+   tick still leaves the canvas object tree identical. The fixed D9
+   threshold palette stays bar-fill-only; text colors resolve through
+   the theme. Color is never the only signal — the `≈` marker and the
+   values remain plain text.
+
 ## 2026-11-01 — Notification fixes: once-per-generation latching, "quota window reset" event
 
 Follow-up to the 2026-10-30 notification entry, driven by real-world

@@ -76,6 +76,10 @@ type QuotaWindowVM struct {
 	Name      string
 	UsedText  string
 	ResetText string // compact countdown, e.g. "2h14m"; empty when unknown
+	// ExhaustText is the optional burn-out estimate prefix of the
+	// countdown ("≈1h35m"): set only when the current pace exhausts the
+	// quota before ResetAt; empty otherwise. Rendered in the error color.
+	ExhaustText string
 	// ResetAt is the absolute reset instant ResetText was derived from.
 	// Carried so a rendered row can refresh its countdown as time passes
 	// without a tree rebuild; nil means no countdown.
@@ -222,6 +226,10 @@ type OverviewDonutVM struct {
 	Used      float64 // arc fraction
 	Remaining float64 // drives threshold color
 	ResetText string  // countdown below donut
+	// ExhaustText is the optional burn-out estimate prefix of the
+	// countdown ("≈1h35m / 2h14m"); empty without an exhausting pace.
+	// Rendered in the error color.
+	ExhaustText string
 	// ResetAt is the absolute instant ResetText was derived from, so the
 	// rendered countdown line can age in place; nil means no countdown.
 	ResetAt *time.Time
@@ -513,6 +521,7 @@ func BuildQuotaOverview(snap domain.QuotaSnapshot, ip pace.InstancePaces, now ti
 		}
 		if est, ok := ip.Windows[w.ID]; ok {
 			donut.Pace = buildPaceVM(est, now)
+			donut.ExhaustText = donut.Pace.ExhaustText(w.ResetAt, now)
 		}
 		vm.Windows = append(vm.Windows, donut)
 	}
@@ -763,6 +772,7 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Tim
 		}
 		if est, ok := ip.Windows[w.ID]; ok {
 			row.Pace = buildPaceVM(est, now)
+			row.ExhaustText = row.Pace.ExhaustText(w.ResetAt, now)
 		}
 		vm.Windows = append(vm.Windows, row)
 	}
@@ -788,6 +798,7 @@ func BuildCodexVM(snap domain.CodexSnapshot, ip pace.InstancePaces, now time.Tim
 		}
 		if est, ok := ip.Windows[w.ID]; ok {
 			row.Pace = buildPaceVM(est, now)
+			row.ExhaustText = row.Pace.ExhaustText(w.ResetAt, now)
 		}
 		vm.Windows = append(vm.Windows, row)
 	}
@@ -830,6 +841,7 @@ func BuildCodexOverview(snap domain.CodexSnapshot, ip pace.InstancePaces, now ti
 		}
 		if est, ok := ip.Windows[w.ID]; ok {
 			donut.Pace = buildPaceVM(est, now)
+			donut.ExhaustText = donut.Pace.ExhaustText(w.ResetAt, now)
 		}
 		vm.Windows = append(vm.Windows, donut)
 	}
@@ -1422,6 +1434,14 @@ func FormatResetCountdown(resetAt *time.Time, now time.Time) string {
 	if d <= 0 {
 		return "now"
 	}
+
+	return formatCountdown(d)
+}
+
+// formatCountdown renders a positive duration in the reset-countdown
+// grammar ("NNs", "NNm", "NhNNm", "NNdNNh"). Shared with the clamped
+// remaining-time half of the pace burn-out estimate.
+func formatCountdown(d time.Duration) string {
 	switch {
 	case d < time.Minute:
 		return fmt.Sprintf("%ds", int(d.Seconds()))

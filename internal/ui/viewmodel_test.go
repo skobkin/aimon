@@ -1315,3 +1315,174 @@ func TestPaceVMCaptions(t *testing.T) {
 		}
 	}
 }
+
+// The burn-out estimate mirrors the projection: with a positive speed it
+// is set exactly when the raw projection exceeds 100%, i.e. the quota
+// dies before the window resets. Zero speed, a safe pace, or a
+// non-projectable series never set it.
+func TestBuildPaceVMExhaustAt(t *testing.T) {
+	if vm := buildPaceVM(activeEst(), now); vm.ExhaustAt != nil {
+		t.Errorf("safe pace exhaust = %v, want nil (51%% projection)", vm.ExhaustAt)
+	}
+
+	// 0.5 + 1.0·1h = 1.5 ⇒ exhausts after exactly 30m (the fractions are
+	// binary-exact, so the instant compares cleanly).
+	over := activeEst()
+	over.LastUsed = 0.5
+	over.SpeedFrac = 1.0
+	vm := buildPaceVM(over, now)
+	if vm.ExhaustAt == nil || !vm.ExhaustAt.Equal(now.Add(30*time.Minute)) {
+		t.Fatalf("over-burning pace exhaust = %v, want %v", vm.ExhaustAt, now.Add(30*time.Minute))
+	}
+	if got := vm.ExhaustText(over.ResetAt, now); got != "≈30m" {
+		t.Errorf("exhaust text = %q, want \"≈30m\"", got)
+	}
+
+	// Exactly 100% at reset is not an exhaustion (strictly-before gate).
+	exact := activeEst()
+	exact.LastUsed = 0.5
+	exact.SpeedFrac = 0.5
+	if vm := buildPaceVM(exact, now); vm.ExhaustAt != nil {
+		t.Errorf("100%% projection exhaust = %v, want nil", vm.ExhaustAt)
+	}
+
+	// Already past 100%: the exhaust instant sits in the past and the
+	// label clamps to "≈0s".
+	spent := activeEst()
+	spent.LastUsed = 1.25
+	spent.SpeedFrac = 0.5
+	vm = buildPaceVM(spent, now)
+	if vm.ExhaustAt == nil || !vm.ExhaustAt.Equal(now.Add(-30*time.Minute)) {
+		t.Errorf("fully-used pace exhaust = %v, want %v", vm.ExhaustAt, now.Add(-30*time.Minute))
+	}
+	if got := vm.ExhaustText(spent.ResetAt, now); got != "≈0s" {
+		t.Errorf("exhausted label = %q, want \"≈0s\"", got)
+	}
+
+	// A zero speed never exhausts, even past 100% used.
+	idle := activeEst()
+	idle.LastUsed = 1.25
+	idle.SpeedFrac = 0
+	if vm := buildPaceVM(idle, now); vm.ExhaustAt != nil {
+		t.Errorf("zero-speed exhaust = %v, want nil", vm.ExhaustAt)
+	}
+
+	// Non-projectable series carry no estimate either.
+	if vm := buildPaceVM(pace.Estimate{State: pace.StateCollecting}, now); vm.ExhaustAt != nil {
+		t.Errorf("collecting exhaust = %v, want nil", vm.ExhaustAt)
+	}
+	noReset := activeEst()
+	noReset.ResetAt = nil
+	noReset.SpeedFrac = 1.0
+	if vm := buildPaceVM(noReset, now); vm.ExhaustAt != nil {
+		t.Errorf("reset-less exhaust = %v, want nil", vm.ExhaustAt)
+	}
+	stale := activeEst()
+	stale.ResetAt = &now
+	stale.SpeedFrac = 1.0
+	if vm := buildPaceVM(stale, now); vm.ExhaustAt != nil {
+		t.Errorf("stale exhaust = %v, want nil", vm.ExhaustAt)
+	}
+}
+
+// The countdown label's burn-out component: the estimated remaining time
+// clamped at zero, dropped without an estimate or once the window reset
+// is reached (the plain countdown takes over), nil-receiver safe.
+func TestPaceVMExhaustText(t *testing.T) {
+	reset := now.Add(time.Hour)
+	exhaust := now.Add(30 * time.Minute)
+	vm := &PaceVM{ExhaustAt: &exhaust}
+
+	if got := vm.ExhaustText(&reset, now); got != "≈30m" {
+		t.Errorf("exhaust text = %q, want \"≈30m\"", got)
+	}
+
+	// Nil receiver and missing inputs render nothing.
+	var nilVM *PaceVM
+	if got := nilVM.ExhaustText(&reset, now); got != "" {
+		t.Errorf("nil receiver = %q, want empty", got)
+	}
+	if got := (&PaceVM{}).ExhaustText(&reset, now); got != "" {
+		t.Errorf("no estimate = %q, want empty", got)
+	}
+	if got := vm.ExhaustText(nil, now); got != "" {
+		t.Errorf("nil reset = %q, want empty", got)
+	}
+
+	// Clamped at zero: an exhaust instant in the past reads "≈0s".
+	past := now.Add(-time.Minute)
+	if got := (&PaceVM{ExhaustAt: &past}).ExhaustText(&reset, now); got != "≈0s" {
+		t.Errorf("past exhaust = %q, want \"≈0s\"", got)
+	}
+
+	// Exhausting exactly at (or after) the reset is not an exhaustion:
+	// the plain countdown carries the label alone.
+	atReset := reset
+	if got := (&PaceVM{ExhaustAt: &atReset}).ExhaustText(&reset, now); got != "" {
+		t.Errorf("exhaust at reset = %q, want empty", got)
+	}
+	afterReset := reset.Add(time.Minute)
+	if got := (&PaceVM{ExhaustAt: &afterReset}).ExhaustText(&reset, now); got != "" {
+		t.Errorf("exhaust past reset = %q, want empty", got)
+	}
+
+	// At and past the window reset the estimate drops with the projection.
+	if got := vm.ExhaustText(&reset, reset); got != "" {
+		t.Errorf("at reset = %q, want empty", got)
+	}
+	if got := vm.ExhaustText(&reset, reset.Add(time.Minute)); got != "" {
+		t.Errorf("past reset = %q, want empty", got)
+	}
+
+	// The grammar stretches through the shared countdown formatter.
+	secs := now.Add(42 * time.Second)
+	if got := (&PaceVM{ExhaustAt: &secs}).ExhaustText(&reset, now); got != "≈42s" {
+		t.Errorf("seconds exhaust = %q, want \"≈42s\"", got)
+	}
+	days := now.Add(26 * time.Hour)
+	longReset := reset.Add(48 * time.Hour)
+	if got := (&PaceVM{ExhaustAt: &days}).ExhaustText(&longReset, now); got != "≈1d2h" {
+		t.Errorf("multi-day exhaust = %q, want \"≈1d2h\"", got)
+	}
+}
+
+// The burn-out estimate folds into the row and donut VMs with the pace: a
+// window whose pace exhausts before the reset carries ExhaustText; a
+// pace-less window keeps it empty.
+func TestBuildQuotaVMExhaustTextFold(t *testing.T) {
+	over := activeEst()
+	over.LastUsed = 0.5
+	over.SpeedFrac = 1.0 // exhausts after 30m, reset in 1h
+	reset := now.Add(time.Hour)
+	snap := domain.QuotaSnapshot{
+		Kind: domain.KindMiniMax,
+		Windows: []domain.QuotaWindow{
+			{ID: "interval", Name: "5-hour", UsedFraction: 0.5, RemainingFraction: 0.5, ResetAt: &reset},
+			{ID: "other", Name: "Month", UsedFraction: 0.1, RemainingFraction: 0.9},
+		},
+	}
+	ip := pace.InstancePaces{Windows: map[string]pace.Estimate{"interval": over}}
+
+	vm := BuildQuotaVM(snap, ip, now, false)
+	if got := vm.Windows[0].ExhaustText; got != "≈30m" {
+		t.Errorf("quota row exhaust text = %q, want \"≈30m\"", got)
+	}
+	if vm.Windows[1].Pace != nil || vm.Windows[1].ExhaustText != "" {
+		t.Errorf("pace-less row = %+v / %q, want no pace and no estimate", vm.Windows[1].Pace, vm.Windows[1].ExhaustText)
+	}
+
+	om := BuildQuotaOverview(snap, ip, now)
+	if got := om.Windows[0].ExhaustText; got != "≈30m" {
+		t.Errorf("overview exhaust text = %q, want \"≈30m\"", got)
+	}
+
+	cs := domain.CodexSnapshot{Windows: snap.Windows}
+	cm := BuildCodexVM(cs, ip, now, false)
+	if got := cm.Windows[0].ExhaustText; got != "≈30m" {
+		t.Errorf("codex row exhaust text = %q, want \"≈30m\"", got)
+	}
+	co := BuildCodexOverview(cs, ip, now)
+	if got := co.Windows[0].ExhaustText; got != "≈30m" {
+		t.Errorf("codex overview exhaust text = %q, want \"≈30m\"", got)
+	}
+}
