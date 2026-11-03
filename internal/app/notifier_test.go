@@ -420,11 +420,17 @@ func TestNotifierQueueDropsInsteadOfBlocking(t *testing.T) {
 	stop := make(chan struct{})
 	var mu sync.Mutex
 	count := 0
+	// parked closes on the first Send entry: the drop arithmetic below is
+	// only sound once the worker is provably parked, so the producer must
+	// wait for it instead of racing the scheduler (CI flake, 2026-11-04).
+	parked := make(chan struct{})
+	var parkOnce sync.Once
 	n := newNotifier(slog.New(slog.NewTextHandler(io.Discard, nil)), notifierConfig{
 		Master:    func() bool { return true },
 		Low:       func() bool { return true },
 		Exhausted: func() bool { return true },
 		Send: func(title, content string) {
+			parkOnce.Do(func() { close(parked) })
 			select {
 			case <-release:
 			case <-stop:
@@ -442,14 +448,22 @@ func TestNotifierQueueDropsInsteadOfBlocking(t *testing.T) {
 		n.Close()
 	}()
 
-	// The worker pulls the first event and parks inside its Send; the
-	// remaining enqueues must all return without blocking. Each event
-	// carries its own fresh window so every one of them would fire — the
-	// edge-triggered latches must not mask the drop being tested.
+	// Enqueue the first event up front, then wait for the worker to park
+	// inside its Send — only then is the queue empty with all 16 slots
+	// free, and the drop arithmetic exact. The remaining enqueues must all
+	// return without blocking. Each event carries its own fresh window so
+	// every one of them would fire — the edge-triggered latches must not
+	// mask the drop being tested.
+	n.Enqueue("MiniMax", "mm", []domain.QuotaWindow{qWindow("w0", 0.05)})
+	select {
+	case <-parked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never parked inside Send")
+	}
 	filled := make(chan struct{})
 	go func() {
 		defer close(filled)
-		for i := 0; i < notifyQueueLen+2; i++ {
+		for i := 1; i < notifyQueueLen+2; i++ {
 			n.Enqueue("MiniMax", "mm", []domain.QuotaWindow{qWindow(fmt.Sprintf("w%d", i), 0.05)})
 		}
 	}()
