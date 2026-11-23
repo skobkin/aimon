@@ -103,6 +103,7 @@ type sourceRecord struct {
 	OpenRouter *openRouterRecord `json:"openrouter,omitempty"`
 	Codex      *codexRecord      `json:"codex,omitempty"`
 	Kimi       *kimiRecord       `json:"kimi,omitempty"`
+	Claude     *claudeRecord     `json:"claude,omitempty"`
 }
 
 type amdGPUWebRecord struct {
@@ -126,6 +127,11 @@ type zaiRecord struct {
 }
 
 type openRouterRecord struct{}
+
+// claudeRecord persists the Claude Code login file path; empty carries the default.
+type claudeRecord struct {
+	CredentialsFile string `json:"login_file,omitempty"`
+}
 
 // kimiRecord persists the region; empty carries the default (global).
 type kimiRecord struct {
@@ -393,6 +399,10 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 		if rec.Kimi != nil {
 			inst.Kimi = &KimiSettings{Region: KimiRegion(rec.Kimi.Region)}
 		}
+	case domain.KindClaude:
+		if rec.Claude != nil {
+			inst.Claude = &ClaudeSettings{CredentialsFile: rec.Claude.CredentialsFile}
+		}
 	default:
 		return SourceInstance{}, fmt.Errorf("unknown source kind %q", rec.Kind)
 	}
@@ -443,6 +453,10 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 				r.Env = append(r.Env, envRecord(env))
 			}
 			rec.Codex = r
+		}
+	case domain.KindClaude:
+		if inst.Claude != nil {
+			rec.Claude = &claudeRecord{CredentialsFile: inst.Claude.CredentialsFile}
 		}
 	case domain.KindKimi:
 		if inst.Kimi != nil {

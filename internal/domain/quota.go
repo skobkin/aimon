@@ -38,6 +38,22 @@ type QuotaSnapshot struct {
 	CollectedAt time.Time
 	Plan        string
 	Windows     []QuotaWindow
+	// ExtraUsage is the optional paid overage state (claude.ai); nil when
+	// the provider reports none.
+	ExtraUsage *QuotaExtraUsage
+}
+
+// QuotaExtraUsage is the paid extra-usage (overage) state of a plan.
+// Amounts are in major currency units, already converted from the
+// provider's minor units; nil means the provider did not report the value.
+type QuotaExtraUsage struct {
+	Enabled bool
+	Used    *float64
+	Limit   *float64
+	// Utilization is the used percentage 0–100 as reported, when present.
+	Utilization *float64
+	// Currency is the ISO 4217 code; empty when unknown.
+	Currency string
 }
 
 // SnapshotKind implements Snapshot.

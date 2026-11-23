@@ -100,6 +100,9 @@ type QuotaWindowVM struct {
 type QuotaVM struct {
 	Windows []QuotaWindowVM
 	Account []MetricRowVM
+	// Money holds account-level money rows (claude.ai extra usage); they
+	// are Sensitive and follow the privacy setting. Detail view only.
+	Money []MoneyMetricVM
 }
 
 // MoneyMetricVM is one labeled money row. Sensitive marks account-level
@@ -352,7 +355,7 @@ func cardKind(kind domain.SourceKind) CardKind {
 		return KindGPU
 	case domain.KindLlamaSwap:
 		return KindSwap
-	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindKimi:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindKimi, domain.KindClaude:
 		return KindQuota
 	case domain.KindOpenRouter:
 		return KindSpend
@@ -370,7 +373,7 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 		return OverviewMetrics
 	case domain.KindLlamaSwap:
 		return OverviewRuntime
-	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindKimi:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindKimi, domain.KindClaude:
 		return OverviewQuota
 	case domain.KindOpenRouter:
 		return OverviewSpend
@@ -538,9 +541,9 @@ func BuildQuotaOverview(snap domain.QuotaSnapshot, ip pace.InstancePaces, now ti
 // shortLabel maps a quota window ID to a compact label for the donut.
 func shortLabel(w domain.QuotaWindow) string {
 	switch w.ID {
-	case "interval", "tokens-5h", "credits-5h", "kimi-5h":
+	case "interval", "tokens-5h", "credits-5h", "kimi-5h", "claude-5h":
 		return "5h"
-	case "weekly", "credits-weekly", "kimi-weekly":
+	case "weekly", "credits-weekly", "kimi-weekly", "claude-7d":
 		return "week"
 	case "mcp-monthly", "kimi-monthly":
 		return "month"
@@ -573,9 +576,9 @@ func codexShortName(name string) string {
 func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 	priority := func(id string) int {
 		switch id {
-		case "interval", "tokens-5h", "credits-5h", "codex-primary", "kimi-5h":
+		case "interval", "tokens-5h", "credits-5h", "codex-primary", "kimi-5h", "claude-5h":
 			return 0
-		case "weekly", "credits-weekly", "codex-secondary", "kimi-weekly":
+		case "weekly", "credits-weekly", "codex-secondary", "kimi-weekly", "claude-7d":
 			return 1
 		default:
 			return 2
@@ -766,6 +769,9 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Tim
 	if detail && snap.Plan != "" {
 		vm.Account = append(vm.Account, MetricRowVM{Label: "Plan", Value: snap.Plan})
 	}
+	if detail && snap.ExtraUsage != nil {
+		vm.Money = append(vm.Money, extraUsageRow(*snap.ExtraUsage))
+	}
 	for _, w := range snap.Windows {
 		row := QuotaWindowVM{
 			Name:      w.Name,
@@ -786,6 +792,47 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Tim
 	}
 
 	return vm
+}
+
+// extraUsageRow renders the paid extra-usage state: "Off", "used / limit
+// CUR (N%)", or just the used amount when no limit is reported. The row is
+// money-sensitive like OpenRouter's account rows.
+func extraUsageRow(x domain.QuotaExtraUsage) MoneyMetricVM {
+	row := MoneyMetricVM{Label: "Extra usage", Sensitive: true}
+	if !x.Enabled {
+		row.Text = "Off"
+
+		return row
+	}
+	// FormatMoney renders dollars; any other currency shows the bare
+	// number followed by its ISO code.
+	amount := func(v float64) string {
+		if x.Currency == "" || x.Currency == "USD" {
+			return FormatMoney(v)
+		}
+
+		return strings.TrimPrefix(FormatMoney(v), "$")
+	}
+	suffix := ""
+	if x.Currency != "" && x.Currency != "USD" {
+		suffix = " " + x.Currency
+	}
+	switch {
+	case x.Used != nil && x.Limit != nil:
+		row.Text = amount(*x.Used) + " / " + amount(*x.Limit) + suffix
+	case x.Used != nil:
+		row.Text = amount(*x.Used) + suffix
+	default:
+		row.Text = "On"
+	}
+	switch {
+	case x.Utilization != nil:
+		row.Text += fmt.Sprintf(" (%d%%)", int(math.Round(*x.Utilization)))
+	case x.Used != nil && x.Limit != nil && *x.Limit > 0:
+		row.Text += fmt.Sprintf(" (%d%%)", int(math.Round(*x.Used / *x.Limit * 100)))
+	}
+
+	return row
 }
 
 // BuildCodexVM derives a ChatGPT Codex card from its snapshot: the shared

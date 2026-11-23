@@ -29,6 +29,7 @@ const (
 	KindOpenRouter SourceKind = "openrouter"
 	KindCodex      SourceKind = "codex"
 	KindKimi       SourceKind = "kimi"
+	KindClaude     SourceKind = "claude"
 )
 
 // Category reports where the source runs. Source kinds are compile-time
@@ -44,7 +45,7 @@ func (kind SourceKind) Category() Category {
 	switch kind {
 	case KindAMDGPUWeb, KindLlamaSwap, KindHindsight:
 		return CategoryLocal
-	case KindMiniMax, KindZAI, KindOpenRouter, KindCodex, KindKimi:
+	case KindMiniMax, KindZAI, KindOpenRouter, KindCodex, KindKimi, KindClaude:
 		return CategoryRemote
 	default:
 		return CategoryRemote

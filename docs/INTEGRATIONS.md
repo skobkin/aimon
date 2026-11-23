@@ -292,6 +292,36 @@ The endpoint is what Kimi Code CLI's `/usage` command calls. It is undocumented;
 
 Remote ladder (default 60s, minimum 30s); one usage request per refresh plus the rare `/me`.
 
+## 5b. Claude (claude.ai subscription)
+
+Added 2026-11-23 (see `docs/DECISION_LOG.md`).
+
+### API stability warning
+
+`GET https://api.anthropic.com/api/oauth/usage?skip_spend=1` is the endpoint Claude Code's own `/usage` screen calls. It is undocumented: every field is nullable and unknown fields are ignored. Headers: `Authorization: Bearer <accessToken>`, `anthropic-beta: oauth-2025-04-20`. Timeout 5 s.
+
+### Credential
+
+No keychain slot. The adapter reads Claude Code's login file (default `~/.claude/.credentials.json`, configurable) fresh on every refresh and decodes only `claudeAiOauth.{accessToken, expiresAt, subscriptionType}`; the refresh token and `mcpOAuth` entries are never read and the raw text is not retained.
+
+- **Never refresh the token** (that rotates the refresh token and logs Claude Code out).
+- Expired token (`expiresAt <= now`): no request; `token expired, run claude to refresh`.
+- 401/403: re-read once; retry only when the token changed; otherwise `auth rejected, run claude to log in again`.
+- Other fixed messages: `credentials file missing`, `credentials file invalid`, `no claude.ai login in credentials`.
+- File contents, parse errors, the token, headers and bodies never reach errors, logs or the UI.
+
+### Quota normalization
+
+- `claude-5h` "5-hour" ← `five_hour`; `claude-7d` "Weekly" ← `seven_day`: used = `utilization / 100`, clamped to [0,1] (the domain contract), `resets_at` as the reset time. Fraction-only, so pace shows `%/h`.
+- `claude-model-<slug>` "<Model> weekly" ← `seven_day_opus`, `seven_day_sonnet`, then `limits[]` entries with `kind = weekly_scoped`, deduplicated by case-insensitive name (40 characters max). `seven_day_oauth_apps` is ignored.
+- Neither headline window present is an invalid-response error.
+- Plan label ← `subscriptionType` (capitalized).
+- Extra usage ← `extra_usage`: amounts are minor units (divided by 100, except JPY/KRW/VND); shown in detail only, as a privacy-masked row.
+
+### Polling
+
+Own ladder 5 / 10 / 15 / 30 min (default 5 min; Claude Code caches the endpoint for 5 min). On HTTP 429 the adapter makes no requests for twice the configured interval and reports `Rate limited`.
+
 ## 6. Credential storage
 
 Use the same general design already proven in `skobkin/qBtRemoteGo`:

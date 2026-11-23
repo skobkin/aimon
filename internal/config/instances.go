@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,6 +53,7 @@ type SourceInstance struct {
 	OpenRouter *OpenRouterSettings
 	Codex      *CodexSettings
 	Kimi       *KimiSettings
+	Claude     *ClaudeSettings
 }
 
 // AMDGPUWebSettings are the amdgputop-web settings.
@@ -121,6 +124,34 @@ func (s KimiSettings) BaseURL() string {
 	return KimiGlobalURL
 }
 
+// DefaultClaudeCredentialsFile is where Claude Code keeps its login on
+// Linux.
+const DefaultClaudeCredentialsFile = "~/.claude/.credentials.json"
+
+// ClaudeSettings are the claude.ai subscription settings. There are no
+// keychain slots: the Claude Code CLI owns the OAuth login, and AI Monitor
+// only reads the access token from its credentials file (read-only, never
+// refreshing it). An empty path means DefaultClaudeCredentialsFile.
+type ClaudeSettings struct {
+	CredentialsFile string
+}
+
+// EffectiveCredentialsFile returns the credentials file path with the
+// default filled in and a leading "~/" expanded.
+func (s ClaudeSettings) EffectiveCredentialsFile() string {
+	path := strings.TrimSpace(s.CredentialsFile)
+	if path == "" {
+		path = DefaultClaudeCredentialsFile
+	}
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+
+	return path
+}
+
 // OpenRouterSettings are the OpenRouter settings. The API endpoints are
 // fixed and the two credentials live in keychain slots, so — like MiniMax —
 // there is nothing to configure beyond the common fields.
@@ -170,6 +201,7 @@ func (ZAISettings) providerSettings()        {}
 func (OpenRouterSettings) providerSettings() {}
 func (CodexSettings) providerSettings()      {}
 func (KimiSettings) providerSettings()       {}
+func (ClaudeSettings) providerSettings()     {}
 
 // EffectiveCodexExecutable returns the configured launcher, filling the
 // default for an empty value.
@@ -227,6 +259,10 @@ func (i SourceInstance) Settings() (ProviderSettings, bool) {
 	case domain.KindKimi:
 		if i.Kimi != nil {
 			return *i.Kimi, true
+		}
+	case domain.KindClaude:
+		if i.Claude != nil {
+			return *i.Claude, true
 		}
 	}
 
@@ -302,9 +338,12 @@ func (i SourceInstance) Validate() []ValidationError {
 	if i.Kimi != nil {
 		set++
 	}
+	if i.Claude != nil {
+		set++
+	}
 
 	switch i.Kind {
-	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex, domain.KindKimi:
+	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex, domain.KindKimi, domain.KindClaude:
 	default:
 		errs = append(errs, ValidationError{Source: label, Field: "Kind", Message: fmt.Sprintf("unknown source kind %q", string(i.Kind))})
 	}
@@ -356,6 +395,10 @@ func (i SourceInstance) Validate() []ValidationError {
 		} else {
 			errs = append(errs, validateCodexSettings(label, *i.Codex)...)
 		}
+	case domain.KindClaude:
+		if i.Claude == nil {
+			errs = append(errs, mismatchSettings(label))
+		}
 	case domain.KindKimi:
 		if i.Kimi == nil {
 			errs = append(errs, mismatchSettings(label))
@@ -393,7 +436,7 @@ func validatePaceWindow(source string, d time.Duration, presets []time.Duration)
 // PaceWindow field is never read.
 func PaceCapable(kind domain.SourceKind) bool {
 	switch kind {
-	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindOpenRouter, domain.KindKimi:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindOpenRouter, domain.KindKimi, domain.KindClaude:
 		return true
 	}
 
@@ -435,6 +478,9 @@ func KindIntervals(kind domain.SourceKind) []time.Duration {
 	}
 	if kind == domain.KindCodex {
 		return CodexIntervals
+	}
+	if kind == domain.KindClaude {
+		return ClaudeIntervals
 	}
 	if kind.Category() == domain.CategoryLocal {
 		return LocalIntervals
@@ -538,6 +584,10 @@ func SameSettings(a, b ProviderSettings) bool {
 		_, ok := b.(OpenRouterSettings)
 
 		return ok
+	case ClaudeSettings:
+		bv, ok := b.(ClaudeSettings)
+
+		return ok && av.EffectiveCredentialsFile() == bv.EffectiveCredentialsFile()
 	case KimiSettings:
 		bv, ok := b.(KimiSettings)
 

@@ -217,3 +217,25 @@ func TestQuotaKindsStayUntouched(t *testing.T) {
 		t.Fatalf("minimax account rows = %+v", vm.Account)
 	}
 }
+
+func TestExtraUsageRow(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name string
+		x    domain.QuotaExtraUsage
+		want string
+	}{
+		{"off", domain.QuotaExtraUsage{}, "Off"},
+		{"limit+util", domain.QuotaExtraUsage{Enabled: true, Used: f(3.2), Limit: f(50), Utilization: f(6.4), Currency: "USD"}, "$3.20 / $50.00 (6%)"},
+		{"derived pct", domain.QuotaExtraUsage{Enabled: true, Used: f(5), Limit: f(50)}, "$5.00 / $50.00 (10%)"},
+		{"no limit", domain.QuotaExtraUsage{Enabled: true, Used: f(2.5), Currency: "EUR"}, "2.50 EUR"},
+		{"eur limit", domain.QuotaExtraUsage{Enabled: true, Used: f(2.5), Limit: f(20), Currency: "EUR"}, "2.50 / 20.00 EUR (13%)"},
+		{"on only", domain.QuotaExtraUsage{Enabled: true}, "On"},
+	}
+	for _, c := range cases {
+		row := extraUsageRow(c.x)
+		if row.Text != c.want || !row.Sensitive || row.Label != "Extra usage" {
+			t.Errorf("%s: %+v, want text %q", c.name, row, c.want)
+		}
+	}
+}

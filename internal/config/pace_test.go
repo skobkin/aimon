@@ -32,6 +32,7 @@ func TestPaceCapable(t *testing.T) {
 		{domain.KindCodex, true},
 		{domain.KindOpenRouter, true},
 		{domain.KindKimi, true},
+		{domain.KindClaude, true},
 		{domain.KindAMDGPUWeb, false},
 		{domain.KindLlamaSwap, false},
 		{domain.KindHindsight, false},

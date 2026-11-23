@@ -19,6 +19,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
 	"git.skobk.in/skobkin/aimonitor/internal/source"
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
+	"git.skobk.in/skobkin/aimonitor/internal/source/claude"
 	"git.skobk.in/skobkin/aimonitor/internal/source/codex"
 	"git.skobk.in/skobkin/aimonitor/internal/source/hindsight"
 	"git.skobk.in/skobkin/aimonitor/internal/source/kimi"
@@ -32,6 +33,7 @@ import (
 // the API endpoints the adapters poll).
 const (
 	MiniMaxConsoleURL     = "https://platform.minimax.io/console/usage"
+	ClaudeUsageURL        = "https://claude.ai/settings/usage"
 	ZAIUsageURL           = "https://z.ai/manage-apikey/coding-plan/personal/usage"
 	OpenRouterActivityURL = "https://openrouter.ai/activity"
 )
@@ -368,6 +370,44 @@ var definitions = []Definition{
 		},
 		// No verified stable console URL for the plan; no web button.
 		WebURL: noWebURL,
+	},
+	{
+		Kind:            domain.KindClaude,
+		Category:        domain.CategoryRemote,
+		DefaultName:     "Claude",
+		Description:     "claude.ai subscription usage, read from your Claude Code login (never refreshed).",
+		DefaultInterval: config.DefaultClaudeInterval,
+		Intervals:       config.ClaudeIntervals,
+		// No credential slots: Claude Code owns the OAuth login; the
+		// adapter only reads its access token, read-only.
+		WebLabel: "Claude usage",
+		DefaultSettings: func() config.ProviderSettings {
+			return config.ClaudeSettings{}
+		},
+		Build: func(inst config.SourceInstance, deps Deps) (source.Source, error) {
+			s := inst.Claude
+			if s == nil {
+				return nil, missingSettings(inst)
+			}
+
+			return claude.New(s.EffectiveCredentialsFile(), inst.PollInterval, deps.Client, deps.Log), nil
+		},
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
+			s := inst.Claude
+			if s == nil {
+				return failedTestReport(missingSettings(inst))
+			}
+			_, err := claude.New(s.EffectiveCredentialsFile(), inst.PollInterval, deps.Client, deps.Log).Refresh(ctx)
+
+			return singleTestReport(err)
+		},
+		WebURL: func(inst config.SourceInstance) (string, bool) {
+			if inst.Claude == nil {
+				return "", false
+			}
+
+			return ClaudeUsageURL, true
+		},
 	},
 	{
 		Kind:            domain.KindOpenRouter,

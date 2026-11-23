@@ -10,6 +10,33 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-23 — Claude (claude.ai subscription) source (issue #12)
+
+User-directed new remote kind `claude`, following the issue and the Herdr
+`provider-usage` mod:
+
+1. **Reads a CLI-owned credentials file.** The kind reads the OAuth access
+   token from Claude Code's `~/.claude/.credentials.json` (configurable).
+   This is specific to this kind: `docs/S6_AGENT_RULES.md` still forbids
+   reading Codex auth files, and no secret is stored by AI Monitor (no
+   keychain slot, nothing in Preferences). The token is never refreshed,
+   only `accessToken`, `expiresAt` and `subscriptionType` are decoded, and
+   all errors are fixed strings.
+2. **Own 5-minute ladder** (5/10/15/30 min, default 5 min), because Claude
+   Code caches the endpoint for five minutes.
+3. **Adapter-level 429 backoff.** The rest of the app has none; this kind
+   pauses requests for twice the interval after a 429, returning the
+   rate-limited error so the last snapshot stays visible as stale. No
+   retries are added.
+4. **Utilization above 100 is clamped** to 1.0 in `QuotaWindow` (the
+   [0,1] contract of pace, donuts and the notifier), deviating from the
+   issue's "do not clamp for projection".
+5. **Per-model weekly limits are extra windows** (`claude-model-*`), with
+   bars and pace in detail; Overview keeps its two headline donuts.
+6. **`QuotaSnapshot.ExtraUsage`** carries the paid overage state; the
+   detail card shows it as a `Sensitive` money row that follows the
+   privacy setting.
+
 ## 2026-11-23 — Kimi Code plan source (issue #8)
 
 User-directed new remote kind `kimi`, following the research recorded on

@@ -50,6 +50,8 @@ func newDraft(kind domain.SourceKind) (config.SourceInstance, bool) {
 		inst.Codex = &s
 	case config.KimiSettings:
 		inst.Kimi = &s
+	case config.ClaudeSettings:
+		inst.Claude = &s
 	}
 
 	return inst, true
@@ -87,6 +89,8 @@ func duplicateInstance(inst config.SourceInstance) (config.SourceInstance, bool)
 			draft.Codex = &v
 		case config.KimiSettings:
 			draft.Kimi = &v
+		case config.ClaudeSettings:
+			draft.Claude = &v
 		}
 	}
 

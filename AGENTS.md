@@ -9,6 +9,7 @@ This project is a small, tray-first desktop monitor for:
 - MiniMax Token Plan quota;
 - Z.AI / GLM Coding Plan quota;
 - Kimi Code plan quota;
+- Claude (claude.ai subscription) usage limits;
 - OpenRouter account spend and key limits;
 - ChatGPT Codex plan usage;
 - Hindsight memory-service banks (rate and liveness).

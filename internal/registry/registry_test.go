@@ -23,8 +23,8 @@ import (
 
 func TestAllRegistersEveryKindOnce(t *testing.T) {
 	all := All()
-	if len(all) != 8 {
-		t.Fatalf("registered %d kinds, want 8", len(all))
+	if len(all) != 9 {
+		t.Fatalf("registered %d kinds, want 9", len(all))
 	}
 	seen := map[domain.SourceKind]bool{}
 	for _, d := range all {
@@ -33,7 +33,7 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 		}
 		seen[d.Kind] = true
 	}
-	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex, domain.KindKimi} {
+	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex, domain.KindKimi, domain.KindClaude} {
 		if !seen[kind] {
 			t.Errorf("kind %q missing from the registry", kind)
 		}
@@ -71,6 +71,7 @@ func TestDefinitionMetadata(t *testing.T) {
 		{domain.KindOpenRouter, domain.CategoryRemote, "OpenRouter", []credentials.Slot{credentials.SlotAPIKey, credentials.SlotManagementKey}},
 		{domain.KindCodex, domain.CategoryRemote, "ChatGPT Codex", nil},
 		{domain.KindKimi, domain.CategoryRemote, "Kimi Code", []credentials.Slot{credentials.SlotAPIKey}},
+		{domain.KindClaude, domain.CategoryRemote, "Claude", nil},
 	}
 	for _, c := range cases {
 		def, ok := Get(c.kind)
@@ -185,6 +186,10 @@ func inst(id, name string, kind domain.SourceKind, settings config.ProviderSetti
 		i.OpenRouter = &s
 	case config.CodexSettings:
 		i.Codex = &s
+	case config.KimiSettings:
+		i.Kimi = &s
+	case config.ClaudeSettings:
+		i.Claude = &s
 	}
 
 	return i
@@ -256,6 +261,7 @@ func TestWebURL(t *testing.T) {
 		{domain.KindMiniMax, "", MiniMaxConsoleURL, true},
 		{domain.KindZAI, "https://api.z.ai", ZAIUsageURL, true},
 		{domain.KindOpenRouter, "", OpenRouterActivityURL, true},
+		{domain.KindClaude, "", ClaudeUsageURL, true},
 		// Hindsight exposes its web UI only when a Web UI URL is configured;
 		// the API base URL is never reused for it (no port derivation).
 		{domain.KindHindsight, "http://127.0.0.1:9999", "http://127.0.0.1:9999", true},

@@ -30,3 +30,16 @@ func TestKimiValidate(t *testing.T) {
 		t.Error("missing settings accepted")
 	}
 }
+
+func TestClaudeEffectiveCredentialsFile(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	if got := (ClaudeSettings{}).EffectiveCredentialsFile(); got != "/home/u/.claude/.credentials.json" {
+		t.Errorf("default = %q", got)
+	}
+	if got := (ClaudeSettings{CredentialsFile: "/etc/c.json"}).EffectiveCredentialsFile(); got != "/etc/c.json" {
+		t.Errorf("explicit = %q", got)
+	}
+	if !SameSettings(ClaudeSettings{}, ClaudeSettings{CredentialsFile: "~/.claude/.credentials.json"}) {
+		t.Error("empty and explicit default must compare equal")
+	}
+}

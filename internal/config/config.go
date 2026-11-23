@@ -42,10 +42,16 @@ var (
 	// (docs/S6_AGENT_RULES.md §15).
 	CodexIntervals = []time.Duration{1 * time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
 
+	// ClaudeIntervals is the claude.ai kind's ladder: Claude Code itself
+	// caches the usage endpoint for five minutes, so nothing faster is
+	// offered.
+	ClaudeIntervals = []time.Duration{5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute}
+
 	DefaultLocalInterval     = 5 * time.Second
 	DefaultHindsightInterval = 10 * time.Second
 	DefaultRemoteInterval    = 60 * time.Second
 	DefaultCodexInterval     = 5 * time.Minute
+	DefaultClaudeInterval    = 5 * time.Minute
 
 	// PaceWindows are the offered usage-pace estimation windows (S7): how
 	// much recent history the pace average spans. They are evenly divisible

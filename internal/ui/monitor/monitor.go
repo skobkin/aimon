@@ -703,10 +703,15 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		// The optional Account section belongs to the subscription kinds
 		// (ChatGPT Codex); the API-quota kinds never set it, so their
 		// rendering is unchanged.
-		if len(c.Quota.Account) > 0 {
+		hasAccount := len(c.Quota.Account) > 0 || len(c.Quota.Money) > 0
+		if hasAccount {
 			box.Add(components.NewSectionLabel("Account"))
 			for _, r := range c.Quota.Account {
 				box.Add(components.NewMetricRow(r))
+			}
+			rows := m.sensitiveRows(c.Instance)
+			for _, r := range c.Quota.Money {
+				box.Add(components.NewMoneyRow(r, rows))
 			}
 			box.Add(components.NewSectionLabel("Limits"))
 		}
@@ -718,7 +723,7 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 			box.Add(row)
 		}
 		if len(c.Quota.Windows) == 0 {
-			if len(c.Quota.Account) > 0 {
+			if hasAccount {
 				return box
 			}
 

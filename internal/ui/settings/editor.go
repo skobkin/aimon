@@ -50,6 +50,10 @@ type editor struct {
 
 	region *widget.Select // kimi only: API host region
 
+	// Claude-only widgets, nil for every other kind.
+	credsFile   *widget.Entry
+	credsStatus *widget.Label
+
 	// Codex-only widgets, nil for every other kind: the execution mode, the
 	// launcher with its live discovery status, and the env override rows.
 	mode   *widget.Select
@@ -146,7 +150,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	// MiniMax and OpenRouter use fixed endpoints.
 	settings, _ := inst.Settings()
 	switch settings.(type) {
-	case config.MiniMaxSettings, config.OpenRouterSettings, config.CodexSettings, config.KimiSettings:
+	case config.MiniMaxSettings, config.OpenRouterSettings, config.CodexSettings, config.KimiSettings, config.ClaudeSettings:
 		e.hasURL = false
 	default:
 		e.hasURL = true
@@ -193,6 +197,9 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	}
 	if inst.Kind == domain.KindCodex {
 		e.buildCodexFields(&items, settings.(config.CodexSettings))
+	}
+	if inst.Kind == domain.KindClaude {
+		e.buildClaudeFields(&items, settings.(config.ClaudeSettings))
 	}
 	if inst.Kind == domain.KindKimi {
 		e.buildKimiFields(&items, settings.(config.KimiSettings))
@@ -383,6 +390,9 @@ func (e *editor) collect() (config.SourceInstance, error) {
 		// tray entry only appear when one is configured.
 		s.WebUIURL = strings.TrimSpace(e.webURL.Text)
 		inst.Hindsight = &s
+	case domain.KindClaude:
+		s := e.draftClaudeSettings()
+		inst.Claude = &s
 	case domain.KindKimi:
 		s := e.draftKimiSettings()
 		inst.Kimi = &s

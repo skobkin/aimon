@@ -64,6 +64,7 @@ you use — without ever opening a browser tab.
 | [Hindsight](https://github.com/vectorize-io/hindsight) | Local | Deployment health, memory banks and facts, activity rates |
 | MiniMax Token Plan | Remote | 5-hour and weekly remaining quota, usage pace and end-of-window projection |
 | Z.AI GLM Coding Plan | Remote | 5-hour token quota and monthly MCP usage quota, usage pace and projection |
+| Claude (claude.ai subscription) | Remote | Plan, 5-hour and weekly usage, per-model weekly limits, extra usage, usage pace and projection; read from your Claude Code login |
 | Kimi Code plan | Remote | Plan tier, 5-hour and monthly quota (Global or Mainland China platform), usage pace and projection |
 | OpenRouter | Remote | Key usage and spend limit, account credits and balance, $/h spend pace |
 | ChatGPT Codex | Remote | Plan, 5-hour rate-limit windows, remaining credits, usage pace and projection |
