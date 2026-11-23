@@ -124,24 +124,24 @@ func (s KimiSettings) BaseURL() string {
 	return KimiGlobalURL
 }
 
-// DefaultClaudeCredentialsFile is where Claude Code keeps its login on
+// DefaultClaudeLoginFile is where Claude Code keeps its login on
 // Linux.
-const DefaultClaudeCredentialsFile = "~/.claude/.credentials.json"
+const DefaultClaudeLoginFile = "~/.claude/.credentials.json"
 
 // ClaudeSettings are the claude.ai subscription settings. There are no
 // keychain slots: the Claude Code CLI owns the OAuth login, and AI Monitor
 // only reads the access token from its credentials file (read-only, never
-// refreshing it). An empty path means DefaultClaudeCredentialsFile.
+// refreshing it). An empty path means DefaultClaudeLoginFile.
 type ClaudeSettings struct {
-	CredentialsFile string
+	LoginFile string
 }
 
-// EffectiveCredentialsFile returns the credentials file path with the
+// EffectiveLoginFile returns the credentials file path with the
 // default filled in and a leading "~/" expanded.
-func (s ClaudeSettings) EffectiveCredentialsFile() string {
-	path := strings.TrimSpace(s.CredentialsFile)
+func (s ClaudeSettings) EffectiveLoginFile() string {
+	path := strings.TrimSpace(s.LoginFile)
 	if path == "" {
-		path = DefaultClaudeCredentialsFile
+		path = DefaultClaudeLoginFile
 	}
 	if rest, ok := strings.CutPrefix(path, "~/"); ok {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -587,7 +587,7 @@ func SameSettings(a, b ProviderSettings) bool {
 	case ClaudeSettings:
 		bv, ok := b.(ClaudeSettings)
 
-		return ok && av.EffectiveCredentialsFile() == bv.EffectiveCredentialsFile()
+		return ok && av.EffectiveLoginFile() == bv.EffectiveLoginFile()
 	case KimiSettings:
 		bv, ok := b.(KimiSettings)
 

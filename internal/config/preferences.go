@@ -130,7 +130,7 @@ type openRouterRecord struct{}
 
 // claudeRecord persists the Claude Code login file path; empty carries the default.
 type claudeRecord struct {
-	CredentialsFile string `json:"login_file,omitempty"`
+	LoginFile string `json:"login_file,omitempty"`
 }
 
 // kimiRecord persists the region; empty carries the default (global).
@@ -401,7 +401,7 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 		}
 	case domain.KindClaude:
 		if rec.Claude != nil {
-			inst.Claude = &ClaudeSettings{CredentialsFile: rec.Claude.CredentialsFile}
+			inst.Claude = &ClaudeSettings{LoginFile: rec.Claude.LoginFile}
 		}
 	default:
 		return SourceInstance{}, fmt.Errorf("unknown source kind %q", rec.Kind)
@@ -456,7 +456,7 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 		}
 	case domain.KindClaude:
 		if inst.Claude != nil {
-			rec.Claude = &claudeRecord{CredentialsFile: inst.Claude.CredentialsFile}
+			rec.Claude = &claudeRecord{LoginFile: inst.Claude.LoginFile}
 		}
 	case domain.KindKimi:
 		if inst.Kimi != nil {

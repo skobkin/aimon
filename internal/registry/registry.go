@@ -390,14 +390,14 @@ var definitions = []Definition{
 				return nil, missingSettings(inst)
 			}
 
-			return claude.New(s.EffectiveCredentialsFile(), inst.PollInterval, deps.Client, deps.Log), nil
+			return claude.New(s.EffectiveLoginFile(), inst.PollInterval, deps.Client, deps.Log), nil
 		},
 		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
 			s := inst.Claude
 			if s == nil {
 				return failedTestReport(missingSettings(inst))
 			}
-			_, err := claude.New(s.EffectiveCredentialsFile(), inst.PollInterval, deps.Client, deps.Log).Refresh(ctx)
+			_, err := claude.New(s.EffectiveLoginFile(), inst.PollInterval, deps.Client, deps.Log).Refresh(ctx)
 
 			return singleTestReport(err)
 		},

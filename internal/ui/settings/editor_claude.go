@@ -16,8 +16,8 @@ import (
 // buildClaudeFields appends the credentials-file entry and its status.
 func (e *editor) buildClaudeFields(items *[]*widget.FormItem, s config.ClaudeSettings) {
 	e.credsFile = widget.NewEntry()
-	e.credsFile.PlaceHolder = config.DefaultClaudeCredentialsFile
-	e.credsFile.SetText(s.CredentialsFile)
+	e.credsFile.PlaceHolder = config.DefaultClaudeLoginFile
+	e.credsFile.SetText(s.LoginFile)
 	e.credsStatus = widget.NewLabel("")
 	e.credsStatus.Wrapping = fyne.TextWrapWord
 	e.credsFile.OnChanged = func(string) { e.refreshCredsStatus() }
@@ -35,14 +35,14 @@ func (e *editor) buildClaudeFields(items *[]*widget.FormItem, s config.ClaudeSet
 }
 
 func (e *editor) draftClaudeSettings() config.ClaudeSettings {
-	return config.ClaudeSettings{CredentialsFile: strings.TrimSpace(e.credsFile.Text)}
+	return config.ClaudeSettings{LoginFile: strings.TrimSpace(e.credsFile.Text)}
 }
 
 func (e *editor) refreshCredsStatus() {
 	if e.credsStatus == nil {
 		return
 	}
-	path := e.draftClaudeSettings().EffectiveCredentialsFile()
+	path := e.draftClaudeSettings().EffectiveLoginFile()
 	if st, err := os.Stat(path); err != nil || st.IsDir() {
 		e.credsStatus.SetText("Credentials file not found.")
 

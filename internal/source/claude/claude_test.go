@@ -20,7 +20,7 @@ import (
 )
 
 // secretToken is a fake token; tests assert it never leaks into errors.
-const secretToken = "sk-ant-oat01-FAKE-test-token-not-real"
+const secretToken = "sk-ant-oat01-FAKE-test-token-not-real" //nolint:gosec // fake test fixture
 
 var fixedNow = time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 
