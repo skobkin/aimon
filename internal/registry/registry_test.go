@@ -23,8 +23,8 @@ import (
 
 func TestAllRegistersEveryKindOnce(t *testing.T) {
 	all := All()
-	if len(all) != 7 {
-		t.Fatalf("registered %d kinds, want 7", len(all))
+	if len(all) != 8 {
+		t.Fatalf("registered %d kinds, want 8", len(all))
 	}
 	seen := map[domain.SourceKind]bool{}
 	for _, d := range all {
@@ -33,7 +33,7 @@ func TestAllRegistersEveryKindOnce(t *testing.T) {
 		}
 		seen[d.Kind] = true
 	}
-	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex} {
+	for _, kind := range []domain.SourceKind{domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex, domain.KindKimi} {
 		if !seen[kind] {
 			t.Errorf("kind %q missing from the registry", kind)
 		}
@@ -70,6 +70,7 @@ func TestDefinitionMetadata(t *testing.T) {
 		{domain.KindZAI, domain.CategoryRemote, "Z.AI / GLM", []credentials.Slot{credentials.SlotAPIKey}},
 		{domain.KindOpenRouter, domain.CategoryRemote, "OpenRouter", []credentials.Slot{credentials.SlotAPIKey, credentials.SlotManagementKey}},
 		{domain.KindCodex, domain.CategoryRemote, "ChatGPT Codex", nil},
+		{domain.KindKimi, domain.CategoryRemote, "Kimi Code", []credentials.Slot{credentials.SlotAPIKey}},
 	}
 	for _, c := range cases {
 		def, ok := Get(c.kind)

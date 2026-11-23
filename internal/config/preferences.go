@@ -102,6 +102,7 @@ type sourceRecord struct {
 	ZAI        *zaiRecord        `json:"zai,omitempty"`
 	OpenRouter *openRouterRecord `json:"openrouter,omitempty"`
 	Codex      *codexRecord      `json:"codex,omitempty"`
+	Kimi       *kimiRecord       `json:"kimi,omitempty"`
 }
 
 type amdGPUWebRecord struct {
@@ -125,6 +126,11 @@ type zaiRecord struct {
 }
 
 type openRouterRecord struct{}
+
+// kimiRecord persists the region; empty carries the default (global).
+type kimiRecord struct {
+	Region string `json:"region,omitempty"`
+}
 
 // codexRecord persists the Codex launcher configuration. Executable and Mode
 // stay empty when they carry the default, and environment values are stored
@@ -383,6 +389,10 @@ func recordToInstance(rec sourceRecord) (SourceInstance, error) {
 			}
 			inst.Codex = &CodexSettings{Executable: rec.Codex.Executable, Mode: CodexMode(rec.Codex.Mode), Env: envs}
 		}
+	case domain.KindKimi:
+		if rec.Kimi != nil {
+			inst.Kimi = &KimiSettings{Region: KimiRegion(rec.Kimi.Region)}
+		}
 	default:
 		return SourceInstance{}, fmt.Errorf("unknown source kind %q", rec.Kind)
 	}
@@ -433,6 +443,10 @@ func instanceToRecord(inst SourceInstance) sourceRecord {
 				r.Env = append(r.Env, envRecord(env))
 			}
 			rec.Codex = r
+		}
+	case domain.KindKimi:
+		if inst.Kimi != nil {
+			rec.Kimi = &kimiRecord{Region: string(inst.Kimi.Region)}
 		}
 	}
 

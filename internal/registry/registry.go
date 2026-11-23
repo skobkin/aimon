@@ -21,6 +21,7 @@ import (
 	"git.skobk.in/skobkin/aimonitor/internal/source/amdgpuweb"
 	"git.skobk.in/skobkin/aimonitor/internal/source/codex"
 	"git.skobk.in/skobkin/aimonitor/internal/source/hindsight"
+	"git.skobk.in/skobkin/aimonitor/internal/source/kimi"
 	"git.skobk.in/skobkin/aimonitor/internal/source/llamaswap"
 	"git.skobk.in/skobkin/aimonitor/internal/source/minimax"
 	"git.skobk.in/skobkin/aimonitor/internal/source/openrouter"
@@ -322,6 +323,51 @@ var definitions = []Definition{
 
 			return ZAIUsageURL, true
 		},
+	},
+	{
+		Kind:            domain.KindKimi,
+		Category:        domain.CategoryRemote,
+		DefaultName:     "Kimi Code",
+		Description:     "Kimi Code plan quota windows (5-hour and monthly).",
+		DefaultInterval: config.DefaultRemoteInterval,
+		Intervals:       config.RemoteIntervals,
+		CredentialSlots: apiKeySlots,
+		DefaultSettings: func() config.ProviderSettings {
+			return config.KimiSettings{Region: config.KimiRegionGlobal}
+		},
+		Build: func(inst config.SourceInstance, deps Deps) (source.Source, error) {
+			s := inst.Kimi
+			if s == nil {
+				return nil, missingSettings(inst)
+			}
+			account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+			if err != nil {
+				return nil, err
+			}
+			if deps.Creds == nil {
+				return nil, fmt.Errorf("build %s instance %s: a credential store is required", inst.Kind, inst.ID)
+			}
+
+			return kimi.New(s.BaseURL(), account, deps.Creds, deps.Client, deps.Log), nil
+		},
+		Test: func(ctx context.Context, inst config.SourceInstance, deps Deps) TestReport {
+			s := inst.Kimi
+			if s == nil {
+				return failedTestReport(missingSettings(inst))
+			}
+			account, err := credentials.AccountForInstance(inst.ID, credentials.SlotAPIKey)
+			if err != nil {
+				return failedTestReport(err)
+			}
+			if deps.Creds == nil {
+				return failedTestReport(fmt.Errorf("test %s instance %s: a credential store is required", inst.Kind, inst.ID))
+			}
+			_, err = kimi.New(s.BaseURL(), account, deps.Creds, deps.Client, deps.Log).Refresh(ctx)
+
+			return singleTestReport(err)
+		},
+		// No verified stable console URL for the plan; no web button.
+		WebURL: noWebURL,
 	},
 	{
 		Kind:            domain.KindOpenRouter,

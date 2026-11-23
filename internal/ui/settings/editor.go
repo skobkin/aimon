@@ -48,6 +48,8 @@ type editor struct {
 	creds  []*credRow // one per credential slot, definition order
 	hasURL bool
 
+	region *widget.Select // kimi only: API host region
+
 	// Codex-only widgets, nil for every other kind: the execution mode, the
 	// launcher with its live discovery status, and the env override rows.
 	mode   *widget.Select
@@ -144,7 +146,7 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	// MiniMax and OpenRouter use fixed endpoints.
 	settings, _ := inst.Settings()
 	switch settings.(type) {
-	case config.MiniMaxSettings, config.OpenRouterSettings, config.CodexSettings:
+	case config.MiniMaxSettings, config.OpenRouterSettings, config.CodexSettings, config.KimiSettings:
 		e.hasURL = false
 	default:
 		e.hasURL = true
@@ -191,6 +193,9 @@ func (s *Settings) openEditorFor(inst config.SourceInstance, isNew bool) {
 	}
 	if inst.Kind == domain.KindCodex {
 		e.buildCodexFields(&items, settings.(config.CodexSettings))
+	}
+	if inst.Kind == domain.KindKimi {
+		e.buildKimiFields(&items, settings.(config.KimiSettings))
 	}
 	for _, slot := range def.CredentialSlots {
 		account, err := credentials.AccountForInstance(inst.ID, slot)
@@ -378,6 +383,9 @@ func (e *editor) collect() (config.SourceInstance, error) {
 		// tray entry only appear when one is configured.
 		s.WebUIURL = strings.TrimSpace(e.webURL.Text)
 		inst.Hindsight = &s
+	case domain.KindKimi:
+		s := e.draftKimiSettings()
+		inst.Kimi = &s
 	case domain.KindCodex:
 		s := e.draftCodexSettings()
 		inst.Codex = &s

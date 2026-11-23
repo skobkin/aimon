@@ -18,6 +18,8 @@ const (
 	DefaultLlamaSwapURL = "http://127.0.0.1:8081"
 	DefaultHindsightURL = "http://127.0.0.1:8888"
 	DefaultZAIURL       = "https://api.z.ai"
+	KimiGlobalURL       = "https://api.kimi.ai"
+	KimiCNURL           = "https://api.kimi.com"
 )
 
 // Polling presets and defaults (legacy decision D8 in

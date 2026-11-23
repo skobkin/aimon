@@ -50,6 +50,7 @@ type SourceInstance struct {
 	ZAI        *ZAISettings
 	OpenRouter *OpenRouterSettings
 	Codex      *CodexSettings
+	Kimi       *KimiSettings
 }
 
 // AMDGPUWebSettings are the amdgputop-web settings.
@@ -81,6 +82,43 @@ type MiniMaxSettings struct{}
 // allow the bigmodel.cn mirror.
 type ZAISettings struct {
 	BaseURL string
+}
+
+// KimiRegion selects the Kimi Code API host: the global platform or the
+// mainland-China one. Plan keys are issued per platform and do not cross.
+type KimiRegion string
+
+const (
+	// KimiRegionGlobal is the global platform (api.kimi.ai); the default.
+	KimiRegionGlobal KimiRegion = "global"
+	// KimiRegionCN is the mainland-China platform (api.kimi.com).
+	KimiRegionCN KimiRegion = "cn"
+)
+
+// KimiSettings are the Kimi Code plan settings. The region picks one of two
+// fixed hosts, so there is no free-text URL; the API key lives in the
+// keychain.
+type KimiSettings struct {
+	Region KimiRegion
+}
+
+// EffectiveRegion returns the configured region, filling the default for
+// an empty value.
+func (s KimiSettings) EffectiveRegion() KimiRegion {
+	if s.Region == "" {
+		return KimiRegionGlobal
+	}
+
+	return s.Region
+}
+
+// BaseURL returns the API host for the effective region.
+func (s KimiSettings) BaseURL() string {
+	if s.EffectiveRegion() == KimiRegionCN {
+		return KimiCNURL
+	}
+
+	return KimiGlobalURL
 }
 
 // OpenRouterSettings are the OpenRouter settings. The API endpoints are
@@ -131,6 +169,7 @@ func (MiniMaxSettings) providerSettings()    {}
 func (ZAISettings) providerSettings()        {}
 func (OpenRouterSettings) providerSettings() {}
 func (CodexSettings) providerSettings()      {}
+func (KimiSettings) providerSettings()       {}
 
 // EffectiveCodexExecutable returns the configured launcher, filling the
 // default for an empty value.
@@ -184,6 +223,10 @@ func (i SourceInstance) Settings() (ProviderSettings, bool) {
 	case domain.KindCodex:
 		if i.Codex != nil {
 			return *i.Codex, true
+		}
+	case domain.KindKimi:
+		if i.Kimi != nil {
+			return *i.Kimi, true
 		}
 	}
 
@@ -256,9 +299,12 @@ func (i SourceInstance) Validate() []ValidationError {
 	if i.Codex != nil {
 		set++
 	}
+	if i.Kimi != nil {
+		set++
+	}
 
 	switch i.Kind {
-	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex:
+	case domain.KindAMDGPUWeb, domain.KindLlamaSwap, domain.KindHindsight, domain.KindMiniMax, domain.KindZAI, domain.KindOpenRouter, domain.KindCodex, domain.KindKimi:
 	default:
 		errs = append(errs, ValidationError{Source: label, Field: "Kind", Message: fmt.Sprintf("unknown source kind %q", string(i.Kind))})
 	}
@@ -310,6 +356,12 @@ func (i SourceInstance) Validate() []ValidationError {
 		} else {
 			errs = append(errs, validateCodexSettings(label, *i.Codex)...)
 		}
+	case domain.KindKimi:
+		if i.Kimi == nil {
+			errs = append(errs, mismatchSettings(label))
+		} else if r := i.Kimi.Region; r != "" && r != KimiRegionGlobal && r != KimiRegionCN {
+			errs = append(errs, ValidationError{Source: label, Field: "Region", Message: "must be global or cn"})
+		}
 	}
 
 	errs = append(errs, validateInterval(label, i.PollInterval, KindIntervals(i.Kind))...)
@@ -341,7 +393,7 @@ func validatePaceWindow(source string, d time.Duration, presets []time.Duration)
 // PaceWindow field is never read.
 func PaceCapable(kind domain.SourceKind) bool {
 	switch kind {
-	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindOpenRouter:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindOpenRouter, domain.KindKimi:
 		return true
 	}
 
@@ -486,6 +538,10 @@ func SameSettings(a, b ProviderSettings) bool {
 		_, ok := b.(OpenRouterSettings)
 
 		return ok
+	case KimiSettings:
+		bv, ok := b.(KimiSettings)
+
+		return ok && av.EffectiveRegion() == bv.EffectiveRegion()
 	case CodexSettings:
 		bv, ok := b.(CodexSettings)
 		if !ok {

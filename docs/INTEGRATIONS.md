@@ -264,6 +264,34 @@ As of the current official plugin/API behavior, `/api/monitor/usage/quota/limit`
 
 Keep Z.AI response parsing isolated and fixture-tested so endpoint/schema changes can be repaired without touching the domain or UI layers.
 
+## 5a. Kimi Code plan
+
+Added 2026-11-23 (see `docs/DECISION_LOG.md`). Plan keys only; PAYGO platform keys are a different platform and fail as `Authentication failed`.
+
+### API stability warning
+
+The endpoint is what Kimi Code CLI's `/usage` command calls. It is undocumented; three independent clients parse it consistently. Every field is decoded loosely (numbers may arrive as strings) and absence stays absence.
+
+### Endpoint and region
+
+`GET <base>/coding/v1/usages` with `Authorization: Bearer <key>`. The base is chosen by a Region select, not a free-text URL: **Global** `https://api.kimi.ai` (default, listed first) or **Mainland China** `https://api.kimi.com`. The key is the `api-key` slot of the instance.
+
+### Quota normalization
+
+- `kimi-5h` "5-hour": only from `limits[]`, selected by `window.duration`/`timeUnit` equal to 300 minutes, never by position. Counts are `used`, or `limit - remaining`. `usages.limit_5h` duplicates it and goes stale, so it is ignored.
+- `kimi-monthly` "Monthly": `usages.limit_month_total.used_ratio`. `limit_month_code` is a slice of the same pool and is skipped.
+- `kimi-weekly` "Weekly": only when a legacy top-level `usage` block is present.
+- Reset times are ISO-8601 UTC under any of `resetTime`/`resetAt`/`reset_at`/`reset_time`.
+- No usable window is an invalid-response error.
+
+### Plan label
+
+`GET <base>/coding/v1/me` → `user_level_name`, best effort and cached: requested only when nothing is cached, when `user.membership.level` changed, or after 24 hours, and not again for an hour after a failure. A failure never fails the refresh; the label falls back to the prettified membership level.
+
+### Polling
+
+Remote ladder (default 60s, minimum 30s); one usage request per refresh plus the rare `/me`.
+
 ## 6. Credential storage
 
 Use the same general design already proven in `skobkin/qBtRemoteGo`:

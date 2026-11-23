@@ -10,6 +10,29 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-23 — Kimi Code plan source (issue #8)
+
+User-directed new remote kind `kimi`, following the research recorded on
+the issue:
+
+1. **Region select instead of a URL field.** The owner asked for a
+   Global / Mainland China choice with Global first, so `KimiSettings`
+   stores a region (`global` default, `cn`) and the host is derived
+   (`api.kimi.ai` / `api.kimi.com`). Unlike Z.AI there is no free-text base
+   URL.
+2. **Windows.** 5-hour from `limits[]` selected by duration, monthly from
+   `usages.limit_month_total`, weekly only from the legacy `usage` block;
+   `limit_5h` and `limit_month_code` are ignored (see INTEGRATIONS §5a).
+3. **Cached plan name.** A best-effort `/me` request supplies the tier
+   name, requested rarely (empty cache, membership level change, 24 h TTL,
+   1 h failure backoff) to keep API load minimal. This is the bounded
+   second request INTEGRATIONS §7 allows.
+4. **`QuotaSnapshot.Plan` is now shown** (Overview title suffix and a
+   detail "Plan" row) for any quota kind that sets it; MiniMax and Z.AI
+   never set it, so they are unchanged.
+5. **No console link.** No stable plan-console URL was verified, so the
+   kind has no web button.
+
 ## 2026-11-03 — Pace burn-out estimate in the countdown labels; error-color accent for over-100% projections
 
 User-directed extension of the S7 pace presentation. The bars and the

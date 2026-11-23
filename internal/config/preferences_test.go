@@ -218,6 +218,7 @@ func TestSourceDocumentHasNoCredentialFields(t *testing.T) {
 		{ID: "l", Kind: domain.KindLlamaSwap, Name: "L", Enabled: true, PollInterval: 30 * time.Second, LlamaSwap: &LlamaSwapSettings{BaseURL: "http://h"}},
 		{ID: "h", Kind: domain.KindHindsight, Name: "H", Enabled: true, PollInterval: 30 * time.Second, Hindsight: &HindsightSettings{BaseURL: "http://h", WebUIURL: "http://h/ui"}},
 		{ID: "m", Kind: domain.KindMiniMax, Name: "M", Enabled: true, PollInterval: time.Minute, MiniMax: &MiniMaxSettings{}},
+		{ID: "k", Kind: domain.KindKimi, Name: "K", Enabled: true, PollInterval: time.Minute, Kimi: &KimiSettings{Region: KimiRegionCN}},
 		{ID: "z", Kind: domain.KindZAI, Name: "Z", Enabled: true, PollInterval: time.Minute, ZAI: &ZAISettings{BaseURL: "http://h"}},
 		{ID: "o", Kind: domain.KindOpenRouter, Name: "O", Enabled: true, PollInterval: time.Minute, OpenRouter: &OpenRouterSettings{}},
 		{ID: "c", Kind: domain.KindCodex, Name: "C", Enabled: true, PollInterval: time.Minute, Codex: &CodexSettings{Executable: "codex", Mode: CodexModePersistent, Env: []EnvOverride{{Name: "EDITOR", Value: "vi"}}}},

@@ -8,6 +8,7 @@ This project is a small, tray-first desktop monitor for:
 - local model/runtime state from `llama-swap`;
 - MiniMax Token Plan quota;
 - Z.AI / GLM Coding Plan quota;
+- Kimi Code plan quota;
 - OpenRouter account spend and key limits;
 - ChatGPT Codex plan usage;
 - Hindsight memory-service banks (rate and liveness).

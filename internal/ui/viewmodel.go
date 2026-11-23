@@ -352,7 +352,7 @@ func cardKind(kind domain.SourceKind) CardKind {
 		return KindGPU
 	case domain.KindLlamaSwap:
 		return KindSwap
-	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindKimi:
 		return KindQuota
 	case domain.KindOpenRouter:
 		return KindSpend
@@ -370,7 +370,7 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 		return OverviewMetrics
 	case domain.KindLlamaSwap:
 		return OverviewRuntime
-	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex:
+	case domain.KindMiniMax, domain.KindZAI, domain.KindCodex, domain.KindKimi:
 		return OverviewQuota
 	case domain.KindOpenRouter:
 		return OverviewSpend
@@ -430,6 +430,10 @@ func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, ip pace.In
 		card.Runtime = BuildRuntimeOverview(snap)
 	case domain.QuotaSnapshot:
 		card.Quota = BuildQuotaOverview(snap, ip, now)
+		// Like Codex, a plan the provider reports joins the card title.
+		if snap.Plan != "" {
+			card.Title += " (" + snap.Plan + ")"
+		}
 	case domain.CodexSnapshot:
 		card.Quota = BuildCodexOverview(snap, ip, now)
 		// The plan name joins the card title ("ChatGPT Codex (Plus)") instead
@@ -534,11 +538,11 @@ func BuildQuotaOverview(snap domain.QuotaSnapshot, ip pace.InstancePaces, now ti
 // shortLabel maps a quota window ID to a compact label for the donut.
 func shortLabel(w domain.QuotaWindow) string {
 	switch w.ID {
-	case "interval", "tokens-5h", "credits-5h":
+	case "interval", "tokens-5h", "credits-5h", "kimi-5h":
 		return "5h"
-	case "weekly", "credits-weekly":
+	case "weekly", "credits-weekly", "kimi-weekly":
 		return "week"
-	case "mcp-monthly":
+	case "mcp-monthly", "kimi-monthly":
 		return "month"
 	case "codex-primary", "codex-secondary":
 		if s := codexShortName(w.Name); s != "" {
@@ -569,9 +573,9 @@ func codexShortName(name string) string {
 func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 	priority := func(id string) int {
 		switch id {
-		case "interval", "tokens-5h", "credits-5h", "codex-primary":
+		case "interval", "tokens-5h", "credits-5h", "codex-primary", "kimi-5h":
 			return 0
-		case "weekly", "credits-weekly", "codex-secondary":
+		case "weekly", "credits-weekly", "codex-secondary", "kimi-weekly":
 			return 1
 		default:
 			return 2
@@ -759,6 +763,9 @@ func BuildSwapVM(snap domain.LlamaSwapSnapshot, detail bool) SwapVM {
 // as before.
 func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Time, detail bool) QuotaVM {
 	vm := QuotaVM{Windows: make([]QuotaWindowVM, 0, len(snap.Windows))}
+	if detail && snap.Plan != "" {
+		vm.Account = append(vm.Account, MetricRowVM{Label: "Plan", Value: snap.Plan})
+	}
 	for _, w := range snap.Windows {
 		row := QuotaWindowVM{
 			Name:      w.Name,
