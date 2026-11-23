@@ -19,6 +19,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -257,15 +258,19 @@ func (a *Adapter) normalize(r usageResponse, cred credential) (domain.QuotaSnaps
 	seen := map[string]bool{}
 	model := func(name string, util *float64, resets *string) {
 		name = strings.TrimSpace(name)
-		if len(name) > maxModelName {
-			name = name[:maxModelName]
+		if r := []rune(name); len(r) > maxModelName {
+			name = string(r[:maxModelName])
 		}
 		key := strings.ToLower(name)
 		if name == "" || seen[key] {
 			return
 		}
 		before := len(windows)
-		add(idModel+slug(key), name+" weekly", util, resets)
+		id := slug(key)
+		if id == "" {
+			id = fmt.Sprintf("%x", key)
+		}
+		add(idModel+id, name+" weekly", util, resets)
 		if len(windows) > before {
 			seen[key] = true
 		}

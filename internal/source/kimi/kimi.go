@@ -177,7 +177,7 @@ func (a *Adapter) plan(ctx context.Context, header http.Header, level string) st
 	now := a.now()
 	fresh := a.planName != "" && a.planFor == level && now.Sub(a.planAt) < planTTL
 	backoff := !a.failAt.IsZero() && now.Sub(a.failAt) < planRetryAfter
-	cached := a.planName
+	cached, cachedFor := a.planName, a.planFor
 	a.mu.Unlock()
 
 	if fresh {
@@ -195,7 +195,7 @@ func (a *Adapter) plan(ctx context.Context, header http.Header, level string) st
 		a.failAt = now
 		a.mu.Unlock()
 	}
-	if cached != "" && a.planFor == level {
+	if cached != "" && cachedFor == level {
 		return cached
 	}
 
