@@ -603,6 +603,31 @@ func TestPlanLabelFromLevel(t *testing.T) {
 	}
 }
 
+// A level of an unexpected type or with control characters never fails the
+// quota decode or reaches the title raw.
+func TestPlanLabelLenient(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"numeric level", `{"data":{"level":3,"limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`, ""},
+		{"object level", `{"level":{"x":1},"limits":[{"type":"TOKENS_LIMIT","percentage":10}]}`, ""},
+		{"control characters", `{"data":{"level":"pro\u0007\u202e","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`, "Pro"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(newQuotaServer(tc.body).handler())
+			defer srv.Close()
+
+			q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+			if q.Plan != tc.want {
+				t.Fatalf("Plan = %q, want %q", q.Plan, tc.want)
+			}
+		})
+	}
+}
+
 func TestPlanLabelCappedByRunes(t *testing.T) {
 	level := strings.Repeat("é", 60)
 	body := `{"data":{"level":"` + level + `","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`

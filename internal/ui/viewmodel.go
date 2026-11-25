@@ -595,8 +595,15 @@ func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 			return 3
 		}
 	}
-	sorted := make([]domain.QuotaWindow, len(windows))
-	copy(sorted, windows)
+	// MiniMax's other plan buckets ("bucket-…") are detail rows only: they
+	// must not fill a headline slot when the chosen bucket lacks one of its
+	// two windows.
+	sorted := make([]domain.QuotaWindow, 0, len(windows))
+	for _, w := range windows {
+		if !strings.HasPrefix(w.ID, "bucket-") {
+			sorted = append(sorted, w)
+		}
+	}
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return priority(sorted[i].ID) < priority(sorted[j].ID)
 	})
@@ -827,7 +834,7 @@ func formatCreditExpiry(at, now time.Time) string {
 // formatShare renders a product's share of the limit: whole percents, and
 // "<1%" for a positive share that would round to zero.
 func formatShare(pct float64) string {
-	if pct > 0 && pct < 1 {
+	if pct > 0 && math.Round(pct) == 0 {
 		return "<1%"
 	}
 

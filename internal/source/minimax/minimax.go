@@ -291,10 +291,12 @@ func (a *Adapter) checkProviderError(resp tokenPlanResp, token string) *source.E
 		return nil
 	}
 
-	a.log.Warn("minimax provider error", "code", code, "status_msg", msg)
+	// The log gets the sanitized text too: a provider that echoes the key
+	// back must not leave it in the log either.
+	shown := source.SanitizeProviderMessage(msg, token)
+	a.log.Warn("minimax provider error", "code", code, "status_msg", shown)
 
 	detail := fmt.Sprintf("provider code %d", code)
-	shown := source.SanitizeProviderMessage(msg, token)
 	if authFailureCodes[code] {
 		return &source.Error{Category: source.CatAuth, Detail: detail, Message: shown}
 	}

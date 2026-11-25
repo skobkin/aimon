@@ -805,6 +805,29 @@ func TestSelectHeadlineWindowsZAITokens(t *testing.T) {
 	}
 }
 
+// "<1%" is reserved for a positive share that rounds to zero; 0.5 and up
+// reads as the rounded whole percent.
+func TestFormatShareRounding(t *testing.T) {
+	for in, want := range map[float64]string{0: "0%", 0.3: "<1%", 0.49: "<1%", 0.5: "1%", 0.7: "1%", 34.4: "34%", 100: "100%"} {
+		if got := formatShare(in); got != want {
+			t.Errorf("formatShare(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// MiniMax's other-bucket windows never take a headline slot, even when the
+// chosen bucket lacks its weekly window.
+func TestSelectHeadlineWindowsSkipsOtherBuckets(t *testing.T) {
+	sel := selectHeadlineWindows([]domain.QuotaWindow{
+		{ID: "interval", Name: "5-hour"},
+		{ID: "bucket-coding-plan-interval", Name: "coding-plan 5-hour"},
+		{ID: "bucket-coding-plan-weekly", Name: "coding-plan Weekly"},
+	})
+	if len(sel) != 1 || sel[0].ID != "interval" {
+		t.Errorf("headlines = %+v, want only the chosen interval window", sel)
+	}
+}
+
 // Equal ranks keep their input order (the sort is stable).
 func TestSelectHeadlineWindowsStable(t *testing.T) {
 	sel := selectHeadlineWindows([]domain.QuotaWindow{

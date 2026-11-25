@@ -701,9 +701,9 @@ func (m *Monitor) cardBody(c ui.CardVM, tick *[]func(now time.Time)) fyne.Canvas
 		return box
 	case ui.KindQuota:
 		box := container.NewVBox()
-		// The optional Account section belongs to the subscription kinds
-		// (ChatGPT Codex); the API-quota kinds never set it, so their
-		// rendering is unchanged.
+		// The optional Account section belongs to the kinds that report a
+		// plan, extra usage or account rows (ChatGPT Codex, Claude, Kimi,
+		// Z.AI); the others never set it, so their rendering is unchanged.
 		hasAccount := len(c.Quota.Account) > 0 || len(c.Quota.Money) > 0
 		if hasAccount {
 			box.Add(components.NewSectionLabel("Account"))

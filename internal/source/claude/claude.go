@@ -107,7 +107,9 @@ type usageResponse struct {
 	SevenDaySonnet *window      `json:"seven_day_sonnet"`
 	Limits         []limitEntry `json:"limits"`
 	ExtraUsage     *extraUsage  `json:"extra_usage"`
-	Breakdown      *breakdown   `json:"seven_day_breakdown"`
+	// Breakdown stays raw and is decoded best-effort (normalizeShares): a
+	// renamed or retyped field must never fail the headline quota decode.
+	Breakdown json.RawMessage `json:"seven_day_breakdown"`
 }
 
 // credential is the minimal copy kept from the credentials file.
@@ -314,9 +316,14 @@ func (a *Adapter) normalize(r usageResponse, cred credential) (domain.QuotaSnaps
 }
 
 // normalizeShares keeps the breakdown rows that carry a name and a finite,
-// non-negative share. Names are trimmed and rune-capped like model names.
-func normalizeShares(b *breakdown) []domain.QuotaShare {
-	if b == nil {
+// non-negative share. Names are trimmed and rune-capped like model names. A
+// missing or malformed block yields no shares, never an error.
+func normalizeShares(raw json.RawMessage) []domain.QuotaShare {
+	if len(raw) == 0 {
+		return nil
+	}
+	var b breakdown
+	if err := json.Unmarshal(raw, &b); err != nil {
 		return nil
 	}
 	var out []domain.QuotaShare

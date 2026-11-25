@@ -74,14 +74,14 @@ type limitEntry struct {
 // quotaData is the wrapped shape: {"data":{"limits":[…]}}.
 type quotaData struct {
 	Limits []limitEntry `json:"limits"`
-	Level  string       `json:"level"`
+	Level  any          `json:"level"` // decoded loosely: an odd type must not fail the quota decode
 }
 
 // envelope accepts both the wrapped and the top-level shapes.
 type envelope struct {
 	Data   *quotaData   `json:"data"`
 	Limits []limitEntry `json:"limits"`
-	Level  string       `json:"level"`
+	Level  any          `json:"level"`
 }
 
 // windowSpec maps a limit entry onto its stable window identity.
@@ -212,11 +212,15 @@ const maxPlanRunes = 40
 // wrapped (or top-level) envelope: trimmed, capped and capitalized. An
 // absent or blank level yields no label — never a guessed one.
 func planLabel(env envelope) string {
-	level := env.Level
-	if env.Data != nil && strings.TrimSpace(env.Data.Level) != "" {
-		level = env.Data.Level
+	level, _ := env.Level.(string)
+	if env.Data != nil {
+		if dl, _ := env.Data.Level.(string); strings.TrimSpace(dl) != "" {
+			level = dl
+		}
 	}
-	level = strings.Join(strings.Fields(level), " ")
+	// Provider text lands in a card title: drop control and other
+	// non-printable runes along with the whitespace collapse.
+	level = source.SanitizeProviderMessage(level)
 	if level == "" {
 		return ""
 	}

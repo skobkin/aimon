@@ -74,9 +74,10 @@ only visible in the log.
    entry's `remains_time` / `weekly_remains_time`. An entry without a usable
    percent adds nothing; a bucket whose slug repeats an earlier one is
    skipped; names are capped at 40 runes.
-2. They rank after every headline window, so Overview keeps its two donuts
-   (the chosen interval and weekly); detail shows bars, pace and
-   notifications like any other window.
+2. They never take an Overview headline slot (`selectHeadlineWindows` skips
+   the `bucket-` IDs), so Overview keeps only the chosen interval and weekly
+   donuts even when the chosen bucket lacks one of them; detail shows bars,
+   pace and notifications like any other window.
 3. A bucket that reports 0% remaining because it has no allowance would read
    as fully used; the API gives no field to tell those apart, so it is shown
    as reported.

@@ -35,7 +35,7 @@ var providerLogos = map[domain.SourceKind]logoSpec{
 	domain.KindOpenRouter: {file: "openrouter.svg", mono: true},
 }
 
-// providerLogoCache holds the resources, built once at first use.
+// providerLogoCache holds the resources, built once at package initialization.
 var providerLogoCache = buildProviderLogos()
 
 func buildProviderLogos() map[domain.SourceKind]fyne.Resource {

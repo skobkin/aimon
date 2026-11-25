@@ -166,6 +166,29 @@ func TestSevenDayBreakdownShares(t *testing.T) {
 	}
 }
 
+// A breakdown block of an unexpected shape drops the shares only: the
+// headline quota still decodes.
+func TestMalformedBreakdownKeepsQuota(t *testing.T) {
+	for name, block := range map[string]string{
+		"array":         `[]`,
+		"string rows":   `{"rows":"none"}`,
+		"retyped name":  `{"rows":[{"display_name":7,"percent_of_limit":3}]}`,
+		"string number": `{"rows":[{"display_name":"Claude Code","percent_of_limit":"34"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newServer(t, `{"five_hour":{"utilization":1},"seven_day_breakdown":`+block+`}`)
+			path := writeCreds(t, credsJSON(secretToken, fixedNow.Add(time.Hour), "max"))
+			snap := refresh(t, s.adapter(path))
+			if len(snap.Shares) != 0 {
+				t.Errorf("shares = %+v, want none", snap.Shares)
+			}
+			if len(snap.Windows) == 0 {
+				t.Error("the headline window must survive a malformed breakdown")
+			}
+		})
+	}
+}
+
 func TestBreakdownAbsentLeavesNoShares(t *testing.T) {
 	s := newServer(t, `{"five_hour":{"utilization":1}}`)
 	path := writeCreds(t, credsJSON(secretToken, fixedNow.Add(time.Hour), "max"))
