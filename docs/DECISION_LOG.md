@@ -10,6 +10,16 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — Z.AI plan label from `level`
+
+Borrowed from the Herdr `provider-usage` mod: the Z.AI quota response
+carries an optional `level` (wrapped `data.level`, or top-level) naming the
+plan tier. The adapter now sets `QuotaSnapshot.Plan` from it (whitespace
+collapsed, capped at 40 runes, first letter upper-cased); absent or blank
+means no label. The existing plumbing shows it (Overview title suffix,
+detail "Plan" row). This supersedes the 2026-11-23 Kimi entry's remark that
+Z.AI never sets `Plan`; MiniMax still does not.
+
 ## 2026-11-23 — Claude (claude.ai subscription) source (issue #12)
 
 User-directed new remote kind `claude`, following the issue and the Herdr

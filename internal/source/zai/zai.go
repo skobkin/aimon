@@ -21,7 +21,9 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"git.skobk.in/skobkin/aimonitor/internal/credentials"
 	"git.skobk.in/skobkin/aimonitor/internal/domain"
@@ -72,12 +74,14 @@ type limitEntry struct {
 // quotaData is the wrapped shape: {"data":{"limits":[…]}}.
 type quotaData struct {
 	Limits []limitEntry `json:"limits"`
+	Level  string       `json:"level"`
 }
 
 // envelope accepts both the wrapped and the top-level shapes.
 type envelope struct {
 	Data   *quotaData   `json:"data"`
 	Limits []limitEntry `json:"limits"`
+	Level  string       `json:"level"`
 }
 
 // windowSpec maps a limit entry onto its stable window identity.
@@ -180,8 +184,33 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	return domain.QuotaSnapshot{
 		Kind:        domain.KindZAI,
 		CollectedAt: time.Now(),
+		Plan:        planLabel(env),
 		Windows:     windows,
 	}, nil
+}
+
+// maxPlanRunes caps the plan label: it lands in a card title.
+const maxPlanRunes = 40
+
+// planLabel derives the plan name from the optional `level` field of the
+// wrapped (or top-level) envelope: trimmed, capped and capitalized. An
+// absent or blank level yields no label — never a guessed one.
+func planLabel(env envelope) string {
+	level := env.Level
+	if env.Data != nil && strings.TrimSpace(env.Data.Level) != "" {
+		level = env.Data.Level
+	}
+	level = strings.Join(strings.Fields(level), " ")
+	if level == "" {
+		return ""
+	}
+	r := []rune(level)
+	if len(r) > maxPlanRunes {
+		r = r[:maxPlanRunes]
+	}
+	r[0] = unicode.ToUpper(r[0])
+
+	return string(r)
 }
 
 // token resolves the plan token; a missing token is a config problem

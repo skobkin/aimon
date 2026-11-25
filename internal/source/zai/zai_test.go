@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -552,5 +553,43 @@ func TestStringUnitAndStringCounts(t *testing.T) {
 	assertFraction(t, "tokens remaining", w.RemainingFraction, 0.9)
 	if w.Unit != "token" {
 		t.Errorf("unit = %q, want token", w.Unit)
+	}
+}
+
+func TestPlanLabelFromLevel(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"wrapped level", `{"data":{"level":"pro","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`, "Pro"},
+		{"top-level level", `{"level":"max","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}`, "Max"},
+		{"data level wins", `{"level":"lite","data":{"level":"pro","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`, "Pro"},
+		{"blank level", `{"data":{"level":"  ","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`, ""},
+		{"absent level", `{"data":{"limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`, ""},
+		{"whitespace collapsed", "{\"data\":{\"level\":\" coding\\n plan \",\"limits\":[{\"type\":\"TOKENS_LIMIT\",\"percentage\":10}]}}", "Coding plan"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(newQuotaServer(tc.body).handler())
+			defer srv.Close()
+
+			q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+			if q.Plan != tc.want {
+				t.Fatalf("Plan = %q, want %q", q.Plan, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlanLabelCappedByRunes(t *testing.T) {
+	level := strings.Repeat("é", 60)
+	body := `{"data":{"level":"` + level + `","limits":[{"type":"TOKENS_LIMIT","percentage":10}]}}`
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+	if got := []rune(q.Plan); len(got) != maxPlanRunes || got[0] != 'É' {
+		t.Fatalf("Plan = %q (%d runes), want %d runes starting with É", q.Plan, len(got), maxPlanRunes)
 	}
 }
