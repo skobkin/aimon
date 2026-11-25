@@ -251,9 +251,11 @@ type QuotaOverviewVM struct {
 // OverviewCardVM is one card in the Overview tab.
 type OverviewCardVM struct {
 	Instance domain.InstanceID
-	Kind     OverviewKind
-	Title    string
-	Status   string
+	// Source is the instance's source kind (the header logo's key).
+	Source domain.SourceKind
+	Kind   OverviewKind
+	Title  string
+	Status string
 
 	Metrics MetricsOverviewVM
 	Runtime RuntimeOverviewVM
@@ -267,10 +269,12 @@ type OverviewCardVM struct {
 // the last refresh failure for Stale/Unavailable cards.
 type CardVM struct {
 	Instance domain.InstanceID
-	Kind     CardKind
-	Title    string
-	Status   string
-	Footer   string
+	// Source is the instance's source kind (the header logo's key).
+	Source domain.SourceKind
+	Kind   CardKind
+	Title  string
+	Status string
+	Footer string
 
 	GPU     GPUVM
 	Swap    SwapVM
@@ -391,6 +395,7 @@ func overviewKind(kind domain.SourceKind) OverviewKind {
 func BuildCard(inst config.SourceInstance, rt domain.Runtime, ip pace.InstancePaces, now time.Time, detail bool) CardVM {
 	card := CardVM{
 		Instance: inst.ID,
+		Source:   inst.Kind,
 		Kind:     cardKind(inst.Kind),
 		Title:    inst.Name,
 		Status:   FreshnessText(rt, now),
@@ -421,6 +426,7 @@ func BuildCard(inst config.SourceInstance, rt domain.Runtime, ip pace.InstancePa
 func BuildOverviewCard(inst config.SourceInstance, rt domain.Runtime, ip pace.InstancePaces, now time.Time) OverviewCardVM {
 	card := OverviewCardVM{
 		Instance: inst.ID,
+		Source:   inst.Kind,
 		Kind:     overviewKind(inst.Kind),
 		Title:    inst.Name,
 		Status:   FreshnessText(rt, now),

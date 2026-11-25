@@ -7,6 +7,8 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"git.skobk.in/skobkin/aimonitor/internal/domain"
+	"git.skobk.in/skobkin/aimonitor/internal/resources"
 	"git.skobk.in/skobkin/aimonitor/internal/ui"
 )
 
@@ -40,8 +42,9 @@ func NewSourceCardWithHeaderAction(vm ui.CardVM, body fyne.CanvasObject, action 
 	if action != nil {
 		trailing = container.NewHBox(action, status)
 	}
-	header := container.NewBorder(nil, nil, nil, trailing,
+	header := NewCardHeader(vm.Source,
 		NewWrappedLabel(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		trailing,
 	)
 
 	content := container.NewVBox(header, body)
@@ -56,6 +59,26 @@ func NewSourceCardWithHeaderAction(vm ui.CardVM, body fyne.CanvasObject, action 
 	}
 
 	return widget.NewCard("", "", content), func(s string) { setText(status, s) }
+}
+
+// NewCardHeader lays out a card header: the provider logo (when the kind
+// has one) at the leading edge, the wrapping title in the Border centre and
+// the trailing controls keeping their natural width. The logo is a fixed
+// inline-icon square, so it adds no height and never widens the card; kinds
+// without a logo render exactly the title and trailing pair.
+func NewCardHeader(kind domain.SourceKind, title, trailing fyne.CanvasObject) fyne.CanvasObject {
+	return container.NewBorder(nil, nil, newProviderLogo(kind), trailing, title)
+}
+
+// newProviderLogo builds the header logo, or nil for a kind without one.
+func newProviderLogo(kind domain.SourceKind) fyne.CanvasObject {
+	res := resources.ProviderLogo(kind)
+	if res == nil {
+		return nil
+	}
+	icon := widget.NewIcon(res)
+
+	return container.NewGridWrap(fyne.NewSquareSize(theme.IconInlineSize()), icon)
 }
 
 // NewEmptyState builds the placeholder shown in a tab whose sources are

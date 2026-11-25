@@ -1534,3 +1534,14 @@ func TestBuildQuotaVMExhaustTextFold(t *testing.T) {
 		t.Errorf("codex overview exhaust text = %q, want \"≈30m\"", got)
 	}
 }
+
+// Cards carry their source kind: it keys the header logo.
+func TestCardVMCarriesSourceKind(t *testing.T) {
+	i := inst("z1", "Z.AI", domain.KindZAI, true)
+	if got := BuildCard(i, domain.Runtime{}, pace.InstancePaces{}, time.Now(), true).Source; got != domain.KindZAI {
+		t.Errorf("CardVM.Source = %q, want zai", got)
+	}
+	if got := BuildOverviewCard(i, domain.Runtime{}, pace.InstancePaces{}, time.Now()).Source; got != domain.KindZAI {
+		t.Errorf("OverviewCardVM.Source = %q, want zai", got)
+	}
+}

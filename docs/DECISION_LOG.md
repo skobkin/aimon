@@ -10,6 +10,35 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — Provider logos in card headers
+
+User-directed, borrowed from the Herdr `provider-usage` mod, which swapped
+text names for logos. This extends the shared card header grammar
+(`docs/S2_UI_UX.md`, `docs/UI_UX.md`: title left, status right) with an
+optional leading mark.
+
+1. **Which kinds.** The remote services — Claude, ChatGPT Codex (OpenAI
+   mark), Z.AI, MiniMax, Kimi and OpenRouter. Local kinds (GPU, llama-swap,
+   Hindsight) get none and render exactly as before.
+2. **Standard widgets only.** `components.NewCardHeader` puts a
+   `widget.Icon` in a `container.NewGridWrap` of `theme.IconInlineSize()` at
+   the Border's leading edge; the wrapping title keeps the centre and the
+   status/refresh its natural width, so the logo adds no height and never
+   widens the window. Used by both the detail cards and the Overview
+   tiles. `CardVM` and `OverviewCardVM` gain `Source` (the instance kind) as
+   the lookup key. The title text is unchanged, so the logo is never the
+   only identification.
+3. **Theming.** One-color marks (OpenAI, Z.AI, Kimi, OpenRouter) are
+   `theme.ThemedResource`s and follow the theme foreground in light and dark;
+   the multi-color Claude and MiniMax originals are drawn as is.
+4. **Assets.** The SVGs are vendored under `internal/resources/logos` from
+   the MIT-licensed LobeHub Icons set (`@lobehub/icons-static-svg` 1.106.0)
+   with the license and the local edits recorded in `logos/NOTICE`. Fyne's
+   SVG rasterizer (oksvg) cannot read compact arc flags (`a5 5 0 110 10`),
+   so each path's data was rewritten with explicit separators; the shapes
+   are unchanged. The marks are trademarks of their owners, used only to
+   identify the service a card reports on.
+
 ## 2026-11-25 — Codex shows when the next reset credit expires
 
 Borrowed from the Herdr `provider-usage` mod, which lists each granted

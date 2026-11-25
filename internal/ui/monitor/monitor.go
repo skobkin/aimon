@@ -340,8 +340,9 @@ func (m *Monitor) overviewRow(cards []ui.OverviewCardVM, states map[domain.Insta
 // refresher is collected for the ticker.
 func overviewSourceCard(vm ui.OverviewCardVM, rt domain.Runtime, body fyne.CanvasObject, tick *[]func(now time.Time)) fyne.CanvasObject {
 	status := widget.NewLabel(vm.Status)
-	header := container.NewBorder(nil, nil, nil, status,
+	header := components.NewCardHeader(vm.Source,
 		components.NewWrappedLabel(vm.Title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		status,
 	)
 	*tick = append(*tick, func(now time.Time) {
 		setLabelStatus(status, ui.FreshnessText(rt, now))
