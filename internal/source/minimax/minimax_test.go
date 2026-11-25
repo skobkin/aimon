@@ -754,3 +754,81 @@ func TestOutOfRangePercentDropsWindow(t *testing.T) {
 		t.Error("valid weekly window must survive")
 	}
 }
+
+// The buckets selectEntry did not choose become extra, percent-only
+// windows; the chosen "general" bucket keeps the plain IDs.
+func TestOtherBucketsReportedAsExtraWindows(t *testing.T) {
+	body := `{
+		"base_resp": {"status_code": 0},
+		"model_remains": [
+			{"model_name": "coding-plan",
+			 "current_interval_remaining_percent": 60,
+			 "current_weekly_remaining_percent": 80,
+			 "remains_time": 3600000,
+			 "weekly_remains_time": 86400000},
+			{"model_name": "general",
+			 "current_interval_remaining_percent": 42,
+			 "current_weekly_remaining_percent": 87},
+			{"model_name": "Text  Lane!",
+			 "current_interval_remaining_percent": 10,
+			 "remains": 5, "total": 50},
+			{"model_name": "no-percents"},
+			{"model_name": "text lane",
+			 "current_interval_remaining_percent": 99}
+		]
+	}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+
+	if w := windowByID(q, "interval"); w == nil || w.RemainingFraction != 0.42 {
+		t.Fatalf("chosen interval = %+v", w)
+	}
+	// Order: the chosen windows first, then the other buckets in payload order.
+	if q.Windows[0].ID != "interval" || q.Windows[1].ID != "weekly" {
+		t.Errorf("window order = %+v", q.Windows)
+	}
+
+	ci := windowByID(q, "bucket-coding-plan-interval")
+	if ci == nil || ci.Name != "coding-plan 5-hour" || ci.RemainingFraction != 0.60 {
+		t.Fatalf("coding interval = %+v", ci)
+	}
+	if want := q.CollectedAt.Add(time.Hour); ci.ResetAt == nil || !ci.ResetAt.Equal(want) {
+		t.Errorf("coding interval reset = %v, want %v", ci.ResetAt, want)
+	}
+	cw := windowByID(q, "bucket-coding-plan-weekly")
+	if cw == nil || cw.Name != "coding-plan Weekly" || cw.RemainingFraction != 0.80 {
+		t.Fatalf("coding weekly = %+v", cw)
+	}
+
+	// Percent-only: per-bucket counts are never attached.
+	tl := windowByID(q, "bucket-text-lane-interval")
+	if tl == nil || tl.Name != "Text  Lane! 5-hour" || tl.RemainingFraction != 0.10 || tl.Limit != nil {
+		t.Fatalf("text lane interval = %+v", tl)
+	}
+	if windowByID(q, "bucket-text-lane-weekly") != nil {
+		t.Error("a bucket without a weekly percent must not add a weekly window")
+	}
+	// An entry without percents adds nothing; a slug duplicate is skipped.
+	for _, w := range q.Windows {
+		if strings.Contains(w.ID, "no-percents") {
+			t.Errorf("unexpected window for a bucket without percents: %+v", w)
+		}
+	}
+	if len(q.Windows) != 5 {
+		t.Errorf("windows = %d, want 5 (2 chosen + 2 coding + 1 text)", len(q.Windows))
+	}
+}
+
+func TestSingleBucketAddsNoExtraWindows(t *testing.T) {
+	body := `{"base_resp":{"status_code":0},"model_remains":[
+		{"model_name":"general","current_interval_remaining_percent":42,"current_weekly_remaining_percent":87}]}`
+	srv := httptest.NewServer(newPlanServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("key-1", false, nil)))
+	if len(q.Windows) != 2 {
+		t.Errorf("windows = %+v, want just interval and weekly", q.Windows)
+	}
+}

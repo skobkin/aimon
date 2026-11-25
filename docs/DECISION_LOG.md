@@ -10,6 +10,26 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — MiniMax reports the other plan buckets
+
+Borrowed from the Herdr `provider-usage` mod: `model_remains[]` can list
+several lanes (coding, text, …) while `selectEntry` picks one. The rest were
+only visible in the log.
+
+1. Every entry `selectEntry` did not choose adds up to two windows,
+   `bucket-<slug>-interval` ("<Bucket> 5-hour") and `bucket-<slug>-weekly`
+   ("<Bucket> Weekly"), after the chosen windows. They are percent-only —
+   no counts, whatever the entry carries — and take their reset from the
+   entry's `remains_time` / `weekly_remains_time`. An entry without a usable
+   percent adds nothing; a bucket whose slug repeats an earlier one is
+   skipped; names are capped at 40 runes.
+2. They rank after every headline window, so Overview keeps its two donuts
+   (the chosen interval and weekly); detail shows bars, pace and
+   notifications like any other window.
+3. A bucket that reports 0% remaining because it has no allowance would read
+   as fully used; the API gives no field to tell those apart, so it is shown
+   as reported.
+
 ## 2026-11-25 — MiniMax shows the provider's error text
 
 Borrowed from the Herdr `provider-usage` mod: a token the API rejects with

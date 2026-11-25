@@ -163,11 +163,86 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 		return nil, werr
 	}
 
+	windows = append(windows, otherBucketWindows(resp, entry, now, a.log)...)
+
 	return domain.QuotaSnapshot{
 		Kind:        domain.KindMiniMax,
 		CollectedAt: now,
 		Windows:     windows,
 	}, nil
+}
+
+// maxBucketName caps a bucket name used in a window name.
+const maxBucketName = 40
+
+// otherBucketWindows reports the plan buckets selectEntry did not choose
+// (coding, text, …) as extra windows named "<Bucket> 5-hour" and
+// "<Bucket> Weekly". Percent-only: the bucket's remaining percent is the
+// one verified value, so an entry without a usable percent adds nothing.
+// Overview keeps its two headline donuts; these are detail rows.
+func otherBucketWindows(resp tokenPlanResp, chosen *modelRemainEntry, observedAt time.Time, log *slog.Logger) []domain.QuotaWindow {
+	entries := resp.ModelRemains
+	if len(entries) == 0 && resp.Data != nil {
+		entries = resp.Data.ModelRemains
+	}
+
+	var out []domain.QuotaWindow
+	seen := map[string]bool{}
+	for i := range entries {
+		e := &entries[i]
+		if e == chosen {
+			continue
+		}
+		name := strings.TrimSpace(e.name())
+		if r := []rune(name); len(r) > maxBucketName {
+			name = string(r[:maxBucketName])
+		}
+		id := slug(name)
+		if name == "" || id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		for _, spec := range []struct {
+			suffix, label string
+			pct           *float64
+			remainsMs     *int64
+		}{
+			{"interval", "5-hour", e.CurIntervalRemainingPercent, e.RemainsTime},
+			{"weekly", "Weekly", e.CurWeeklyRemainingPercent, e.WeeklyRemainsTime},
+		} {
+			w, ok, _ := deriveWindow("bucket-"+id+"-"+spec.suffix, name+" "+spec.label, spec.pct, countPair{})
+			if !ok {
+				continue
+			}
+			if spec.remainsMs != nil {
+				if t, ok := resetAtFromMilliseconds(observedAt, *spec.remainsMs); ok {
+					w.ResetAt = t
+				}
+			}
+			out = append(out, w)
+		}
+	}
+	if len(out) > 0 {
+		log.Debug("minimax: reporting other plan buckets", "windows", len(out))
+	}
+
+	return out
+}
+
+// slug lowercases a bucket name into a stable window-ID fragment.
+func slug(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
+			b.WriteByte('-')
+		}
+	}
+
+	return strings.Trim(b.String(), "-")
 }
 
 // token resolves the subscription key; a missing key is a config problem
