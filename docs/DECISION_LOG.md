@@ -14,7 +14,9 @@ first.
 
 The `lint`, `vet` and `test` steps installed a C toolchain and the
 GL/X11/Wayland headers only because `fyne.io/fyne/v2/app` pulls in GLFW and
-OpenGL. Fyne's `ci` build tag swaps that driver for its headless software
+OpenGL, and then compiled both from C on every run. The motive is speed:
+the steps run about 10 times faster without cgo (measured by the owner).
+Fyne's `ci` build tag swaps that driver for its headless software
 driver, so those steps now run with `CGO_ENABLED=0` and `-tags ci`
 (`golangci-lint run --build-tags ci`) and install nothing but `git` for
 lint. The `build` and `release` steps are unchanged: they compile the real

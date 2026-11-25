@@ -35,8 +35,9 @@ steps:
     image: golangci/golangci-lint:v2.13-alpine
     pull: true
     depends_on: []
-    # No cgo: the `ci` build tag selects Fyne's headless driver, so no C
-    # toolchain and no GL/X11/Wayland headers are needed (see vet below).
+    # No cgo, for speed: this step is ~10x faster without it (measured).
+    # It skips the apk install of a C toolchain and the GL/X11/Wayland
+    # headers and the cgo compilation of GLFW/OpenGL. See vet below for how.
     environment:
       CGO_ENABLED: "0"
     commands:
@@ -56,10 +57,13 @@ steps:
     # image (it served go1.26.1 while the tag had moved on).
     pull: true
     depends_on: []
-    # No cgo. Fyne's `ci` build tag swaps the GLFW/OpenGL app driver for its
-    # headless software driver, so vet and the tests need neither a C
-    # toolchain nor the GL/X11/Wayland headers. The real windowing build
-    # (cgo, no tag) is exercised by the `build` step and the release.
+    # No cgo, for speed: lint, vet and test are ~10x faster this way
+    # (measured). The cost was never our code but cgo: installing a C
+    # toolchain plus the GL/X11/Wayland headers, then compiling GLFW and
+    # OpenGL from C on every run. Fyne's `ci` build tag swaps that
+    # GLFW/OpenGL app driver for its headless software driver, so these
+    # steps need no C at all. Nothing is lost: the real windowing build
+    # (cgo, no tag) is still compiled by the `build` step and the release.
     environment:
       CGO_ENABLED: "0"
     commands:
@@ -77,7 +81,7 @@ steps:
     # image (it served go1.26.1 while the tag had moved on).
     pull: true
     depends_on: []
-    # No cgo, headless Fyne: see the vet step.
+    # No cgo, headless Fyne, ~10x faster: see the vet step for why.
     environment:
       CGO_ENABLED: "0"
     commands:
