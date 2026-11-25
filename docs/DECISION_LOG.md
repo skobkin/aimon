@@ -10,6 +10,24 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — CI lint, vet and test run without cgo (Fyne `ci` build tag)
+
+The `lint`, `vet` and `test` steps installed a C toolchain and the
+GL/X11/Wayland headers only because `fyne.io/fyne/v2/app` pulls in GLFW and
+OpenGL. Fyne's `ci` build tag swaps that driver for its headless software
+driver, so those steps now run with `CGO_ENABLED=0` and `-tags ci`
+(`golangci-lint run --build-tags ci`) and install nothing but `git` for
+lint. The `build` and `release` steps are unchanged: they compile the real
+windowing build with cgo and no tag.
+
+1. The one direct GLFW call, the Wayland app-id hint, moved from
+   `internal/app/app.go` into `setWaylandAppID`: the real implementation in
+   `waylandid.go` (`!ci`, comment preserved) and a no-op in
+   `waylandid_ci.go` (`ci`). Behavior of the shipped binary is unchanged.
+2. Trade-off: under the `ci` tag the real `waylandid.go` is not
+   type-checked, vetted or linted by those steps; the `build` step still
+   compiles it.
+
 ## 2026-11-25 — Provider logos in card headers
 
 User-directed, borrowed from the Herdr `provider-usage` mod, which swapped

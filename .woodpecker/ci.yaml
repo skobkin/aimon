@@ -35,6 +35,10 @@ steps:
     image: golangci/golangci-lint:v2.13-alpine
     pull: true
     depends_on: []
+    # No cgo: the `ci` build tag selects Fyne's headless driver, so no C
+    # toolchain and no GL/X11/Wayland headers are needed (see vet below).
+    environment:
+      CGO_ENABLED: "0"
     commands:
       - export CACHE_ROOT="$PWD/.ci-cache"
       - export GOMODCACHE="$CACHE_ROOT/gomod"
@@ -43,10 +47,8 @@ steps:
       - export GOLANGCI_LINT_CACHE="$CACHE_ROOT/golangci-lint"
       - export XDG_CACHE_HOME="$CACHE_ROOT/xdg"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin" "$GOLANGCI_LINT_CACHE" "$XDG_CACHE_HOME"
-      # wayland-dev + libxkbcommon-dev: go-gl/glfw includes wl_platform.h
-      # unconditionally, which needs the Wayland and xkbcommon headers.
-      - apk add --no-cache git build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
-      - golangci-lint run ./...
+      - apk add --no-cache git
+      - golangci-lint run --build-tags ci ./...
 
   vet:
     image: golang:1.26-alpine
@@ -54,6 +56,12 @@ steps:
     # image (it served go1.26.1 while the tag had moved on).
     pull: true
     depends_on: []
+    # No cgo. Fyne's `ci` build tag swaps the GLFW/OpenGL app driver for its
+    # headless software driver, so vet and the tests need neither a C
+    # toolchain nor the GL/X11/Wayland headers. The real windowing build
+    # (cgo, no tag) is exercised by the `build` step and the release.
+    environment:
+      CGO_ENABLED: "0"
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
       - export CACHE_ROOT="$PWD/.ci-cache"
@@ -61,8 +69,7 @@ steps:
       - export GOCACHE="$CACHE_ROOT/gobuild"
       - export GOPATH="$CACHE_ROOT/gopath"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin"
-      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
-      - go vet ./...
+      - go vet -tags ci ./...
 
   test:
     image: golang:1.26-alpine
@@ -70,6 +77,9 @@ steps:
     # image (it served go1.26.1 while the tag had moved on).
     pull: true
     depends_on: []
+    # No cgo, headless Fyne: see the vet step.
+    environment:
+      CGO_ENABLED: "0"
     commands:
       - export PATH=/usr/local/go/bin:/go/bin:$PATH
       - export CACHE_ROOT="$PWD/.ci-cache"
@@ -77,8 +87,7 @@ steps:
       - export GOCACHE="$CACHE_ROOT/gobuild"
       - export GOPATH="$CACHE_ROOT/gopath"
       - mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOPATH/bin"
-      - apk add --no-cache build-base pkgconf mesa-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev wayland-dev libxkbcommon-dev
-      - go test ./...
+      - go test -tags ci ./...
 
   build:
     image: golang:1.26-alpine
