@@ -1,5 +1,7 @@
 package codex
 
+import "encoding/json"
+
 // The `account/rateLimits/read` result, modeled field by field as observed
 // on Codex CLI 0.150.1 (docs/S6_CODEX.md). Every field is a pointer: the
 // difference between "absent" and "zero" must survive decoding, because a
@@ -31,8 +33,17 @@ type window struct {
 	ResetsAt           *int64   `json:"resetsAt"`
 }
 
-// resetCreditsSummary is the optional reset-credit block. Only the count is
-// modeled: the per-credit identifiers and statuses are deliberately not.
+// resetCreditsSummary is the optional reset-credit block. The count is
+// modeled, and credits[] is kept raw so a malformed list can never fail the
+// quota decode; only each credit's status and expiry are ever read from it
+// (nextCreditExpiry) — never the opaque identifier or title.
 type resetCreditsSummary struct {
-	AvailableCount *int64 `json:"availableCount"`
+	AvailableCount *int64          `json:"availableCount"`
+	Credits        json.RawMessage `json:"credits"`
+}
+
+// resetCredit is the part of one credit entry the monitor reads.
+type resetCredit struct {
+	Status    *string  `json:"status"`
+	ExpiresAt *float64 `json:"expiresAt"` // Unix seconds
 }

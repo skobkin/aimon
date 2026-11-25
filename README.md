@@ -67,7 +67,7 @@ you use — without ever opening a browser tab.
 | Claude (claude.ai subscription) | Remote | Plan, 5-hour and weekly usage, per-model weekly limits, weekly share by product, extra usage, usage pace and projection; read from your Claude Code login |
 | Kimi Code plan | Remote | Plan tier, 5-hour and monthly quota (Global or Mainland China platform), usage pace and projection |
 | OpenRouter | Remote | Key usage and spend limit, account credits and balance, $/h spend pace |
-| ChatGPT Codex | Remote | Plan, 5-hour rate-limit windows, remaining credits, usage pace and projection |
+| ChatGPT Codex | Remote | Plan, 5-hour rate-limit windows, reset credits with the next expiry date, usage pace and projection |
 
 ## Download
 

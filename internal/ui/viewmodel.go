@@ -807,6 +807,17 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Tim
 	return vm
 }
 
+// formatCreditExpiry renders a reset credit's expiry as a local calendar
+// date: "3 Dec", with the year when it is not the current one.
+func formatCreditExpiry(at, now time.Time) string {
+	at = at.In(now.Location())
+	if at.Year() != now.Year() {
+		return at.Format("2 Jan 2006")
+	}
+
+	return at.Format("2 Jan")
+}
+
 // formatShare renders a product's share of the limit: whole percents, and
 // "<1%" for a positive share that would round to zero.
 func formatShare(pct float64) string {
@@ -887,10 +898,11 @@ func BuildCodexVM(snap domain.CodexSnapshot, ip pace.InstancePaces, now time.Tim
 		vm.Account = append(vm.Account, MetricRowVM{Label: "Plan", Value: plan})
 	}
 	if snap.ResetCreditsAvailable != nil {
-		vm.Account = append(vm.Account, MetricRowVM{
-			Label: "Reset credits",
-			Value: FormatCount(float64(*snap.ResetCreditsAvailable)),
-		})
+		value := FormatCount(float64(*snap.ResetCreditsAvailable))
+		if snap.ResetCreditsNextExpiry != nil {
+			value += " · next expires " + formatCreditExpiry(*snap.ResetCreditsNextExpiry, now)
+		}
+		vm.Account = append(vm.Account, MetricRowVM{Label: "Reset credits", Value: value})
 	}
 	if snap.RateLimitReachedType != "" {
 		vm.Account = append(vm.Account, MetricRowVM{

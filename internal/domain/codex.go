@@ -22,9 +22,13 @@ type CodexSnapshot struct {
 	// the provider says so; empty otherwise.
 	RateLimitReachedType string
 	// ResetCreditsAvailable is the count of available rate-limit reset
-	// credits; nil when the provider did not report it. Only the count is
-	// ever carried — never the opaque per-credit identifiers.
+	// credits; nil when the provider did not report it. Only the count and
+	// the next expiry are ever carried — never the opaque per-credit
+	// identifiers.
 	ResetCreditsAvailable *int64
+	// ResetCreditsNextExpiry is when the soonest available reset credit
+	// expires; nil when no credit reported a future expiry.
+	ResetCreditsNextExpiry *time.Time
 }
 
 // SnapshotKind implements Snapshot.

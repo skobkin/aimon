@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -85,9 +86,55 @@ func buildSnapshot(result *rateLimitsReadResult, now time.Time) (domain.CodexSna
 	out.RateLimitReachedType = trimOptional(snap.RateLimitReachedType)
 	if credits != nil {
 		out.ResetCreditsAvailable = credits.AvailableCount
+		out.ResetCreditsNextExpiry = nextCreditExpiry(credits.Credits, now)
 	}
 
 	return out, nil
+}
+
+// maxCreditExpiry bounds a plausible expiry (Unix seconds, year 2100);
+// anything beyond it is not a seconds timestamp and is ignored.
+const maxCreditExpiry = 4102444800
+
+// nextCreditExpiry is the soonest future expiry among the available reset
+// credits. When no credit carries a status at all, every credit counts. A
+// missing, malformed or fully expired list yields nil — never a guess. Only
+// the status and expiry are read; the credit identifier is not decoded.
+func nextCreditExpiry(raw json.RawMessage, now time.Time) *time.Time {
+	if len(raw) == 0 {
+		return nil
+	}
+	var credits []resetCredit
+	if err := json.Unmarshal(raw, &credits); err != nil {
+		return nil
+	}
+	anyStatus := false
+	for _, c := range credits {
+		if c.Status != nil {
+			anyStatus = true
+
+			break
+		}
+	}
+
+	var best *time.Time
+	for _, c := range credits {
+		if anyStatus && (c.Status == nil || !strings.EqualFold(strings.TrimSpace(*c.Status), "available")) {
+			continue
+		}
+		if c.ExpiresAt == nil || math.IsNaN(*c.ExpiresAt) || *c.ExpiresAt <= 0 || *c.ExpiresAt > maxCreditExpiry {
+			continue
+		}
+		at := time.Unix(int64(*c.ExpiresAt), 0)
+		if !at.After(now) {
+			continue
+		}
+		if best == nil || at.Before(*best) {
+			best = &at
+		}
+	}
+
+	return best
 }
 
 // buildWindow normalizes one window: a sane used percent is required, the

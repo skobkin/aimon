@@ -10,6 +10,28 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — Codex shows when the next reset credit expires
+
+Borrowed from the Herdr `provider-usage` mod, which lists each granted
+reset credit's expiry. S6 kept only `rateLimitResetCredits.availableCount`
+and said not to expose credit details; this narrows that to **the soonest
+expiry only**, user-directed.
+
+1. `resetCreditsSummary.Credits` is kept as raw JSON and parsed
+   best-effort, so a malformed or renamed list can never fail the quota
+   decode (S6: credit data is never required). Only each credit's `status`
+   and `expiresAt` (Unix seconds, bounded to year 2100) are read; the opaque
+   `id` and the `title` are not decoded, stored or displayed — that S6 rule
+   stands.
+2. `CodexSnapshot.ResetCreditsNextExpiry` is the soonest *future* expiry
+   among `available` credits (all credits when none carries a status);
+   nil when unknown. No fallback guesses.
+3. The detail "Reset credits" row reads `2 · next expires 3 Dec` (local
+   date, with the year when it is not the current one). It is a date, not a
+   countdown, so the per-second ticker does not touch it. No count means no
+   row, as before. `account/rateLimitResetCredit/consume` is still never
+   called.
+
 ## 2026-11-25 — MiniMax reports the other plan buckets
 
 Borrowed from the Herdr `provider-usage` mod: `model_remains[]` can list

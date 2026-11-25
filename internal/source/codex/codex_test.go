@@ -2,7 +2,9 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -905,4 +907,77 @@ func quietLoggerForTest(t *testing.T) *slog.Logger {
 	t.Helper()
 
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// --- reset-credit expiry --------------------------------------------------
+func TestNextCreditExpiry(t *testing.T) {
+	now := time.Unix(1756500000, 0)
+	at := func(d time.Duration) int64 { return now.Add(d).Unix() }
+	mk := func(s string, args ...any) json.RawMessage { return json.RawMessage(fmt.Sprintf(s, args...)) }
+
+	cases := []struct {
+		name string
+		raw  json.RawMessage
+		want *int64
+	}{
+		{"soonest available wins", mk(`[
+			{"id":"a","status":"available","expiresAt":%d},
+			{"id":"b","status":"available","expiresAt":%d},
+			{"id":"c","status":"consumed","expiresAt":%d}]`, at(48*time.Hour), at(24*time.Hour), at(time.Hour)),
+			ptr(at(24 * time.Hour))},
+		{"expired ones skipped", mk(`[{"status":"available","expiresAt":%d},{"status":"available","expiresAt":%d}]`,
+			at(-time.Hour), at(time.Hour)), ptr(at(time.Hour))},
+		{"no statuses at all counts every credit", mk(`[{"expiresAt":%d}]`, at(time.Hour)), ptr(at(time.Hour))},
+		{"statuses present but none available", mk(`[{"status":"consumed","expiresAt":%d}]`, at(time.Hour)), nil},
+		{"missing or implausible expiry", mk(`[{"status":"available"},{"status":"available","expiresAt":-5},{"status":"available","expiresAt":99999999999999}]`), nil},
+		{"malformed list", json.RawMessage(`{"not":"a list"}`), nil},
+		{"credits as strings", json.RawMessage(`["x"]`), nil},
+		{"absent", nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextCreditExpiry(tc.raw, now)
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("got %v, want nil", got)
+			case tc.want != nil && (got == nil || got.Unix() != *tc.want):
+				t.Fatalf("got %v, want %d", got, *tc.want)
+			}
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// The credit list rides along in a real result without disturbing the
+// quota decode, and the opaque id never reaches the snapshot.
+func TestResetCreditsDecodeAndSnapshot(t *testing.T) {
+	now := time.Unix(1756500000, 0)
+	exp := now.Add(72 * time.Hour).Unix()
+	raw := fmt.Sprintf(`{"rateLimits":{"primary":{"usedPercent":10,"windowDurationMins":300}},
+		"rateLimitResetCredits":{"availableCount":1,"credits":[{"id":"SECRET-ID","title":"Reset","status":"available","expiresAt":%d}]}}`, exp)
+	var result rateLimitsReadResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	snap, err := buildSnapshot(&result, now)
+	if err != nil {
+		t.Fatalf("buildSnapshot: %v", err)
+	}
+	if snap.ResetCreditsNextExpiry == nil || snap.ResetCreditsNextExpiry.Unix() != exp {
+		t.Fatalf("next expiry = %v, want %d", snap.ResetCreditsNextExpiry, exp)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", snap), "SECRET-ID") {
+		t.Fatal("credit identifier leaked into the snapshot")
+	}
+
+	// A garbage credits value must not fail the quota decode.
+	bad := `{"rateLimits":{"primary":{"usedPercent":10}},"rateLimitResetCredits":{"availableCount":2,"credits":"oops"}}`
+	var r2 rateLimitsReadResult
+	if err := json.Unmarshal([]byte(bad), &r2); err != nil {
+		t.Fatalf("garbage credits broke the decode: %v", err)
+	}
+	if s2, err := buildSnapshot(&r2, now); err != nil || s2.ResetCreditsNextExpiry != nil || *s2.ResetCreditsAvailable != 2 {
+		t.Fatalf("garbage credits: %+v, %v", s2, err)
+	}
 }

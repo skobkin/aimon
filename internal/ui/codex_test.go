@@ -68,6 +68,35 @@ func TestBuildCodexVMAccountRows(t *testing.T) {
 	}
 }
 
+func TestBuildCodexVMResetCreditExpiry(t *testing.T) {
+	cases := []struct {
+		name string
+		at   time.Time
+		want string
+	}{
+		{"same year", now.Add(36 * time.Hour), "3 · next expires " + now.Add(36*time.Hour).Format("2 Jan")},
+		{"other year", now.AddDate(1, 0, 0), "3 · next expires " + now.AddDate(1, 0, 0).Format("2 Jan 2006")},
+	}
+	for _, tc := range cases {
+		snap := codexSnap()
+		at := tc.at
+		snap.ResetCreditsNextExpiry = &at
+		vm := BuildCodexVM(snap, pace.InstancePaces{}, now, true)
+		if got := vm.Account[1].Value; got != tc.want {
+			t.Errorf("%s: credits row = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+
+	// An expiry without a count adds no row: the count is the anchor.
+	snap := codexSnap()
+	snap.ResetCreditsAvailable = nil
+	at := now.Add(time.Hour)
+	snap.ResetCreditsNextExpiry = &at
+	if vm := BuildCodexVM(snap, pace.InstancePaces{}, now, true); len(vm.Account) != 1 {
+		t.Errorf("rows = %+v, want only Plan", vm.Account)
+	}
+}
+
 func TestBuildCodexVMAbsentOptionalFieldsOmitted(t *testing.T) {
 	snap := codexSnap()
 	snap.PlanType = ""
