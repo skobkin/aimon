@@ -41,6 +41,17 @@ type QuotaSnapshot struct {
 	// ExtraUsage is the optional paid overage state (claude.ai); nil when
 	// the provider reports none.
 	ExtraUsage *QuotaExtraUsage
+	// Shares is the optional split of the weekly limit by product
+	// (claude.ai); empty when the provider reports none.
+	Shares []QuotaShare
+}
+
+// QuotaShare is one product's share of a plan's weekly limit.
+type QuotaShare struct {
+	// Name is the product name ("Claude Code").
+	Name string
+	// PercentOfLimit is the share of the whole limit, 0–100 as reported.
+	PercentOfLimit float64
 }
 
 // QuotaExtraUsage is the paid extra-usage (overage) state of a plan.

@@ -218,6 +218,38 @@ func TestQuotaKindsStayUntouched(t *testing.T) {
 	}
 }
 
+func TestQuotaSharesRows(t *testing.T) {
+	snap := domain.QuotaSnapshot{
+		Kind: domain.KindClaude,
+		Plan: "Max",
+		Shares: []domain.QuotaShare{
+			{Name: "Claude Code", PercentOfLimit: 34.4},
+			{Name: "Chats", PercentOfLimit: 0.3},
+			{Name: "Idle", PercentOfLimit: 0},
+		},
+	}
+	vm := BuildQuotaVM(snap, pace.InstancePaces{}, time.Now(), true)
+	want := []MetricRowVM{
+		{Label: "Plan", Value: "Max"},
+		{Label: "Claude Code", Value: "34% of weekly limit"},
+		{Label: "Chats", Value: "<1% of weekly limit"},
+		{Label: "Idle", Value: "0% of weekly limit"},
+	}
+	if len(vm.Account) != len(want) {
+		t.Fatalf("account rows = %+v, want %+v", vm.Account, want)
+	}
+	for i, w := range want {
+		if vm.Account[i] != w {
+			t.Errorf("row %d = %+v, want %+v", i, vm.Account[i], w)
+		}
+	}
+
+	// The Overview never shows the split.
+	if ov := BuildQuotaVM(snap, pace.InstancePaces{}, time.Now(), false); len(ov.Account) != 0 {
+		t.Errorf("non-detail account rows = %+v, want none", ov.Account)
+	}
+}
+
 func TestExtraUsageRow(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	cases := []struct {

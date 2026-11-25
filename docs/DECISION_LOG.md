@@ -10,6 +10,21 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — Claude weekly limit split by product
+
+Borrowed from the Herdr `provider-usage` mod: the usage response's
+`seven_day_breakdown.rows[]` (`display_name`, `percent_of_limit`) splits the
+weekly limit by product (Claude Code, Chats, …).
+
+1. **`QuotaSnapshot.Shares []QuotaShare`** carries it; only the Claude
+   adapter fills it. Rows without a name or a finite, non-negative share are
+   dropped; names are trimmed and capped at 40 runes like model names.
+2. **Detail only.** Each share is an Account row after "Plan"
+   (`Claude Code — 34% of weekly limit`, `<1%` for a positive share that
+   rounds to zero). They are not money rows, so the privacy setting does not
+   touch them; the Overview is unchanged. The shares are not windows: they
+   get no bars, pace or notifications.
+
 ## 2026-11-25 — Z.AI token quota yields the 5-hour slot to credit windows
 
 Borrowed from the Herdr `provider-usage` mod, which treats `TOKENS_LIMIT`

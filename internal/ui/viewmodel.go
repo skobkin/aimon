@@ -774,6 +774,14 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Tim
 	if detail && snap.Plan != "" {
 		vm.Account = append(vm.Account, MetricRowVM{Label: "Plan", Value: snap.Plan})
 	}
+	if detail {
+		for _, sh := range snap.Shares {
+			vm.Account = append(vm.Account, MetricRowVM{
+				Label: sh.Name,
+				Value: formatShare(sh.PercentOfLimit) + " of weekly limit",
+			})
+		}
+	}
 	if detail && snap.ExtraUsage != nil {
 		vm.Money = append(vm.Money, extraUsageRow(*snap.ExtraUsage))
 	}
@@ -797,6 +805,16 @@ func BuildQuotaVM(snap domain.QuotaSnapshot, ip pace.InstancePaces, now time.Tim
 	}
 
 	return vm
+}
+
+// formatShare renders a product's share of the limit: whole percents, and
+// "<1%" for a positive share that would round to zero.
+func formatShare(pct float64) string {
+	if pct > 0 && pct < 1 {
+		return "<1%"
+	}
+
+	return fmt.Sprintf("%d%%", int(math.Round(pct)))
 }
 
 // extraUsageRow renders the paid extra-usage state: "Off", "used / limit

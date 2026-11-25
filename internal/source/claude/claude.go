@@ -91,6 +91,15 @@ type extraUsage struct {
 	Currency     *string  `json:"currency"`
 }
 
+// breakdown is the weekly limit split by product: percent_of_limit is each
+// product's share of the whole limit.
+type breakdown struct {
+	Rows []struct {
+		DisplayName    string   `json:"display_name"`
+		PercentOfLimit *float64 `json:"percent_of_limit"`
+	} `json:"rows"`
+}
+
 type usageResponse struct {
 	FiveHour       *window      `json:"five_hour"`
 	SevenDay       *window      `json:"seven_day"`
@@ -98,6 +107,7 @@ type usageResponse struct {
 	SevenDaySonnet *window      `json:"seven_day_sonnet"`
 	Limits         []limitEntry `json:"limits"`
 	ExtraUsage     *extraUsage  `json:"extra_usage"`
+	Breakdown      *breakdown   `json:"seven_day_breakdown"`
 }
 
 // credential is the minimal copy kept from the credentials file.
@@ -299,7 +309,30 @@ func (a *Adapter) normalize(r usageResponse, cred credential) (domain.QuotaSnaps
 		Plan:        titleCase(cred.plan),
 		Windows:     windows,
 		ExtraUsage:  normalizeExtra(r.ExtraUsage),
+		Shares:      normalizeShares(r.Breakdown),
 	}, true
+}
+
+// normalizeShares keeps the breakdown rows that carry a name and a finite,
+// non-negative share. Names are trimmed and rune-capped like model names.
+func normalizeShares(b *breakdown) []domain.QuotaShare {
+	if b == nil {
+		return nil
+	}
+	var out []domain.QuotaShare
+	for _, row := range b.Rows {
+		name := strings.TrimSpace(row.DisplayName)
+		if r := []rune(name); len(r) > maxModelName {
+			name = string(r[:maxModelName])
+		}
+		p := row.PercentOfLimit
+		if name == "" || p == nil || math.IsNaN(*p) || math.IsInf(*p, 0) || *p < 0 {
+			continue
+		}
+		out = append(out, domain.QuotaShare{Name: name, PercentOfLimit: *p})
+	}
+
+	return out
 }
 
 // slug lowercases a model name into a stable window-ID suffix.

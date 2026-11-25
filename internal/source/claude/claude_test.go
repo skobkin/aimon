@@ -138,6 +138,42 @@ func assertNoToken(t *testing.T, err error) {
 	}
 }
 
+func TestSevenDayBreakdownShares(t *testing.T) {
+	body := `{"five_hour":{"utilization":1},
+	 "seven_day_breakdown":{"rows":[
+	  {"display_name":"Claude Code","percent_of_limit":34.2},
+	  {"display_name":"  Chats  ","percent_of_limit":0.4},
+	  {"display_name":"","percent_of_limit":5},
+	  {"display_name":"No number"},
+	  {"display_name":"Negative","percent_of_limit":-1},
+	  {"display_name":"` + strings.Repeat("é", 60) + `","percent_of_limit":2}
+	 ]}}`
+	s := newServer(t, body)
+	path := writeCreds(t, credsJSON(secretToken, fixedNow.Add(time.Hour), "max"))
+	snap := refresh(t, s.adapter(path))
+
+	if len(snap.Shares) != 3 {
+		t.Fatalf("shares = %+v, want 3 valid rows", snap.Shares)
+	}
+	if sh := snap.Shares[0]; sh.Name != "Claude Code" || sh.PercentOfLimit != 34.2 {
+		t.Errorf("first share = %+v", sh)
+	}
+	if sh := snap.Shares[1]; sh.Name != "Chats" || sh.PercentOfLimit != 0.4 {
+		t.Errorf("second share = %+v (name must be trimmed)", sh)
+	}
+	if n := len([]rune(snap.Shares[2].Name)); n != maxModelName {
+		t.Errorf("long name = %d runes, want %d", n, maxModelName)
+	}
+}
+
+func TestBreakdownAbsentLeavesNoShares(t *testing.T) {
+	s := newServer(t, `{"five_hour":{"utilization":1}}`)
+	path := writeCreds(t, credsJSON(secretToken, fixedNow.Add(time.Hour), "max"))
+	if snap := refresh(t, s.adapter(path)); snap.Shares != nil {
+		t.Errorf("shares = %+v, want nil", snap.Shares)
+	}
+}
+
 func TestFullResponse(t *testing.T) {
 	s := newServer(t, fullBody)
 	path := writeCreds(t, credsJSON(secretToken, fixedNow.Add(time.Hour), "max"))
