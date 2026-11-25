@@ -10,6 +10,24 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — Z.AI token quota yields the 5-hour slot to credit windows
+
+Borrowed from the Herdr `provider-usage` mod, which treats `TOKENS_LIMIT`
+as a quota of its own that never competes with the `CREDIT_LIMIT` windows.
+A payload carrying both would have produced two rows named "5-hour" and two
+claimants for the first Overview donut. This is defensive: no such mixed
+payload has been observed, the mod's behavior is the only precedent.
+
+1. When at least one credit window exists, the token window keeps its ID
+   `tokens-5h` (pace history keys on it) but is named "Tokens 5-hour".
+   Without credit windows nothing changes.
+2. `selectHeadlineWindows` ranks `tokens-5h` after the credit pair
+   (0 = primary 5-hour windows, 1 = weekly windows, 2 = `tokens-5h`,
+   3 = everything else) and sorts stably. Plans with only the token and
+   monthly MCP quotas show the same two donuts as before. A plan with a
+   lone credit window beside `tokens-5h` shows two "5h" donuts; the detail
+   rows tell them apart by name.
+
 ## 2026-11-25 — Z.AI plan label from `level`
 
 Borrowed from the Herdr `provider-usage` mod: the Z.AI quota response

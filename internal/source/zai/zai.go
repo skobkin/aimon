@@ -99,6 +99,10 @@ var fixedSpecs = map[string]windowSpec{
 	typeTime:   {ID: "mcp-monthly", Name: "Monthly"},
 }
 
+// tokensWithCreditsName is the token quota's name when the payload also
+// carries credit windows (which own the plain "5-hour" name).
+const tokensWithCreditsName = "Tokens 5-hour"
+
 // The two credit windows of newer Coding Plans: one CREDIT_LIMIT entry
 // per window, told apart by reset time.
 var (
@@ -172,7 +176,19 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 			windows = append(windows, w)
 		}
 	}
-	windows = append(windows, a.creditWindows(credits)...)
+	creditWins := a.creditWindows(credits)
+	if len(creditWins) > 0 {
+		// The token quota is a quota of its own, not the plan's 5-hour
+		// credit window: once credit windows exist, name it so the two
+		// rows cannot be mistaken for each other. The ID is unchanged
+		// (pace history keys on it).
+		for i := range windows {
+			if windows[i].ID == fixedSpecs[typeTokens].ID {
+				windows[i].Name = tokensWithCreditsName
+			}
+		}
+	}
+	windows = append(windows, creditWins...)
 
 	if len(windows) == 0 {
 		return nil, &source.Error{

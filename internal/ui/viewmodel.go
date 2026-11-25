@@ -576,17 +576,22 @@ func codexShortName(name string) string {
 func selectHeadlineWindows(windows []domain.QuotaWindow) []domain.QuotaWindow {
 	priority := func(id string) int {
 		switch id {
-		case "interval", "tokens-5h", "credits-5h", "codex-primary", "kimi-5h", "claude-5h":
+		case "interval", "credits-5h", "codex-primary", "kimi-5h", "claude-5h":
 			return 0
 		case "weekly", "credits-weekly", "codex-secondary", "kimi-weekly", "claude-7d":
 			return 1
-		default:
+		case "tokens-5h":
+			// Z.AI's token quota is the 5-hour headline only on plans
+			// without credit windows; beside them it ranks after the
+			// credit pair (and before every other window).
 			return 2
+		default:
+			return 3
 		}
 	}
 	sorted := make([]domain.QuotaWindow, len(windows))
 	copy(sorted, windows)
-	sort.Slice(sorted, func(i, j int) bool {
+	sort.SliceStable(sorted, func(i, j int) bool {
 		return priority(sorted[i].ID) < priority(sorted[j].ID)
 	})
 

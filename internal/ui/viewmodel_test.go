@@ -783,6 +783,38 @@ func TestSelectHeadlineWindows(t *testing.T) {
 	}
 }
 
+// Z.AI: beside credit windows the token quota yields the headline slots;
+// on a plan without them it is still the first headline.
+func TestSelectHeadlineWindowsZAITokens(t *testing.T) {
+	mixed := selectHeadlineWindows([]domain.QuotaWindow{
+		{ID: "tokens-5h", Name: "Tokens 5-hour"},
+		{ID: "mcp-monthly", Name: "Monthly"},
+		{ID: "credits-weekly", Name: "Weekly"},
+		{ID: "credits-5h", Name: "5-hour"},
+	})
+	if len(mixed) != 2 || mixed[0].ID != "credits-5h" || mixed[1].ID != "credits-weekly" {
+		t.Errorf("mixed = %+v, want credits-5h then credits-weekly", mixed)
+	}
+
+	legacy := selectHeadlineWindows([]domain.QuotaWindow{
+		{ID: "mcp-monthly", Name: "Monthly"},
+		{ID: "tokens-5h", Name: "5-hour"},
+	})
+	if len(legacy) != 2 || legacy[0].ID != "tokens-5h" || legacy[1].ID != "mcp-monthly" {
+		t.Errorf("legacy = %+v, want tokens-5h then mcp-monthly", legacy)
+	}
+}
+
+// Equal ranks keep their input order (the sort is stable).
+func TestSelectHeadlineWindowsStable(t *testing.T) {
+	sel := selectHeadlineWindows([]domain.QuotaWindow{
+		{ID: "other-b"}, {ID: "other-a"}, {ID: "other-c"},
+	})
+	if len(sel) != 2 || sel[0].ID != "other-b" || sel[1].ID != "other-a" {
+		t.Errorf("stable = %+v, want other-b, other-a", sel)
+	}
+}
+
 func TestOverviewPctTextNoUsed(t *testing.T) {
 	if got := formatPctOnly(0.14); got != "14%" {
 		t.Errorf("formatPctOnly(0.14) = %q, want \"14%%\"", got)

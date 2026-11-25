@@ -257,6 +257,27 @@ func TestMixedTypesIncludingCredit(t *testing.T) {
 	assertFraction(t, "tokens", windowByID(q, "tokens-5h").RemainingFraction, 0.90)
 	assertFraction(t, "mcp", windowByID(q, "mcp-monthly").RemainingFraction, 0.80)
 	assertFraction(t, "credits", windowByID(q, "credits-5h").RemainingFraction, 0.70)
+	if got := windowByID(q, "tokens-5h").Name; got != "Tokens 5-hour" {
+		t.Errorf("token quota name beside credit windows = %q, want %q", got, "Tokens 5-hour")
+	}
+	if got := windowByID(q, "credits-5h").Name; got != "5-hour" {
+		t.Errorf("credit window name = %q, want 5-hour", got)
+	}
+}
+
+// Without credit windows the token quota keeps the plain 5-hour name.
+func TestTokensKeepPlainNameWithoutCredits(t *testing.T) {
+	body := `{"data":{"limits":[
+		{"type":"TOKENS_LIMIT","percentage":10,"currentValue":10,"usage":100},
+		{"type":"TIME_LIMIT","percentage":20,"currentValue":20,"usage":100}
+	]}}`
+	srv := httptest.NewServer(newQuotaServer(body).handler())
+	defer srv.Close()
+
+	q := refresh(t, adapterAt(srv.URL, withStore("ztoken", false, nil)))
+	if got := windowByID(q, "tokens-5h").Name; got != "5-hour" {
+		t.Errorf("token quota name = %q, want 5-hour", got)
+	}
 }
 
 func TestTopLevelLimitsFallback(t *testing.T) {
