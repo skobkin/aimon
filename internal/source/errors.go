@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"unicode"
 )
 
 // Category classifies a refresh failure for the UI. Categories map onto
@@ -41,6 +43,12 @@ type Error struct {
 	Detail     string
 	StatusCode int // set for CatHTTP/CatAuth/CatRateLimited/CatProvider
 	Err        error
+	// Message is an optional provider-authored explanation that the adapter
+	// has already run through SanitizeProviderMessage. UserMessage appends
+	// it to the category's fixed text. Only adapters that opt in set it
+	// (docs/DECISION_LOG.md, 2026-11-25); everywhere else the UI text stays
+	// fixed per category.
+	Message string
 }
 
 func (e *Error) Error() string {
@@ -56,6 +64,15 @@ func (e *Error) Unwrap() error { return e.Err }
 // UserMessage returns the fixed UI string for the category. Credentials
 // and Config details are authored to be user-appropriate and pass through.
 func (e *Error) UserMessage() string {
+	msg := e.categoryMessage()
+	if e.Message == "" || e.Category == CatCredentials || e.Category == CatConfig {
+		return msg
+	}
+
+	return msg + ": " + e.Message
+}
+
+func (e *Error) categoryMessage() string {
 	switch e.Category {
 	case CatConnection:
 		return "Connection failed"
@@ -78,6 +95,38 @@ func (e *Error) UserMessage() string {
 	}
 
 	return e.Detail
+}
+
+// MaxProviderMessageRunes caps a provider message shown in the UI.
+const MaxProviderMessageRunes = 80
+
+// SanitizeProviderMessage turns provider-authored text into something safe
+// to show: whitespace collapsed, non-printable runes dropped, capped at
+// MaxProviderMessageRunes. It returns "" — show nothing — when the text
+// contains any of the given secrets (an API key echoed back by the
+// provider must never reach the UI).
+func SanitizeProviderMessage(msg string, secrets ...string) string {
+	for _, sec := range secrets {
+		if sec != "" && strings.Contains(msg, sec) {
+			return ""
+		}
+	}
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if !unicode.IsPrint(r) {
+			return -1
+		}
+
+		return r
+	}, msg)
+	clean = strings.Join(strings.Fields(clean), " ")
+	if r := []rune(clean); len(r) > MaxProviderMessageRunes {
+		clean = string(r[:MaxProviderMessageRunes-1]) + "…"
+	}
+
+	return clean
 }
 
 // classifyTransport maps a transport-level error onto a Category.

@@ -10,6 +10,27 @@ The authoritative documents are not rewritten retroactively. An entry here
 supersedes the affected document from its date onward. Newest entries
 first.
 
+## 2026-11-25 — MiniMax shows the provider's error text
+
+Borrowed from the Herdr `provider-usage` mod: a token the API rejects with
+an HTTP-200 envelope used to read only "Authentication failed" /
+"Invalid provider response", with the provider's `status_msg`
+("login fail: invalid api key") in the log. That reflects NFR-3's fixed
+UI strings, and it also hid why a card went red. User-directed deviation,
+scoped to MiniMax:
+
+1. **`source.Error.Message`** is a new optional field. `UserMessage()`
+   appends it to the category's fixed text (`Authentication failed: login
+   fail: invalid api key`); credentials/config errors are unaffected, and
+   every adapter that leaves it empty keeps the fixed strings. (`Detail`
+   never reaches the UI, so putting the text there would have shown
+   nothing.)
+2. **`source.SanitizeProviderMessage`** is the only way text enters it:
+   whitespace collapsed, non-printable runes dropped, capped at 80 runes,
+   and dropped entirely when it contains the subscription key. HTTP error
+   bodies and other providers are untouched.
+3. The status code stays in `Detail` for logs.
+
 ## 2026-11-25 — Claude weekly limit split by product
 
 Borrowed from the Herdr `provider-usage` mod: the usage response's

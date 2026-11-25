@@ -146,7 +146,7 @@ func (a *Adapter) Refresh(ctx context.Context) (domain.Snapshot, error) {
 	}
 
 	// HTTP-200 error envelopes: base_resp wins, then the legacy code.
-	if perr := a.checkProviderError(resp); perr != nil {
+	if perr := a.checkProviderError(resp, token); perr != nil {
 		return nil, perr
 	}
 
@@ -199,9 +199,10 @@ func (a *Adapter) token(ctx context.Context) (string, error) {
 	}
 }
 
-// checkProviderError inspects the in-band error fields. status_msg is
-// logged but never surfaced: provider messages are not UI text (NFR-3).
-func (a *Adapter) checkProviderError(resp tokenPlanResp) *source.Error {
+// checkProviderError inspects the in-band error fields. The sanitized
+// status_msg is shown after the category text (docs/DECISION_LOG.md,
+// 2026-11-25); it is dropped when it echoes the subscription key.
+func (a *Adapter) checkProviderError(resp tokenPlanResp, token string) *source.Error {
 	code := int64(0)
 	haveCode := false
 	msg := ""
@@ -218,11 +219,12 @@ func (a *Adapter) checkProviderError(resp tokenPlanResp) *source.Error {
 	a.log.Warn("minimax provider error", "code", code, "status_msg", msg)
 
 	detail := fmt.Sprintf("provider code %d", code)
+	shown := source.SanitizeProviderMessage(msg, token)
 	if authFailureCodes[code] {
-		return &source.Error{Category: source.CatAuth, Detail: detail}
+		return &source.Error{Category: source.CatAuth, Detail: detail, Message: shown}
 	}
 
-	return &source.Error{Category: source.CatInvalidResponse, Detail: detail}
+	return &source.Error{Category: source.CatInvalidResponse, Detail: detail, Message: shown}
 }
 
 // selectEntry picks the plan entry to report. Selection is by name

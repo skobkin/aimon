@@ -560,8 +560,34 @@ func TestBaseRespErrorOverHTTPOKIsAuth(t *testing.T) {
 	if serr.Category != source.CatAuth {
 		t.Errorf("1004 category = %s, want auth", serr.Category)
 	}
-	if msg := serr.UserMessage(); msg == "login fail: invalid api key" {
-		t.Error("status_msg must never surface in the user message")
+	if msg := serr.UserMessage(); msg != "Authentication failed: login fail: invalid api key" {
+		t.Errorf("user message = %q, want category text plus the provider message", msg)
+	}
+}
+
+func TestProviderMessageSanitized(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	cases := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{"whitespace and control", "bad\\n\\t  token\\u0007!", "Authentication failed: bad token!"},
+		{"capped", long, "Authentication failed: " + strings.Repeat("x", source.MaxProviderMessageRunes-1) + "…"},
+		{"echoes the key", "key secret-token rejected", "Authentication failed"},
+		{"empty", "", "Authentication failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"base_resp":{"status_code":1004,"status_msg":"` + tc.msg + `"}}`
+			srv := httptest.NewServer(newPlanServer(body).handler())
+			defer srv.Close()
+
+			_, err := adapterAt(srv.URL, withStore("secret-token", false, nil)).Refresh(context.Background())
+			if got := asSourceError(t, err).UserMessage(); got != tc.want {
+				t.Errorf("user message = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

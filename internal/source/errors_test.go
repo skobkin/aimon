@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -191,5 +192,36 @@ func TestGetText(t *testing.T) {
 	body, err := GetText(context.Background(), srv.Client(), srv.URL, nil)
 	if err != nil || body != "OK" {
 		t.Fatalf("GetText = (%q, %v)", body, err)
+	}
+}
+
+func TestUserMessageAppendsProviderMessage(t *testing.T) {
+	cases := []struct {
+		err  *Error
+		want string
+	}{
+		{&Error{Category: CatAuth, Message: "token expired"}, "Authentication failed: token expired"},
+		{&Error{Category: CatInvalidResponse, Message: "internal"}, "Invalid provider response: internal"},
+		{&Error{Category: CatAuth}, "Authentication failed"},
+		// Credentials/config details already are the user text.
+		{&Error{Category: CatCredentials, Detail: "API key not set", Message: "ignored"}, "API key not set"},
+	}
+	for _, tc := range cases {
+		if got := tc.err.UserMessage(); got != tc.want {
+			t.Errorf("UserMessage = %q, want %q", got, tc.want)
+		}
+	}
+}
+
+func TestSanitizeProviderMessage(t *testing.T) {
+	if got := SanitizeProviderMessage("  a\n\tb\u0007  c ", "k"); got != "a b c" {
+		t.Errorf("collapse = %q", got)
+	}
+	if got := SanitizeProviderMessage("the key hunter2 failed", "", "hunter2"); got != "" {
+		t.Errorf("secret echo = %q, want empty", got)
+	}
+	long := SanitizeProviderMessage(strings.Repeat("é", 200))
+	if n := len([]rune(long)); n != MaxProviderMessageRunes || !strings.HasSuffix(long, "…") {
+		t.Errorf("cap = %d runes, %q", n, long)
 	}
 }
